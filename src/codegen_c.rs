@@ -279,7 +279,7 @@ impl CTranspiler {
         // Replace marker if math functions used
         let output = lines.join("\n");
         let final_code = if needs_math {
-            output.replace("/* math_include_marker */", "#include <math.h>")
+            output.replace("/* math_include_marker */", &math_prelude(&output))
         } else {
             output.replace("/* math_include_marker */\n", "")
         };
@@ -326,8 +326,10 @@ fn expr_to_c(expr: &Expr, needs_math: &mut bool) -> String {
         Expr::Call(fn_name, arg) => {
             *needs_math = true;
             match fn_name.as_str() {
-                "ceil" => format!("ceil({})", expr_to_c(arg, needs_math)),
-                "floor" => format!("floor({})", expr_to_c(arg, needs_math)),
+                // Same snapping rule as the evaluator: values within 1e-9 of a whole number
+                // round to it, so ceil(1000.3 / 0.7) is 1429 in C exactly as in `avenc run`
+                "ceil" => format!("aven_ceil({})", expr_to_c(arg, needs_math)),
+                "floor" => format!("aven_floor({})", expr_to_c(arg, needs_math)),
                 "round" => format!("round({})", expr_to_c(arg, needs_math)),
                 "abs" => format!("fabs({})", expr_to_c(arg, needs_math)),
                 // C's log() is the natural logarithm
@@ -354,4 +356,27 @@ fn expr_to_c(expr: &Expr, needs_math: &mut bool) -> String {
             }
         }
     }
+}
+
+/// `#include <math.h>` plus the snapping helpers the emitted code calls. The helpers are
+/// branch-free: a comparison yields 0 or 1 and selects between the two candidates.
+fn math_prelude(code: &str) -> String {
+    let mut out = String::from("#include <math.h>");
+    for (name, base) in [("aven_ceil", "ceil"), ("aven_floor", "floor")] {
+        if code.contains(&format!("{}(", name)) {
+            out.push_str(&[
+                String::new(),
+                String::new(),
+                format!("/* {} with the evaluator's 1e-9 snap to the nearest whole number */", base),
+                format!("static double {}(double v) {{", name),
+                "    const double r = round(v);".to_string(),
+                "    const double snap = (double)(fabs(v - r) < 1e-9);".to_string(),
+                format!("    return snap * r + (1.0 - snap) * {}(v);", base),
+                "}".to_string(),
+            ]
+            .join("
+"));
+        }
+    }
+    out
 }
