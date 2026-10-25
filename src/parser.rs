@@ -130,6 +130,13 @@ impl Parser {
     fn parse_block(&mut self, kind: BlockKind) -> Result<BlockDecl, ParseError> {
         let start_tok = self.take(); // KwRelation or KwForward
         let (name, _line, _col) = self.expect_ident()?;
+
+        let mut backend = BackendDecl::Native;
+        if self.peek().kind == TokenKind::KwUsing {
+            self.take(); // consume 'using'
+            backend = self.parse_backend_decl()?;
+        }
+
         self.expect(&TokenKind::LeftBrace, "'{'")?;
 
         let mut equations = Vec::new();
@@ -143,10 +150,82 @@ impl Parser {
         Ok(BlockDecl {
             kind,
             name,
+            backend,
             equations,
             line: start_tok.line,
             col: start_tok.col,
         })
+    }
+
+    fn parse_backend_decl(&mut self) -> Result<BackendDecl, ParseError> {
+        let (tok_kind, tok_line, tok_col, tok_text) = {
+            let t = self.peek();
+            (t.kind.clone(), t.line, t.col, t.text.clone())
+        };
+        match tok_kind {
+            TokenKind::KwExternal => {
+                self.take(); // consume 'external'
+                self.expect(&TokenKind::LeftParen, "'('")?;
+                let mut args = Vec::new();
+                while self.peek().kind != TokenKind::RightParen
+                    && self.peek().kind != TokenKind::Eof
+                {
+                    match self.peek().kind.clone() {
+                        TokenKind::Str(s) => {
+                            args.push(s);
+                            self.take();
+                        }
+                        _ => {
+                            let (t_line, t_col, t_text) = {
+                                let t = self.peek();
+                                (t.line, t.col, t.text.clone())
+                            };
+                            return Err(ParseError {
+                                message: format!(
+                                    "expected string literal in external(...) declaration, found '{}'",
+                                    t_text
+                                ),
+                                line: t_line,
+                                col: t_col,
+                            });
+                        }
+                    }
+                    if self.peek().kind == TokenKind::Comma {
+                        self.take();
+                    } else if self.peek().kind != TokenKind::RightParen {
+                        let (t_line, t_col, t_text) = {
+                            let t = self.peek();
+                            (t.line, t.col, t.text.clone())
+                        };
+                        return Err(ParseError {
+                            message: format!(
+                                "expected ',' or ')' in external(...) declaration, found '{}'",
+                                t_text
+                            ),
+                            line: t_line,
+                            col: t_col,
+                        });
+                    }
+                }
+                self.expect(&TokenKind::RightParen, "')'")?;
+
+                if args.is_empty() {
+                    return Err(ParseError {
+                        message: "external(...) backend requires at least a command string literal (e.g. external(\"python\", \"sim.py\"))".to_string(),
+                        line: tok_line,
+                        col: tok_col,
+                    });
+                }
+
+                let command = args.remove(0);
+                Ok(BackendDecl::External { command, args })
+            }
+            _ => Err(ParseError {
+                message: format!("expected 'external(...)', found '{}'", tok_text),
+                line: tok_line,
+                col: tok_col,
+            }),
+        }
     }
 
     fn parse_equation(&mut self) -> Result<Equation, ParseError> {

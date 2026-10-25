@@ -184,10 +184,21 @@ pub enum BlockKind {
     Forward,  // Direction-pinned compiler
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum BackendDecl {
+    #[default]
+    Native,
+    External {
+        command: String,
+        args: Vec<String>,
+    },
+}
+
 #[derive(Debug, Clone)]
 pub struct BlockDecl {
     pub kind: BlockKind,
     pub name: String,
+    pub backend: BackendDecl,
     pub equations: Vec<Equation>,
     pub line: usize,
     pub col: usize,

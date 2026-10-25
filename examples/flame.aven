@@ -1,0 +1,9 @@
+// examples/flame.aven — Discontinuous external simulator model with first-class syntax
+
+relation Flame using external("python", "evaluations/tests/flame_eval.py") {
+}
+
+solve Flame with {
+    x = 0.5
+    y = -0.2
+}

@@ -178,6 +178,7 @@ fn test_c_code_generation() {
     let block = BlockDecl {
         kind: BlockKind::Forward,
         name: "Trip".to_string(),
+        backend: BackendDecl::Native,
         equations: vec![
             Equation {
                 lhs: "distance".to_string(),
@@ -684,4 +685,79 @@ fn test_evaluator_config_flag_defaults_to_native_newton() {
     assert_eq!(pt.vars.get("y"), Some(42.0));
     assert_eq!(pt.diagnostics.backend_trace, vec!["native_analytic"]);
     assert_eq!(pt.diagnostics.residual, 0.0);
+}
+
+#[test]
+fn test_first_class_external_relation_syntax_and_autobinding() {
+    use avenc::ast::*;
+    use avenc::evaluator::{EvaluatorBackend, Orchestrator, OrchestratorConfig, VarMap};
+    use avenc::lexer::Lexer;
+    use avenc::parser::Parser;
+
+    let src = r#"
+        relation Flame using external("python", "evaluations/tests/flame_eval.py") {
+            value = 0
+        }
+        solve Flame with {
+            x = 0.5
+            y = -0.2
+        }
+    "#;
+
+    let mut lexer = Lexer::new(src);
+    let tokens = lexer.tokenize().expect("Tokenize failed");
+    let mut parser = Parser::new(tokens);
+    let module = parser.parse_module("test_flame").expect("Parse failed");
+
+    assert_eq!(module.blocks.len(), 1);
+    let blk = &module.blocks[0];
+    assert_eq!(blk.name, "Flame");
+
+    // Verify BackendDecl::External is parsed accurately
+    match &blk.backend {
+        BackendDecl::External { command, args } => {
+            assert_eq!(command, "python");
+            assert_eq!(args, &["evaluations/tests/flame_eval.py"]);
+        }
+        other => panic!("Expected BackendDecl::External, got {:?}", other),
+    }
+
+    // Auto-bind into OrchestratorConfig from AST
+    let config = match &blk.backend {
+        BackendDecl::External { command, args } => {
+            let b_id = args.first().cloned().unwrap_or_else(|| command.clone());
+            OrchestratorConfig {
+                backend: EvaluatorBackend::External {
+                    command: command.clone(),
+                    args: args.clone(),
+                    backend_id: Some(b_id),
+                    working_dir: None,
+                },
+                seed: 42,
+            }
+        }
+        BackendDecl::Native => OrchestratorConfig::default(),
+    };
+
+    let orchestrator = Orchestrator::from_config(&config, blk.equations.clone());
+    assert_eq!(
+        orchestrator.evaluator.name(),
+        "evaluations/tests/flame_eval.py"
+    );
+
+    let mut inputs = VarMap::new();
+    inputs.set("x", 0.5);
+    inputs.set("y", -0.2);
+
+    let mut pt = None;
+    for _ in 0..3 {
+        if let Ok(res) = orchestrator.solve_single(&inputs) {
+            pt = Some(res);
+            break;
+        }
+    }
+    let pt = pt.expect("Solve with auto-bound external evaluator failed");
+    assert!(pt.is_feasible);
+    assert_eq!(pt.diagnostics.backend_trace, vec!["flame_eval"]);
+    assert!(pt.vars.get("value").is_some());
 }

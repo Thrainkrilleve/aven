@@ -11,9 +11,12 @@ pub enum TokenKind {
     KwSignal,
     KwMinimize,
     KwMaximize,
+    KwUsing,
+    KwExternal,
 
     // Literals & Identifiers
     Ident(String),
+    Str(String),
     Number(f64),
 
     // Symbols & Operators
@@ -144,6 +147,13 @@ impl<'a> Lexer<'a> {
                 || (c == '.' && self.peek_next().map_or(false, |n| n.is_ascii_digit()))
             {
                 let tok = self.lex_number(start_line, start_col)?;
+                tokens.push(tok);
+                continue;
+            }
+
+            // String literals
+            if c == '"' {
+                let tok = self.lex_string(start_line, start_col)?;
                 tokens.push(tok);
                 continue;
             }
@@ -300,6 +310,8 @@ impl<'a> Lexer<'a> {
             "forward" => TokenKind::KwForward,
             "solve" => TokenKind::KwSolve,
             "with" => TokenKind::KwWith,
+            "using" => TokenKind::KwUsing,
+            "external" => TokenKind::KwExternal,
             "unit" => TokenKind::KwUnit,
             "signal" => TokenKind::KwSignal,
             "minimize" => TokenKind::KwMinimize,
@@ -313,5 +325,49 @@ impl<'a> Lexer<'a> {
             line: start_line,
             col: start_col,
         }
+    }
+
+    fn lex_string(&mut self, start_line: usize, start_col: usize) -> Result<Token, LexError> {
+        self.advance(); // consume opening quote '"'
+        let mut s = String::new();
+        while let Some(c) = self.peek() {
+            if c == '"' {
+                self.advance(); // consume closing quote '"'
+                return Ok(Token {
+                    kind: TokenKind::Str(s.clone()),
+                    text: s,
+                    line: start_line,
+                    col: start_col,
+                });
+            } else if c == '\\' {
+                self.advance();
+                if let Some(escaped) = self.peek() {
+                    let esc_char = match escaped {
+                        'n' => '\n',
+                        't' => '\t',
+                        'r' => '\r',
+                        '\\' => '\\',
+                        '"' => '"',
+                        other => other,
+                    };
+                    s.push(esc_char);
+                    self.advance();
+                } else {
+                    return Err(LexError {
+                        message: "unterminated escape sequence in string literal".to_string(),
+                        line: start_line,
+                        col: start_col,
+                    });
+                }
+            } else {
+                s.push(c);
+                self.advance();
+            }
+        }
+        Err(LexError {
+            message: "unterminated string literal".to_string(),
+            line: start_line,
+            col: start_col,
+        })
     }
 }

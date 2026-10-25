@@ -21,6 +21,7 @@ mod units;
 use ast::*;
 use codegen_c::CTranspiler;
 use diagnostics::Diagnostician;
+use evaluator::Evaluator;
 use ledger::{Fact, Ledger};
 use lexer::Lexer;
 use parser::Parser;
@@ -289,10 +290,56 @@ fn execute_module(
         }
     }
 
-    // Set up solver engine (only load Relation blocks, never duplicate with Forward blocks)
+    // Execute external evaluators if declared via 'using external(...)'
+    for blk in &module.blocks {
+        if let BackendDecl::External { command, args } = &blk.backend {
+            let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+            let ext_eval = evaluator::ExternalEvaluator::new(command, &arg_refs);
+            let mut varmap = evaluator::VarMap::new();
+            for (k, v) in &env {
+                varmap.set(k, *v);
+            }
+            if verbose {
+                println!(
+                    "Executing external evaluator '{}' for relation '{}'...",
+                    command, blk.name
+                );
+            }
+            match ext_eval.evaluate(&varmap) {
+                Ok(res) => {
+                    if verbose {
+                        println!(
+                            "  [external] {} settled in {:.1} µs (backend: {})",
+                            blk.name, res.solve_time_us, res.backend_id
+                        );
+                    }
+                    for (k, v) in res.values {
+                        if !env.contains_key(&k) {
+                            seq += 1;
+                            env.insert(k.clone(), v);
+                            ledger.append(Fact {
+                                seq,
+                                tick: 0,
+                                kind: "derived".to_string(),
+                                name: k,
+                                value: v,
+                                causes: Vec::new(),
+                                origin: format!("external: {}", res.backend_id),
+                            });
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("External evaluation failed for block '{}': {}", blk.name, e);
+                }
+            }
+        }
+    }
+
+    // Set up solver engine (only load native Relation blocks, never duplicate with Forward or external blocks)
     let mut solver = SolverEngine::new();
     for blk in &module.blocks {
-        if blk.kind == BlockKind::Relation {
+        if blk.kind == BlockKind::Relation && blk.backend == BackendDecl::Native {
             for eq in &blk.equations {
                 solver.add_relation(eq.clone());
             }
@@ -564,6 +611,17 @@ fn cmd_pareto(
             },
             seed: 42,
         }
+    } else if let BackendDecl::External { command, args } = &rel_block.backend {
+        let b_id = args.first().cloned().unwrap_or_else(|| command.clone());
+        evaluator::OrchestratorConfig {
+            backend: evaluator::EvaluatorBackend::External {
+                command: command.clone(),
+                args: args.clone(),
+                backend_id: Some(b_id),
+                working_dir: None,
+            },
+            seed: 42,
+        }
     } else {
         evaluator::OrchestratorConfig::default()
     };
@@ -593,22 +651,36 @@ fn cmd_pareto(
 
     match orchestrator.solve_pareto(&initial_inputs, var, (min, max), 5, &obj_list) {
         Ok(frontier) => {
-            println!(
-                "\n{:<6} {:<18} {:<18} {:<18}",
-                "Step", var, "raw_workers", "allocated_workers"
-            );
-            println!("{}", "-".repeat(60));
-            for (idx, pt) in frontier.iter().enumerate() {
-                let v_sweep = pt.vars.get(var).unwrap_or(0.0);
-                let raw = pt.vars.get("raw_workers").unwrap_or(0.0);
-                let alloc = pt.vars.get("allocated_workers").unwrap_or(0.0);
-                println!(
-                    "{:<6} {:<18.2} {:<18.2} {:<18.0}",
-                    idx + 1,
-                    v_sweep,
-                    raw,
-                    alloc
-                );
+            if let Some(first_pt) = frontier.first() {
+                let mut display_vars: Vec<String> = first_pt
+                    .vars
+                    .values
+                    .keys()
+                    .filter(|k| k.as_str() != var)
+                    .cloned()
+                    .collect();
+                display_vars.sort();
+
+                print!("\n{:<6} {:<18}", "Step", var);
+                for vname in &display_vars {
+                    print!(" {:<18}", vname);
+                }
+                println!();
+                println!("{}", "-".repeat(24 + 19 * display_vars.len()));
+
+                for (idx, pt) in frontier.iter().enumerate() {
+                    let v_sweep = pt.vars.get(var).unwrap_or(0.0);
+                    print!("{:<6} {:<18.2}", idx + 1, v_sweep);
+                    for vname in &display_vars {
+                        let val = pt.vars.get(vname).unwrap_or(0.0);
+                        if val.fract() == 0.0 && val.abs() < 1e9 {
+                            print!(" {:<18.0}", val);
+                        } else {
+                            print!(" {:<18.4}", val);
+                        }
+                    }
+                    println!();
+                }
             }
 
             if let Some(knee) = evaluator::Orchestrator::find_knee_point(&frontier) {
