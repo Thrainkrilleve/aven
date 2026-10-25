@@ -542,3 +542,28 @@ solve Cluster with {
     assert!(run.stdout.contains("\"optimality\": \"proven\""), "{}", run.stdout);
     assert!(run.stdout.contains("\"cost\": 6800"), "{}", run.stdout);
 }
+
+// An adapter only has to supply what nothing else in the model can compute: a constraint on
+// a value another relation derives must not be demanded from the adapter.
+#[test]
+fn adapter_is_not_asked_for_values_other_relations_compute() {
+    let py = if cfg!(windows) { "python" } else { "python3" };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let script = format!(
+        "import json; print(json.dumps({{'surface_temp_c': 20.0, 'timestamp_ms': {}, 'ttl_ms': 60000}}))",
+        now
+    );
+    let src = format!(
+        "relation Weather using external(\"{}\", \"-c\", \"{}\") {{\n outside_c = surface_temp_c\n}}\nrelation Plant {{\n it_kw = load * 2\n cop = 7.5 - 0.12 * outside_c\n}}\nsolve Plant, Weather with {{\n load = 100\n it_kw <= 800\n}}\n",
+        py,
+        script.replace('"', "\\\"")
+    );
+    let run = run_model(&src, &[]);
+    assert_eq!(run.code, 0, "stdout: {}\nstderr: {}", run.stdout, run.stderr);
+    let env = settled(&run);
+    assert_close(&env, "it_kw", 200.0, 1e-9);
+    assert_close(&env, "cop", 7.5 - 0.12 * 20.0, 1e-9);
+}

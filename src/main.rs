@@ -751,12 +751,13 @@ fn execute_module(
         match eval_res {
             Ok(res) => {
                 // Relations are omnidirectional: a variable the adapter did not report is only
-                // missing if the block's equations cannot derive it from what was reported.
+                // missing if no equation in the model can derive it from what is known (e.g. a
+                // constraint on a value another relation computes is not the adapter's job).
                 let mut known: std::collections::HashSet<String> =
                     env.keys().chain(res.values.keys()).cloned().collect();
                 loop {
                     let mut progressed = false;
-                    for eq in &blk.equations {
+                    for eq in module.blocks.iter().flat_map(|b| b.equations.iter()) {
                         let mut vars = eq.rhs.vars();
                         vars.insert(eq.lhs.clone());
                         let unknown: Vec<&String> =
@@ -772,7 +773,7 @@ fn execute_module(
                 }
                 if let Some(missing) = required_keys.iter().find(|k| !known.contains(*k)) {
                     eprintln!(
-                        "{} evaluation failed for block '{}': Malformed output: Schema validation failed: {} adapter '{}' omitted required numeric field '{}', and the block's equations cannot derive it",
+                        "{} evaluation failed for block '{}': Malformed output: Schema validation failed: {} adapter '{}' omitted required numeric field '{}', and no equation in the model can derive it",
                         backend_type, blk.name, backend_type, res.backend_id, missing
                     );
                     process::exit(EXIT_ERROR);
