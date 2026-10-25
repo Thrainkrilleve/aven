@@ -1,0 +1,18 @@
+// examples/aerodynamics.aven — Aerodynamic Lift & Drag Relations with Dimensional Checking
+unit velocity_unit : knots, mach
+
+signal velocity : km/h
+signal wing_area : m^2
+signal air_density : kg/m^3
+
+relation Aerodynamics {
+    dynamic_pressure = 0.5 * air_density * velocity^2
+    lift = dynamic_pressure * wing_area * lift_coeff
+}
+
+solve Aerodynamics with {
+    velocity = 250 km/h
+    wing_area = 32 m^2
+    lift_coeff = 0.55
+    air_density = 1.225 kg/m^3
+}

@@ -22,6 +22,8 @@ latest_plc.json
 Thumbs.db
 .vscode/
 .idea/
+.env
+*.env
 
 # Standalone binary executables (source is compiled via cargo)
 *.exe

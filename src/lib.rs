@@ -5,7 +5,8 @@
     clippy::should_implement_trait,
     clippy::unnecessary_map_or,
     clippy::too_many_arguments,
-    clippy::chunks_exact_to_as_chunks
+    clippy::chunks_exact_to_as_chunks,
+    clippy::result_large_err
 )]
 
 pub mod ast;

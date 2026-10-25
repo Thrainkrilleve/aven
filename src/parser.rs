@@ -411,7 +411,14 @@ impl Parser {
 
     fn parse_optional_unit(&mut self, line: usize) -> Option<String> {
         let mut parts = String::new();
-        while matches!(self.peek().kind, TokenKind::Ident(_) | TokenKind::Slash) {
+        while matches!(
+            self.peek().kind,
+            TokenKind::Ident(_)
+                | TokenKind::Slash
+                | TokenKind::Star
+                | TokenKind::Caret
+                | TokenKind::Number(_)
+        ) {
             if self.peek().line != line {
                 break;
             }
@@ -462,9 +469,8 @@ impl Parser {
 
         let mut unit = None;
         if self.peek().kind == TokenKind::Colon {
-            self.take();
-            let (u, _, _) = self.expect_ident()?;
-            unit = Some(u);
+            let col_tok = self.take();
+            unit = self.parse_optional_unit(col_tok.line);
         }
 
         Ok(SignalDecl {

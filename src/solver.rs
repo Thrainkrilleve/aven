@@ -19,6 +19,7 @@ pub enum SolverError {
         actual: f64,
         bound: f64,
     },
+    UnderDetermined(crate::diagnostics::Diagnosis),
     Infeasible(String),
     MathError(String),
 }
@@ -46,6 +47,14 @@ impl fmt::Display for SolverError {
                 "Constraint violation in '{}': {} = {:.4} violates bound {:.4}",
                 constraint, lhs, actual, bound
             ),
+            SolverError::UnderDetermined(diag) => {
+                write!(
+                    f,
+                    "System is under-determined ({} degree(s) of freedom):\n{}",
+                    diag.dof,
+                    diag.report()
+                )
+            }
             SolverError::Infeasible(msg) => write!(f, "No feasible solution found: {}", msg),
             SolverError::MathError(msg) => write!(f, "Solver math error: {}", msg),
         }
@@ -64,6 +73,7 @@ pub struct SolverEngine {
     pub objectives: Vec<Objective>,
     pub integer_vars: BTreeSet<String>,
     pub trace: Vec<String>,
+    pub diagnosis: Option<crate::diagnostics::Diagnosis>,
 }
 
 impl Default for SolverEngine {
@@ -80,6 +90,7 @@ impl SolverEngine {
             objectives: Vec::new(),
             integer_vars: BTreeSet::new(),
             trace: Vec::new(),
+            diagnosis: None,
         }
     }
 
@@ -189,6 +200,40 @@ impl SolverEngine {
                     *val = rounded;
                 }
             }
+        }
+
+        // 5. Check if any unknowns remain unconstrained
+        let mut all_vars = BTreeSet::new();
+        for eq in &self.relations {
+            all_vars.insert(eq.lhs.clone());
+            for v in eq.rhs.vars() {
+                all_vars.insert(v);
+            }
+        }
+        let remaining_unknowns: Vec<String> = all_vars
+            .into_iter()
+            .filter(|v| !env.contains_key(v))
+            .collect();
+
+        if !remaining_unknowns.is_empty() {
+            let blocked: Vec<Equation> = self
+                .relations
+                .iter()
+                .filter(|eq| {
+                    let mut v = eq.rhs.vars();
+                    v.insert(eq.lhs.clone());
+                    v.iter().any(|var| remaining_unknowns.contains(var))
+                })
+                .cloned()
+                .collect();
+
+            let d = crate::diagnostics::Diagnostician::new().diagnose(
+                &remaining_unknowns,
+                &blocked,
+                &env,
+            );
+            self.diagnosis = Some(d.clone());
+            return Err(SolverError::UnderDetermined(d));
         }
 
         Ok(env)

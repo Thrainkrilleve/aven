@@ -4,7 +4,8 @@
     clippy::collapsible_if,
     clippy::should_implement_trait,
     clippy::unnecessary_map_or,
-    clippy::too_many_arguments
+    clippy::too_many_arguments,
+    clippy::result_large_err
 )]
 
 mod ast;
@@ -194,11 +195,53 @@ fn parse_file(path: &str) -> AvenModule {
 
 fn cmd_check(path: &str) {
     let module = parse_file(path);
-    println!("Check OK: '{}' parsed successfully.", path);
+    println!("Checking module '{}'...", path);
     println!("  Blocks:   {}", module.blocks.len());
     println!("  Solves:   {}", module.solves.len());
     println!("  Signals:  {}", module.signals.len());
     println!("  Units:    {}", module.units.len());
+
+    // 1. Compile-Time Dimensional Homogeneity Check
+    let mut checker = units::DimensionalChecker::new();
+    match checker.check_module(&module) {
+        Ok(report) => {
+            println!("\n✓ Dimensional Analysis PASSED:");
+            println!(
+                "  Verified {} equation(s) across SI/Systems unit registry.",
+                report.verified_equations
+            );
+            if !report.variable_dimensions.is_empty() {
+                let mut sorted_dims: Vec<_> = report.variable_dimensions.iter().collect();
+                sorted_dims.sort_by_key(|(k, _)| *k);
+                for (var, dim) in sorted_dims {
+                    println!("    • {:<18} : [{}]", var, dim);
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("\n✗ {}", e);
+            process::exit(1);
+        }
+    }
+
+    // 2. Degree-of-Freedom & Under-Determination Analysis
+    let diagnostician = Diagnostician::new();
+    let diags = diagnostician.diagnose_module(&module);
+    let mut has_underdetermined = false;
+    for d in diags {
+        if d.dof > 0 {
+            has_underdetermined = true;
+            println!("\n{}", d.report());
+        }
+    }
+
+    if has_underdetermined {
+        println!(
+            "\nCheck WARNING: Module has under-determined relation(s). See diagnostic report above."
+        );
+    } else {
+        println!("\n✓ System Determinacy PASSED: All relation blocks have 0 degrees of freedom.");
+    }
 }
 
 fn cmd_run(path: &str) {
@@ -296,6 +339,13 @@ fn execute_module(
     module: &AvenModule,
     verbose: bool,
 ) -> (HashMap<String, f64>, Ledger, Option<diagnostics::Diagnosis>) {
+    // 0. Verify compile-time dimensional homogeneity across all relation blocks
+    let mut type_checker = units::DimensionalChecker::new();
+    if let Err(e) = type_checker.check_module(module) {
+        eprintln!("\n{}", e);
+        process::exit(1);
+    }
+
     let mut env = HashMap::new();
     let mut ledger = Ledger::new();
     let mut seq = 0;
@@ -434,39 +484,13 @@ fn execute_module(
                 }
             }
 
-            // Check if any unknowns remain
-            let mut all_vars = std::collections::BTreeSet::new();
-            for eq in &solver.relations {
-                all_vars.insert(eq.lhs.clone());
-                eq.rhs.collect_vars(&mut all_vars);
+            (solved_env, ledger, None)
+        }
+        Err(solver::SolverError::UnderDetermined(diag)) => {
+            if verbose {
+                println!("\n{}", diag.report());
             }
-            let remaining_unknowns: Vec<String> = all_vars
-                .into_iter()
-                .filter(|v| !solved_env.contains_key(v))
-                .collect();
-
-            let diag = if !remaining_unknowns.is_empty() {
-                let blocked: Vec<Equation> = solver
-                    .relations
-                    .iter()
-                    .filter(|eq| {
-                        let mut v = eq.rhs.vars();
-                        v.insert(eq.lhs.clone());
-                        v.iter().any(|var| remaining_unknowns.contains(var))
-                    })
-                    .cloned()
-                    .collect();
-
-                let d = Diagnostician::new().diagnose(&remaining_unknowns, &blocked, &solved_env);
-                if verbose {
-                    println!("\n{}", d.report());
-                }
-                Some(d)
-            } else {
-                None
-            };
-
-            (solved_env, ledger, diag)
+            (env, ledger, Some(diag))
         }
         Err(e) => {
             eprintln!("\nSolver Error: {}", e);

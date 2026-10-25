@@ -12,6 +12,7 @@ pub struct Diagnosis {
     pub orphans: Vec<String>,
     pub minimal_fixes: Vec<String>,
     pub zero_gradient_relations: Vec<String>,
+    pub degenerate_equations: Vec<String>,
     pub rank: usize,
 }
 
@@ -86,6 +87,21 @@ impl Diagnosis {
             );
         }
 
+        if !self.degenerate_equations.is_empty() {
+            add_row(&mut lines, "");
+            add_row(
+                &mut lines,
+                "  DEGENERATE / REDUNDANT EQUATION(S) (linearly dependent):",
+            );
+            for de in &self.degenerate_equations {
+                add_row(&mut lines, &format!("      • {}", de));
+            }
+            add_row(
+                &mut lines,
+                "  (these equations add no independent constraint to the system)",
+            );
+        }
+
         if !self.free_vars.is_empty() && self.dof > 0 {
             add_row(&mut lines, "  FREE variables (unconstrained directions):");
             add_row(&mut lines, &format!("      {}", self.free_vars.join(", ")));
@@ -137,6 +153,41 @@ impl Diagnostician {
         1.0 + 0.37 * (i as f64) + 0.11 * ((i % 3) as f64)
     }
 
+    pub fn diagnose_module(&self, module: &AvenModule) -> Vec<Diagnosis> {
+        let mut diagnoses = Vec::new();
+        for blk in &module.blocks {
+            if blk.kind == BlockKind::Relation && blk.backend == BackendDecl::Native {
+                let mut known = BTreeSet::new();
+                if let Some(solve) = module.solves.iter().find(|s| s.target == blk.name) {
+                    for b in &solve.bindings {
+                        known.insert(b.name.clone());
+                    }
+                }
+                let mut all_vars = BTreeSet::new();
+                for eq in &blk.equations {
+                    all_vars.insert(eq.lhs.clone());
+                    for v in eq.rhs.vars() {
+                        all_vars.insert(v);
+                    }
+                }
+                let unknowns: Vec<String> = all_vars
+                    .into_iter()
+                    .filter(|v| !known.contains(v))
+                    .collect();
+
+                if !unknowns.is_empty() {
+                    let mut probe_env = HashMap::new();
+                    for (i, u) in unknowns.iter().enumerate() {
+                        probe_env.insert(u.clone(), Self::probe_val(i));
+                    }
+                    let diag = self.diagnose(&unknowns, &blk.equations, &probe_env);
+                    diagnoses.push(diag);
+                }
+            }
+        }
+        diagnoses
+    }
+
     pub fn diagnose(
         &self,
         unknowns: &[String],
@@ -171,7 +222,7 @@ impl Diagnostician {
             }
         }
 
-        let (rank, pivots) = rank_and_pivots(&jac);
+        let (rank, pivots, degenerate_row_indices) = rank_and_pivots(&jac);
         let free_cols: Vec<usize> = (0..n).filter(|c| !pivots.contains(c)).collect();
         let free_vars: Vec<String> = free_cols.into_iter().map(|c| unknowns[c].clone()).collect();
 
@@ -183,6 +234,13 @@ impl Diagnostician {
                 zero_gradient_relations.push(rel.original_text.clone());
             }
         }
+
+        // Identify degenerate / redundant equations
+        let degenerate_equations: Vec<String> = degenerate_row_indices
+            .into_iter()
+            .filter(|&idx| idx < relations.len())
+            .map(|idx| relations[idx].original_text.clone())
+            .collect();
 
         // Check for orphan variables
         let mut mentioned = BTreeSet::new();
@@ -207,7 +265,7 @@ impl Diagnostician {
                     .map(|row| keep_cols.iter().map(|&c| row[c]).collect())
                     .collect();
 
-                let (sub_rank, _) = rank_and_pivots(&sub_jac);
+                let (sub_rank, _, _) = rank_and_pivots(&sub_jac);
                 if sub_rank == n - 1 {
                     let others: Vec<&String> = unknowns.iter().filter(|u| *u != v).collect();
                     let others_str: Vec<String> = others.into_iter().cloned().collect();
@@ -229,19 +287,21 @@ impl Diagnostician {
             orphans,
             minimal_fixes,
             zero_gradient_relations,
+            degenerate_equations,
             rank,
         }
     }
 }
 
-/// Gaussian elimination on matrix copy to compute rank and pivot columns with dynamic scale-aware tolerance
-fn rank_and_pivots(mat: &[Vec<f64>]) -> (usize, Vec<usize>) {
+/// Gaussian elimination on matrix copy to compute rank, pivot columns, and degenerate rows
+fn rank_and_pivots(mat: &[Vec<f64>]) -> (usize, Vec<usize>, Vec<usize>) {
     let rows = mat.len();
     if rows == 0 {
-        return (0, Vec::new());
+        return (0, Vec::new(), Vec::new());
     }
     let cols = mat[0].len();
     let mut a: Vec<Vec<f64>> = mat.to_vec();
+    let mut row_indices: Vec<usize> = (0..rows).collect();
 
     // Dynamically scale tolerance to matrix magnitude to handle both micro (1e-9) and macro (1e9) scales
     let max_entry: f64 = mat
@@ -275,6 +335,7 @@ fn rank_and_pivots(mat: &[Vec<f64>]) -> (usize, Vec<usize>) {
         }
 
         a.swap(r, max_row);
+        row_indices.swap(r, max_row);
 
         for i in 0..rows {
             if i != r && a[i][c].abs() > pivot_tol {
@@ -290,5 +351,6 @@ fn rank_and_pivots(mat: &[Vec<f64>]) -> (usize, Vec<usize>) {
         r += 1;
     }
 
-    (r, pivots)
+    let degenerate_rows: Vec<usize> = (r..rows).map(|k| row_indices[k]).collect();
+    (r, pivots, degenerate_rows)
 }

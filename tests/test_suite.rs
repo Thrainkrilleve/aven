@@ -251,9 +251,9 @@ fn test_units_and_dimensions() {
     assert!((gib.to_base / gb.to_base - 1.073741824).abs() < 1e-6);
 
     // Rate: req/s
-    let req_rate_dim = req.dimension / s.dimension;
+    let req_rate_dim = req.dimension.clone() / s.dimension;
     // Concurrency = req/s * ms = transaction count
-    let concurrency_dim = req_rate_dim * ms.dimension;
+    let concurrency_dim = req_rate_dim.clone() * ms.dimension;
     assert_eq!(concurrency_dim, Dim::TRANSACTION);
 
     // Bandwidth = (req/s) * kb = DATA / TIME
@@ -1105,4 +1105,297 @@ fn test_mixed_integer_provenance_and_ledger() {
 
     let why_drives = ledger.why("drives");
     assert!(why_drives.contains("drives = 8.0000"));
+}
+
+#[test]
+fn test_extensible_unit_system_and_compound_algebra() {
+    use avenc::ast::UnitDecl;
+    use avenc::units::UnitRegistry;
+
+    let mut reg = UnitRegistry::new();
+
+    // 1. Extensible custom dimension declarations
+    let custom_decl = UnitDecl {
+        dimension: "photon_flux".to_string(),
+        units: vec!["photon".to_string(), "kphoton".to_string()],
+        line: 1,
+        col: 1,
+    };
+    reg.register_unit_decl(&custom_decl);
+
+    let photon_u = reg
+        .lookup("photon")
+        .expect("photon unit must be registered");
+    assert_eq!(photon_u.dimension.custom.get("photon_flux"), Some(&1));
+
+    // 2. Compound unit parsing: km/h, m/s^2, req/s, kW*h
+    let km_h = reg.lookup("km/h").expect("km/h compound unit must resolve");
+    assert_eq!(km_h.dimension.length, 1);
+    assert_eq!(km_h.dimension.time, -1);
+
+    let accel = reg
+        .lookup("m/s^2")
+        .expect("m/s^2 compound unit must resolve");
+    assert_eq!(accel.dimension.length, 1);
+    assert_eq!(accel.dimension.time, -2);
+
+    let energy_kwh = reg.lookup("kW*h").expect("kW*h compound unit must resolve");
+    assert_eq!(energy_kwh.dimension.mass, 1);
+    assert_eq!(energy_kwh.dimension.length, 2);
+    assert_eq!(energy_kwh.dimension.time, -2);
+
+    // 3. Conversions
+    let m_per_s = reg
+        .convert(90.0, "km/h", "m/s")
+        .expect("conversion km/h to m/s");
+    assert!((m_per_s - 25.0).abs() < 1e-9);
+
+    let j_val = reg.convert(1.0, "kWh", "J").expect("conversion kWh to J");
+    assert!((j_val - 3_600_000.0).abs() < 1e-6);
+
+    // Incompatible conversion returns error
+    let err = reg.convert(100.0, "km/h", "kg");
+    assert!(err.is_err());
+    assert!(err.unwrap_err().contains("incompatible dimensions"));
+}
+
+#[test]
+fn test_dimensional_checker_propagation_and_homogeneity() {
+    use avenc::lexer::Lexer;
+    use avenc::parser::Parser;
+    use avenc::units::{Dim, DimensionalChecker, TypeError};
+
+    // 1. Valid dimensional model with omnidirectional propagation
+    let src = r#"
+        unit currency : usd, eur
+        signal speed : km/h
+        signal time : h
+
+        relation Travel {
+            distance = speed * time
+        }
+        solve Travel with {
+            speed = 90 km/h
+            time = 2.5 h
+        }
+    "#;
+    let mut lex = Lexer::new(src);
+    let mut parser = Parser::new(lex.tokenize().unwrap());
+    let module = parser.parse_module("travel").unwrap();
+
+    let mut checker = DimensionalChecker::new();
+    let report = checker
+        .check_module(&module)
+        .expect("dimensional check must succeed");
+
+    assert_eq!(report.verified_equations, 1);
+    assert_eq!(report.variable_dimensions["distance"], Dim::LENGTH);
+    assert_eq!(report.variable_dimensions["speed"].length, 1);
+    assert_eq!(report.variable_dimensions["speed"].time, -1);
+    assert_eq!(report.variable_dimensions["time"], Dim::TIME);
+
+    // 2. Incompatible addition (+ between distance and time) must be rejected
+    let bad_add_src = r#"
+        signal length_val : m
+        signal time_val : s
+
+        relation Incompatible {
+            mismatch = length_val + time_val
+        }
+        solve Incompatible with {
+            length_val = 10 m
+            time_val = 5 s
+        }
+    "#;
+    let mut lex_bad = Lexer::new(bad_add_src);
+    let mut parser_bad = Parser::new(lex_bad.tokenize().unwrap());
+    let bad_module = parser_bad.parse_module("bad_add").unwrap();
+
+    let mut checker_bad = DimensionalChecker::new();
+    let res = checker_bad.check_module(&bad_module);
+    assert!(matches!(res, Err(TypeError::DimensionalMismatch { .. })));
+
+    // 3. Transcendental function argument must be dimensionless or angle
+    let bad_trig_src = r#"
+        signal len : m
+        relation BadTrig {
+            res = sin(len)
+        }
+        solve BadTrig with {
+            len = 5 m
+        }
+    "#;
+    let mut lex_trig = Lexer::new(bad_trig_src);
+    let mut parser_trig = Parser::new(lex_trig.tokenize().unwrap());
+    let trig_module = parser_trig.parse_module("bad_trig").unwrap();
+
+    let mut checker_trig = DimensionalChecker::new();
+    let res_trig = checker_trig.check_module(&trig_module);
+    assert!(matches!(
+        res_trig,
+        Err(TypeError::InvalidFunctionArgument { .. })
+    ));
+}
+
+#[test]
+fn test_underdetermination_rank_deficiency_and_minimal_fixes() {
+    use avenc::ast::*;
+    use avenc::diagnostics::Diagnostician;
+    use std::collections::HashMap;
+
+    // 3 variables (x, y, z), 2 independent equations
+    // Rank = 2, DOF = 1
+    // eq1: x + y + z = 10
+    // eq2: 2 * x + y = 5
+    let eq1 = Equation {
+        lhs: "eq1_res".to_string(),
+        op: ConstraintOp::Equal,
+        rhs: Expr::Bin(
+            BinaryOp::Add,
+            Box::new(Expr::Bin(
+                BinaryOp::Add,
+                Box::new(Expr::Var("x".to_string())),
+                Box::new(Expr::Var("y".to_string())),
+            )),
+            Box::new(Expr::Var("z".to_string())),
+        ),
+        original_text: "eq1_res = x + y + z".to_string(),
+        line: 1,
+        col: 1,
+    };
+
+    let eq2 = Equation {
+        lhs: "eq2_res".to_string(),
+        op: ConstraintOp::Equal,
+        rhs: Expr::Bin(
+            BinaryOp::Add,
+            Box::new(Expr::Bin(
+                BinaryOp::Mul,
+                Box::new(Expr::Num(2.0)),
+                Box::new(Expr::Var("x".to_string())),
+            )),
+            Box::new(Expr::Var("y".to_string())),
+        ),
+        original_text: "eq2_res = 2 * x + y".to_string(),
+        line: 2,
+        col: 1,
+    };
+
+    let unknowns = vec!["x".to_string(), "y".to_string(), "z".to_string()];
+    let mut env = HashMap::new();
+    env.insert("eq1_res".to_string(), 10.0);
+    env.insert("eq2_res".to_string(), 5.0);
+
+    let diag = Diagnostician::new().diagnose(&unknowns, &[eq1, eq2], &env);
+    assert_eq!(diag.dof, 1);
+    assert_eq!(diag.rank, 2);
+    assert_eq!(diag.unknowns.len(), 3);
+    assert!(!diag.free_vars.is_empty());
+    assert!(!diag.minimal_fixes.is_empty());
+    let rep = diag.report();
+    assert!(rep.contains("UNDER-DETERMINED SYSTEM"));
+    assert!(rep.contains("1 degree(s) of freedom"));
+    assert!(rep.contains("MINIMAL FIX"));
+
+    // Redundant equation test (degenerate rows):
+    // eq_a: 2 * x + 3 * y = 10
+    // eq_b: 4 * x + 6 * y = 20 (linearly dependent on eq_a)
+    let eq_a = Equation {
+        lhs: "res_a".to_string(),
+        op: ConstraintOp::Equal,
+        rhs: Expr::Bin(
+            BinaryOp::Add,
+            Box::new(Expr::Bin(
+                BinaryOp::Mul,
+                Box::new(Expr::Num(2.0)),
+                Box::new(Expr::Var("x".to_string())),
+            )),
+            Box::new(Expr::Bin(
+                BinaryOp::Mul,
+                Box::new(Expr::Num(3.0)),
+                Box::new(Expr::Var("y".to_string())),
+            )),
+        ),
+        original_text: "res_a = 2 * x + 3 * y".to_string(),
+        line: 3,
+        col: 1,
+    };
+
+    let eq_b = Equation {
+        lhs: "res_b".to_string(),
+        op: ConstraintOp::Equal,
+        rhs: Expr::Bin(
+            BinaryOp::Add,
+            Box::new(Expr::Bin(
+                BinaryOp::Mul,
+                Box::new(Expr::Num(4.0)),
+                Box::new(Expr::Var("x".to_string())),
+            )),
+            Box::new(Expr::Bin(
+                BinaryOp::Mul,
+                Box::new(Expr::Num(6.0)),
+                Box::new(Expr::Var("y".to_string())),
+            )),
+        ),
+        original_text: "res_b = 4 * x + 6 * y".to_string(),
+        line: 4,
+        col: 1,
+    };
+
+    let xy_unknowns = vec!["x".to_string(), "y".to_string()];
+    let mut xy_env = HashMap::new();
+    xy_env.insert("res_a".to_string(), 10.0);
+    xy_env.insert("res_b".to_string(), 20.0);
+
+    let degen_diag = Diagnostician::new().diagnose(&xy_unknowns, &[eq_a, eq_b], &xy_env);
+    assert_eq!(degen_diag.rank, 1);
+    assert_eq!(degen_diag.dof, 1);
+    assert!(!degen_diag.degenerate_equations.is_empty());
+    assert!(
+        degen_diag
+            .report()
+            .contains("DEGENERATE / REDUNDANT EQUATION(S)")
+    );
+}
+
+#[test]
+fn test_solver_underdetermined_error_handling() {
+    use avenc::lexer::Lexer;
+    use avenc::parser::Parser;
+    use avenc::solver::{SolverEngine, SolverError};
+    use std::collections::HashMap;
+
+    let src = r#"
+        relation UnderDeterminedPlane {
+            volume = length * width * height
+        }
+        solve UnderDeterminedPlane with {
+            volume = 1000
+            height = 10
+        }
+    "#;
+    let mut lex = Lexer::new(src);
+    let mut parser = Parser::new(lex.tokenize().unwrap());
+    let module = parser.parse_module("plane").unwrap();
+
+    let mut solver = SolverEngine::new();
+    for eq in &module.blocks[0].equations {
+        solver.add_relation(eq.clone());
+    }
+
+    let mut env = HashMap::new();
+    for b in &module.solves[0].bindings {
+        env.insert(b.name.clone(), b.value);
+    }
+
+    let res = solver.solve(&env);
+    match res {
+        Err(SolverError::UnderDetermined(diag)) => {
+            assert_eq!(diag.dof, 1);
+            assert!(diag.unknowns.contains(&"length".to_string()));
+            assert!(diag.unknowns.contains(&"width".to_string()));
+            assert!(!diag.minimal_fixes.is_empty());
+        }
+        other => panic!("expected SolverError::UnderDetermined, got {:?}", other),
+    }
 }
