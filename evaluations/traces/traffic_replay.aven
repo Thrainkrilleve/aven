@@ -1,0 +1,16 @@
+// traffic_replay.aven — Production Web Traffic Trace Sizing Model
+// Consumes real production telemetry traces with Little's Law queueing stability
+
+relation ProductionScaling using external("python", "evaluations/traces/trace_adapter.py") {
+    raw_workers = (reqs_per_second * avg_latency_ms) / 1000.0
+    allocated_workers = ceil(raw_workers / target_utilization)
+    target_pods = ceil(allocated_workers / pod_capacity_workers)
+    payload_gbps = (reqs_per_second * avg_payload_kb * 8.0) / 1000000.0
+    wire_rate_gbps = payload_gbps * 1.05
+}
+
+solve ProductionScaling with {
+    target_utilization = 0.70
+    pod_capacity_workers = 100.0
+    target_pods >= 1.0
+}

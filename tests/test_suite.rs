@@ -2255,3 +2255,93 @@ fn test_microbenchmark_frontier_rebuild_under_mutating_external_facts() {
         avg_rebuild_us
     );
 }
+
+#[test]
+fn test_real_production_traffic_trace_replay_and_capacity_tracking() {
+    use avenc::ledger::{Fact, FactMetadata, Ledger};
+    use avenc::lexer::Lexer;
+    use avenc::parser::Parser;
+    use avenc::solver::SolverEngine;
+    use std::collections::HashMap;
+
+    let src = r#"
+        relation ProductionScaling {
+            raw_workers = (reqs_per_second * avg_latency_ms) / 1000.0
+            allocated_workers = ceil(raw_workers / target_utilization)
+            target_pods = ceil(allocated_workers / pod_capacity_workers)
+        }
+    "#;
+    let mut lex = Lexer::new(src);
+    let mut parser = Parser::new(lex.tokenize().unwrap());
+    let module = parser.parse_module("test_scaling").unwrap();
+
+    let mut solver = SolverEngine::new();
+    for eq in &module.blocks[0].equations {
+        solver.add_relation(eq.clone());
+    }
+
+    // Key representative test points from wikimedia_traffic_trace.json:
+    // (step, rps, latency_ms, ttl_ms, expected_pods, expected_workers)
+    let test_points = vec![
+        (0, 8200.0, 14.2, 30000, 2.0, 167.0),
+        (10, 48000.0, 28.5, 30000, 20.0, 1955.0),
+        (16, 98200.0, 56.4, 30000, 80.0, 7913.0),
+        (25, 45500.0, 27.2, 0, 18.0, 1768.0),
+        (39, 7100.0, 13.5, 30000, 2.0, 137.0),
+    ];
+
+    let mut solve_durations_us = Vec::new();
+
+    for (step, rps, lat, ttl, expected_pods, expected_workers) in test_points {
+        let mut env = HashMap::new();
+        env.insert("reqs_per_second".to_string(), rps);
+        env.insert("avg_latency_ms".to_string(), lat);
+        env.insert("target_utilization".to_string(), 0.70);
+        env.insert("pod_capacity_workers".to_string(), 100.0);
+
+        let t0 = std::time::Instant::now();
+        let solved = solver.solve(&env).expect("Step solve must succeed");
+        let elapsed_us = t0.elapsed().as_secs_f64() * 1_000_000.0;
+        solve_durations_us.push(elapsed_us);
+
+        let pods = *solved.get("target_pods").unwrap();
+        let workers = *solved.get("allocated_workers").unwrap();
+
+        assert_eq!(pods, expected_pods, "Step {} pod sizing mismatch", step);
+        assert_eq!(workers, expected_workers, "Step {} worker sizing mismatch", step);
+
+        // Freshness verification
+        let is_stale = ttl == 0;
+        let mut ledger = Ledger::new();
+        ledger.append(Fact {
+            seq: 1,
+            tick: step as usize,
+            kind: "input".to_string(),
+            name: "reqs_per_second".to_string(),
+            value: rps,
+            causes: Vec::new(),
+            origin: "wikimedia-trace".to_string(),
+            metadata: Some(FactMetadata {
+                timestamp_ms: Some(1792900000000),
+                ttl_ms: Some(ttl),
+                is_stale,
+                warnings: if is_stale { vec!["stale-telemetry".to_string()] } else { Vec::new() },
+            }),
+        });
+
+        if is_stale {
+            let fact = ledger.latest("reqs_per_second").unwrap();
+            assert!(fact.metadata.as_ref().unwrap().is_stale);
+            let display = fact.display();
+            assert!(display.contains("[STALE]"));
+        }
+    }
+
+    let avg_solve_us = solve_durations_us.iter().sum::<f64>() / solve_durations_us.len() as f64;
+    assert!(
+        avg_solve_us < 200.0,
+        "Average Little's Law solve took {:.2} µs (expected < 200 µs)",
+        avg_solve_us
+    );
+}
+
