@@ -218,45 +218,60 @@ solve DatacenterFleet with {
 ```
 
 ### 6.3 Radar Atmospheric Nowcasting & Physics Bounds
+
+A live, verified build of this is in `evaluations/possible/weather-predict.aven` (driven by
+`weather_adapter.py` against NWS/NOAA/USGS feeds; checked to 1e-9 against MetPy and NumPy by
+`verify/weather_reference.py`). The simplified single-cell form below shows the corrected
+physics — note the units and the distinction between divergence, shear and deformation.
+
 ```aven
 relation RadarAtmosphericCell {
-    // 1. Kinematic divergence & vertical motion
+    // 1. Kinematics: divergence (1/s) and vertical motion via continuity (w = 0 at ground)
     div_horizontal = du_dx + dv_dy
-    vertical_velocity_proxy = -div_horizontal - moisture_g_kg * 0.001
+    vertical_velocity_ms = -div_horizontal * layer_depth_m   // m/s = (1/s) * m
 
-    // 2. Discretized hydrostatic pressure gradient
-    dP_dz = -pressure_hpa * 9.80665 / (287.056 * temperature_k)
+    // Deformation and vorticity use the cross terms (not |du_dx| + |dv_dy|, which is stretching)
+    vorticity_per_s = dv_dx - du_dy
+    deformation_per_s = sqrt((du_dx - dv_dy) ^ 2 + (dv_dx + du_dy) ^ 2)
 
-    // 3. Clausius-Clapeyron saturation vapor pressure
+    // 2. Hydrostatic pressure gradient
     temp_c = temperature_k - 273.15
+    dP_dz = -pressure_hpa * 9.80665 / (287.04749 * temperature_k)
+
+    // 3. Saturation vapor pressure (Magnus form shown; the shipped model uses Ambaum 2020)
     e_sat_hpa = 6.112 * exp(17.67 * temp_c / (temp_c + 243.5))
-    actual_vapor_pressure_hpa = pressure_hpa * (moisture_g_kg / 1000.0) / 0.622
-    saturation_deficit_hpa = e_sat_hpa - actual_vapor_pressure_hpa
-    relative_humidity = (actual_vapor_pressure_hpa / e_sat_hpa) * 100.0
+    vapor_pressure_hpa = 6.112 * exp(17.67 * dewpoint_c / (dewpoint_c + 243.5))
+    relative_humidity = 100.0 * vapor_pressure_hpa / e_sat_hpa
 
-    // 4. Marshall-Palmer radar reflectivity Z = 200 * R^1.6
-    z_linear = 200.0 * (precip_rate_mmh ^ 1.6)
-    radar_dbz = 10.0 * (log(z_linear) / 2.302585092994046)
+    // 4. Marshall-Palmer reflectivity. The radar MEASURES dBZ, so avenc solves this backward
+    //    for the rain rate — one relation, either direction.
+    radar_dbz = 10.0 * log(200.0 * precip_rate_mmh ^ 1.6) / 2.302585092994046
 
-    // 5. Total horizontal wind shear
-    wind_speed = sqrt(wind_u * wind_u + wind_v * wind_v)
-    shear_per_km = (abs(du_dx) + abs(dv_dy)) * 1000.0
+    // 5. Vertical wind shear between the surface and winds aloft (m/s per km)
+    vertical_shear_ms_per_km = 1000.0 * sqrt(((aloft_u - wind_u) / aloft_height_m) ^ 2
+                                           + ((aloft_v - wind_v) / aloft_height_m) ^ 2)
 }
 
 solve RadarAtmosphericCell with {
     temperature_k = 294.15 [K]
+    dewpoint_c = 12.0 [degC]
     pressure_hpa = 1013.25 [hPa]
-    moisture_g_kg = 9.2
-    wind_u = 14.2 [m/s]
-    wind_v = 8.6 [m/s]
+    layer_depth_m = 1000.0 [m]
     du_dx = 0.0003
     dv_dy = 0.0002
-    precip_rate_mmh = 18.5
+    du_dy = 0.0001
+    dv_dx = -0.0001
+    wind_u = 14.2 [m/s]
+    wind_v = 8.6 [m/s]
+    aloft_u = 22.0 [m/s]
+    aloft_v = 4.0 [m/s]
+    aloft_height_m = 1500.0 [m]
+    radar_dbz = 43.0   // solved backward -> precip_rate_mmh
 
-    // Physical safety envelopes
+    // Physical gates: inconsistent sensors stop the solve
     temperature_k >= 250.0 [K]
     temperature_k <= 320.0 [K]
-    shear_per_km <= 25.0
+    vertical_shear_ms_per_km <= 40.0
     relative_humidity <= 105.0
 }
 ```

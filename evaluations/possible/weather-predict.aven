@@ -1,85 +1,110 @@
-// weather_nowcast.aven - Radar Atmospheric Nowcasting Model
-// Real-time sensor fusion & physical boundary verification for radar tiles.
+// weather-predict.aven — Live weather-cell consistency check and radar nowcast
 //
-// Formulates kinematic continuity, hydrostatic balance, Clausius-Clapeyron
-// moisture saturation, Marshall-Palmer radar reflectivity, and wind shear.
+// Fuses live U.S. government observations (weather_adapter.py: NWS stations, NOAA METAR and
+// winds aloft, NOAA nowCOAST radar, USGS gauges) into one physically consistent state, gates
+// on sensor consistency, and extrapolates radar echoes along the steering flow to predict
+// reflectivity and rain rate 15, 30 and 60 minutes ahead (Lagrangian persistence).
+//
+// Run:  avenc run evaluations/possible/weather-predict.aven
+// Change the site by editing site_lat / site_lon (CONUS; NWS station coverage required).
 
-relation RadarAtmosphericCell {
+relation WeatherCell {
     // ----------------------------------------------------
-    // 1. Kinematic Continuity & Divergence
+    // 1. Moisture: saturation vapor pressure over liquid water, Ambaum (2020) Eq. 13
     // ----------------------------------------------------
-    // Horizontal divergence: div_h = du/dx + dv_dy
-    div_horizontal = du_dx + dv_dy
+    // Integrates Clausius-Clapeyron with latent heat varying linearly with temperature,
+    // L(T) = L0 - (cpl - cpv)(T - T0). Constants as in MetPy: e0 = 6.112 hPa at
+    // T0 = 273.16 K, L0 = 2.50084e6 J/kg, cpl = 4219.4, cpv = 1860.078 J/(kg K),
+    // Rv = 461.523 J/(kg K). More accurate than the Magnus fit below about -30 C.
+    temp_k = temp_c + 273.15
+    dewpoint_k = dewpoint_c + 273.15
+    latent_heat_t = 2500840.0 - (4219.4 - 1860.078011865639) * (temp_k - 273.16)
+    latent_heat_td = 2500840.0 - (4219.4 - 1860.078011865639) * (dewpoint_k - 273.16)
+    e_sat_hpa = 6.112 * (273.16 / temp_k) ^ ((4219.4 - 1860.078011865639) / 461.52311572606084) * exp((2500840.0 / 273.16 - latent_heat_t / temp_k) / 461.52311572606084)
+    vapor_pressure_hpa = 6.112 * (273.16 / dewpoint_k) ^ ((4219.4 - 1860.078011865639) / 461.52311572606084) * exp((2500840.0 / 273.16 - latent_heat_td / dewpoint_k) / 461.52311572606084)
+    relative_humidity = 100.0 * vapor_pressure_hpa / e_sat_hpa
 
-    // Incompressibility / continuity proxy: vertical velocity proxy w ≈ -div_h
-    // Moisture flux term accounts for updraft moisture convergence
-    vertical_velocity_proxy = -div_horizontal - moisture_g_kg * 0.001
+    // Recomputed RH vs the RH the station reported: a sensor-consistency check
+    rh_residual = abs(relative_humidity - rh_reported)
+    dewpoint_depression_c = temp_c - dewpoint_c
 
-    // ----------------------------------------------------
-    // 2. Hydrostatic Balance Proxy
-    // ----------------------------------------------------
-    // Discretized barometric equation: dP/dz = -P * g / (R_d * T)
-    // R_d = 287.056 J/(kg·K), g = 9.81 m/s²
-    dP_dz = -pressure_hpa * 9.80665 / (287.056 * temperature_k)
-
-    // ----------------------------------------------------
-    // 3. Clausius-Clapeyron Moisture Saturation
-    // ----------------------------------------------------
-    // Magnus-Tetens approximation for saturation vapor pressure over water (hPa)
-    temp_c = temperature_k - 273.15
-    e_sat_hpa = 6.112 * exp(17.67 * temp_c / (temp_c + 243.5))
-
-    // Actual water vapor partial pressure from specific humidity: e ≈ P * q / 0.622
-    // moisture_g_kg is in g/kg, so specific humidity q = moisture_g_kg / 1000.0
-    actual_vapor_pressure_hpa = pressure_hpa * (moisture_g_kg / 1000.0) / 0.622
-
-    // Saturation deficit (positive = undersaturated, negative = supersaturated)
-    saturation_deficit_hpa = e_sat_hpa - actual_vapor_pressure_hpa
-
-    // Relative humidity percentage (%)
-    relative_humidity = (actual_vapor_pressure_hpa / e_sat_hpa) * 100.0
+    // Exact specific humidity q = eps e / (p - (1 - eps) e), eps = Rd / Rv = 0.621957
+    specific_humidity = 0.6219569100577033 * vapor_pressure_hpa / (pressure_hpa - (1.0 - 0.6219569100577033) * vapor_pressure_hpa)
 
     // ----------------------------------------------------
-    // 4. Marshall-Palmer Radar Reflectivity
+    // 2. Hydrostatic balance with virtual temperature
     // ----------------------------------------------------
-    // Z = A * R^B where A = 200, B = 1.6 (rain rate R in mm/hr)
-    z_linear = 200.0 * (precip_rate_mmh ^ 1.6)
-
-    // Radar reflectivity factor in decibels (dBZ = 10 * log10(Z))
-    // log10(Z) = ln(Z) / ln(10) where ln(10) ≈ 2.302585092994046
-    radar_dbz = 10.0 * (log(z_linear) / 2.302585092994046)
+    // Exact T_v = T (1 - q + q / eps); rho = p / (Rd T_v); dp/dz = -rho g
+    virtual_temp_k = temp_k * (1.0 - specific_humidity + specific_humidity / 0.6219569100577033)
+    air_density_kg_m3 = 100.0 * pressure_hpa / (287.04749097718457 * virtual_temp_k)
+    dp_dz_pa_per_m = -air_density_kg_m3 * 9.80665
 
     // ----------------------------------------------------
-    // 5. Total Wind Shear & Microburst Hazard
+    // 3. Surface kinematics from a triangle of NWS stations
     // ----------------------------------------------------
-    // Horizontal wind speed magnitude
-    wind_speed = sqrt(wind_u * wind_u + wind_v * wind_v)
+    // Each station's wind lies on a plane u = u0 + du/dx x + du/dy y (and likewise v);
+    // three stations give six equations that Aven solves jointly for the gradients.
+    u1 = u0 + du_dx * x1 + du_dy * y1
+    u2 = u0 + du_dx * x2 + du_dy * y2
+    u3 = u0 + du_dx * x3 + du_dy * y3
+    v1 = v0 + dv_dx * x1 + dv_dy * y1
+    v2 = v0 + dv_dx * x2 + dv_dy * y2
+    v3 = v0 + dv_dx * x3 + dv_dy * y3
 
-    // Total horizontal deformation / shear rate (1/s)
-    total_shear_rate = abs(du_dx) + abs(dv_dy)
+    divergence_per_s = du_dx + dv_dy
+    vorticity_per_s = dv_dx - du_dy
+    stretching_per_s = du_dx - dv_dy
+    shearing_per_s = dv_dx + du_dy
+    deformation_per_s = sqrt(stretching_per_s ^ 2 + shearing_per_s ^ 2)
 
-    // Scaled shear per kilometer (m/s per km)
-    shear_per_km = total_shear_rate * 1000.0
+    // Continuity (incompressible, w = 0 at the ground): w at the top of the layer
+    vertical_velocity_ms = -divergence_per_s * layer_depth_m
+
+    // ----------------------------------------------------
+    // 4. Vertical wind shear (surface to the lowest NOAA winds-aloft level)
+    // ----------------------------------------------------
+    shear_u = (aloft_u - wind_u) / aloft_height_m
+    shear_v = (aloft_v - wind_v) / aloft_height_m
+    vertical_shear_ms_per_km = 1000.0 * sqrt(shear_u ^ 2 + shear_v ^ 2)
+    steering_speed_ms = sqrt(steer_u ^ 2 + steer_v ^ 2)
+
+    // ----------------------------------------------------
+    // 5. Radar: Marshall-Palmer Z = 200 R^1.6, dBZ = 10 log10 Z
+    // ----------------------------------------------------
+    // The radar measures dBZ, so Aven solves this backward for the rain rate. Below about
+    // 10 dBZ (0.15 mm/h) there is no measurable rain and the relation is not meaningful.
+    radar_dbz = 10.0 * log(200.0 * radar_rain_mmh ^ 1.6) / 2.302585092994046
+
+    // Radar-estimated vs gauge-measured rain (USGS), when a gauge is nearby
+    radar_minus_gauge_mmh = gauge_available * (radar_rain_mmh - gauge_rate_mmh)
+
+    // ----------------------------------------------------
+    // 6. Nowcast: Lagrangian persistence along the steering flow
+    // ----------------------------------------------------
+    // The echo now upstream by (steering wind x lead time) arrives at the site at that lead.
+    nowcast_dbz_15 = upstream_dbz_15
+    nowcast_dbz_30 = upstream_dbz_30
+    nowcast_dbz_60 = upstream_dbz_60
+    nowcast_dbz_15 = 10.0 * log(200.0 * nowcast_rain_15_mmh ^ 1.6) / 2.302585092994046
+    nowcast_dbz_30 = 10.0 * log(200.0 * nowcast_rain_30_mmh ^ 1.6) / 2.302585092994046
+    nowcast_dbz_60 = 10.0 * log(200.0 * nowcast_rain_60_mmh ^ 1.6) / 2.302585092994046
 }
 
-solve RadarAtmosphericCell with {
-    // Atmospheric state observations (METAR & satellite sounding)
-    temperature_k = 294.15
-    pressure_hpa = 1013.25
-    moisture_g_kg = 9.2
+// Live observations; every field comes from weather_adapter.py
+relation LiveObservations using external("python", "weather_adapter.py") {
+}
 
-    // Wind vector observations (Doppler radar radial velocity retrieval)
-    wind_u = 14.2
-    wind_v = 8.6
-    du_dx = 0.0003
-    dv_dy = 0.0002
+solve WeatherCell, LiveObservations with {
+    // Site: Denver International Airport
+    site_lat = 39.86
+    site_lon = -104.67
+    layer_depth_m = 1000.0
 
-    // Radar estimated surface precipitation rate (mm/hr)
-    precip_rate_mmh = 18.5
-
-    // Physical safety envelopes and realism constraints
-    temperature_k >= 250.0
-    temperature_k <= 320.0
-    shear_per_km <= 25.0
-    relative_humidity <= 105.0
+    // Data-quality gate: physically inconsistent sensors stop the solve (exit 2)
+    rh_residual <= 5.0
+    dewpoint_depression_c >= -0.5
+    temp_c >= -80.0
+    temp_c <= 60.0
+    pressure_hpa >= 500.0
+    pressure_hpa <= 1090.0
 }
