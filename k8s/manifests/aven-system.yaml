@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aven-system
+  labels:
+    app.kubernetes.io/part-of: aven
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aven-capacity-models
+  namespace: aven-system
+data:
+  server_capacity.aven: |
+    relation WorkerScaling {
+        raw_workers = (reqs_per_second * avg_latency_ms) / 1000.0
+        allocated_workers = ceil(raw_workers / target_utilization)
+        total_ram_needed = allocated_workers * (ram_per_worker + socket_buffer_mb) + os_kernel_ram_mb
+        payload_gbps = (reqs_per_second * avg_payload_kb * 8.0) / 1000000.0
+        wire_rate_gbps = payload_gbps * framing_overhead_ratio
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aven-workload
+  namespace: aven-system
+  labels:
+    app: aven-workload
+  annotations:
+    aven.sh/managed-by: "avenc-controller"
+    aven.sh/model: "server_capacity.aven"
+    aven.sh/freeze: "false"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: aven-workload
+  template:
+    metadata:
+      labels:
+        app: aven-workload
+    spec:
+      containers:
+      - name: workload
+        image: registry.k8s.io/pause:3.9
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aven-workload-svc
+  namespace: aven-system
+spec:
+  selector:
+    app: aven-workload
+  ports:
+  - port: 80
+    targetPort: 8080

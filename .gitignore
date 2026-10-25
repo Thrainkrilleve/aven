@@ -27,3 +27,7 @@ Thumbs.db
 *.so
 *.dll
 *.dylib
+
+# Local CLI binaries
+/bin/
+
