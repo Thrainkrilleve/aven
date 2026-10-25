@@ -1,0 +1,43 @@
+// server_capacity.aven — Production RHEL Capacity Sizing with Queueing Headroom
+//
+// Incorporates Little's Law queueing theory (target utilization for queue stability)
+// and physical Ethernet/IP wire-rate framing overhead.
+
+relation WorkerScaling {
+    // Little's Law: raw concurrent requests = arrival_rate * latency
+    raw_workers       = (reqs_per_second * avg_latency_ms) / 1000
+    
+    // Safety Headroom: Operating at 100% utilization causes queues to explode to infinity.
+    // Sizing for target_utilization (e.g. 0.70 = 70%) ensures 30% surge headroom.
+    allocated_workers = ceil(raw_workers / target_utilization)
+    
+    // RAM: Per-worker thread + socket buffers + base OS/kernel memory
+    total_ram_needed  = (allocated_workers * (ram_per_worker + socket_buffer_mb)) + os_kernel_ram_mb
+    
+    // Network: Payload bandwidth + physical Ethernet/IP/TCP framing overhead (typically ~4%)
+    payload_gbps      = (reqs_per_second * avg_payload_kb * 8) / 1000000
+    wire_rate_gbps    = payload_gbps * framing_overhead_ratio
+}
+
+forward ProductionProfile {
+    // Direction-pinned for zero-overhead C99 emission on Linux
+    raw_workers       = (reqs_per_second * avg_latency_ms) / 1000
+    allocated_workers = ceil(raw_workers / target_utilization)
+    total_ram_needed  = (allocated_workers * (ram_per_worker + socket_buffer_mb)) + os_kernel_ram_mb
+    payload_gbps      = (reqs_per_second * avg_payload_kb * 8) / 1000000
+    wire_rate_gbps    = payload_gbps * framing_overhead_ratio
+}
+
+// Production Scenario:
+// Sizing a node to handle 50,000 req/s with 20ms latency and 64KB payloads
+// with 70% utilization headroom (30% surge buffer) and 4% wire framing overhead:
+solve WorkerScaling with {
+    reqs_per_second         = 50000
+    avg_latency_ms          = 20
+    avg_payload_kb          = 64
+    ram_per_worker          = 16
+    socket_buffer_mb        = 4
+    os_kernel_ram_mb        = 4096
+    target_utilization      = 0.70
+    framing_overhead_ratio  = 1.04
+}

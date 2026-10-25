@@ -1,0 +1,24 @@
+// storage_cluster.aven — Enterprise Ceph / Storage Node Sizing & Diagnostics
+//
+// Models a high-performance Ceph NVMe storage pool.
+// Demonstrates Aven's under-determination diagnostic engine and Gaussian rank analysis.
+//
+// In Ceph clusters:
+//   - Erasure Coding 6+2 profile: raid_efficiency = 6 / (6 + 2) = 0.75 (75% usable)
+//   - 3x Replication profile:     raid_efficiency = 1 / 3 = 0.333 (33.3% usable)
+//   - Traditional RAID 6:         raid_efficiency = (N - 2) / N
+
+relation StorageCluster {
+    total_iops      = drives * iops_per_drive
+    usable_tb       = drives * drive_size_tb * raid_efficiency
+    throughput_mbps = (total_iops * block_size_kb) / 1024
+    wire_rate_gbps  = (throughput_mbps * 8) / 1000
+}
+
+// Under-determined Scenario:
+// Sizing targets: 100 TB usable, 2,500 MB/s throughput.
+// Aven's diagnostic engine identifies 3 degrees of freedom and reports the exact free variables.
+solve StorageCluster with {
+    usable_tb       = 100
+    throughput_mbps = 2500
+}

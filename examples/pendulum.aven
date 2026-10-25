@@ -1,0 +1,10 @@
+// examples/pendulum.aven — solve length from period (symbolic chain rule)
+
+relation Pendulum {
+    period = 2 * pi * sqrt(length / gravity)
+}
+
+solve Pendulum with {
+    period  = 2
+    gravity = 9.81
+}

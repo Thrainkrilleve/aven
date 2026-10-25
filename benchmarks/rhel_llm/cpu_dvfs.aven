@@ -1,0 +1,24 @@
+// cpu_dvfs.aven — Non-Linear CPU Power Envelope & Frequency Sizing
+//
+// Models dynamic voltage/frequency scaling (DVFS) under cubic CMOS dynamic power:
+//   P_dynamic = alpha * f^3
+//   P_static  = beta  * f
+//   P_total   = cores * (P_dynamic + P_static)
+//
+// Aven uses Newton-Raphson with an analytical Jacobian to solve for frequency 'f'.
+
+relation CpuPowerEnvelope {
+    total_power_w   = cores * (alpha * (f ^ 3) + beta * f)
+    reqs_per_second = cores * throughput_per_core_per_ghz * f
+}
+
+// Sizing Scenario:
+// Target: Cap package power at 168W across 16 cores.
+// Aven solves the non-linear cubic equation to find optimal clock frequency 'f' and throughput:
+solve CpuPowerEnvelope with {
+    cores                         = 16
+    alpha                         = 0.25
+    beta                          = 1.25
+    total_power_w                 = 168
+    throughput_per_core_per_ghz   = 1041.6666667
+}

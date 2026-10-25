@@ -1,0 +1,155 @@
+---
+# deploy_aven_node.yml — Production Ansible Deployment Playbook for RHEL 9
+#
+# Incorporates security hardening, oneshot service idempotency,
+# dynamic recompilation tracking, and SELinux persistent policy context.
+
+- name: Deploy Aven High-Throughput Capacity Node on RHEL 9
+  hosts: aven_nodes
+  become: true
+  vars:
+    aven_root: /opt/aven
+    aven_user: aven
+    aven_cflags: >-
+      -std=c99 -O2 -Wall -Werror=format-security
+      -fstack-protector-strong -fstack-clash-protection -fcf-protection
+      -D_FORTIFY_SOURCE=2 -fPIE -pie -Wl,-z,relro,-z,now
+
+  tasks:
+    - name: Install compiler toolchain and SELinux management utilities
+      ansible.builtin.dnf:
+        name:
+          - gcc
+          - make
+          - glibc-devel
+          - policycoreutils-python-utils
+        state: present
+
+    - name: Configure kernel sysctl parameters for 25.6 Gbps throughput
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/99-aven.conf
+        content: |
+          net.core.somaxconn = 65535
+          net.ipv4.tcp_max_syn_backlog = 65535
+          net.core.netdev_max_backlog = 65535
+          net.core.rmem_max = 67108864
+          net.core.wmem_max = 67108864
+          net.ipv4.tcp_rmem = 4096 131072 67108864
+          net.ipv4.tcp_wmem = 4096 65536 67108864
+          fs.file-max = 2097152
+          net.ipv4.ip_local_port_range = 10000 65535
+          net.ipv4.tcp_tw_reuse = 1
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload sysctl
+
+    - name: Create dedicated unprivileged system user 'aven'
+      ansible.builtin.user:
+        name: "{{ aven_user }}"
+        system: true
+        shell: /sbin/nologin
+        create_home: false
+        home: "{{ aven_root }}"
+        state: present
+
+    - name: Ensure deployment directory hierarchy exists
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - "{{ aven_root }}"
+        - "{{ aven_root }}/bin"
+
+    - name: Copy generated server_capacity.c source
+      ansible.builtin.copy:
+        src: server_capacity.c
+        dest: "{{ aven_root }}/server_capacity.c"
+        owner: root
+        group: root
+        mode: "0644"
+      register: aven_src
+
+    - name: Check for existing compiled binary
+      ansible.builtin.stat:
+        path: "{{ aven_root }}/bin/server_capacity"
+      register: aven_bin
+
+    # Recompiles whenever the source file changes or if the binary is missing
+    - name: Compile hardened C binary with stack canary and full RELRO
+      ansible.builtin.command:
+        cmd: "gcc {{ aven_cflags }} -o {{ aven_root }}/bin/server_capacity {{ aven_root }}/server_capacity.c -lm"
+      when: aven_src.changed or not aven_bin.stat.exists
+      notify: Reload systemd
+
+    - name: Register persistent SELinux bin_t file context
+      community.general.sefcontext:
+        target: "{{ aven_root }}/bin(/.*)?"
+        setype: bin_t
+        state: present
+
+    - name: Restore SELinux contexts across deployment tree
+      ansible.builtin.command:
+        cmd: "restorecon -Rv {{ aven_root }}"
+      register: aven_restorecon
+      changed_when: aven_restorecon.stdout | length > 0
+
+    # Type=oneshot with RemainAfterExit=yes prevents systemd restart-limit crash loops
+    - name: Install systemd capacity reporting service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/aven-server.service
+        content: |
+          [Unit]
+          Description=Aven Node Capacity Profile
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          User={{ aven_user }}
+          Group={{ aven_user }}
+          ExecStart={{ aven_root }}/bin/server_capacity
+          NoNewPrivileges=true
+          ProtectSystem=strict
+          ProtectHome=true
+          PrivateTmp=true
+          ProtectKernelTunables=true
+          ProtectControlGroups=true
+          LockPersonality=true
+          MemoryDenyWriteExecute=true
+
+          [Install]
+          WantedBy=multi-user.target
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload systemd
+
+    # Flush handlers here so sysctl and systemd are reloaded before starting the service
+    - name: Flush handlers to apply daemon reloads before starting service
+      ansible.builtin.meta: flush_handlers
+
+    - name: Enable and execute aven-server service
+      ansible.builtin.systemd:
+        name: aven-server
+        enabled: true
+        state: started
+        daemon_reload: true
+
+  handlers:
+    - name: Reload sysctl
+      ansible.builtin.command:
+        cmd: sysctl --system
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restart aven-server
+      ansible.builtin.systemd:
+        name: aven-server
+        state: restarted

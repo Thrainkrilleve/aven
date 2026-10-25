@@ -1,0 +1,29 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Scratch & temporary testing files
+/scratch/
+*.tmp
+*.log
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Standalone binary executables (source is compiled via cargo)
+*.exe
+*.o
+*.a
+*.so
+*.dll
+*.dylib

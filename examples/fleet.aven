@@ -1,0 +1,24 @@
+// examples/fleet.aven — Fleet Economics & Trip Model
+
+relation Economics {
+    revenue = price * units
+    profit  = revenue - cost
+}
+
+forward Trip {
+    distance = speed * time
+    fuel     = distance * consumption
+    cost     = fuel * price_fuel
+}
+
+solve Trip with {
+    speed       = 90
+    time        = 4
+    consumption = 0.07
+    price_fuel  = 1.75
+}
+
+solve Economics with {
+    profit = 500
+    price  = 25
+}

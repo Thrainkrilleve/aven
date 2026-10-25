@@ -1,0 +1,294 @@
+// src/diagnostics.rs — Under-determination diagnostics & Jacobian rank analysis
+use crate::ast::*;
+use crate::diff::{diff, eval_expr};
+use std::collections::{BTreeSet, HashMap};
+
+#[derive(Debug, Clone)]
+pub struct Diagnosis {
+    pub unknowns: Vec<String>,
+    pub equations: Vec<String>,
+    pub dof: usize,
+    pub free_vars: Vec<String>,
+    pub orphans: Vec<String>,
+    pub minimal_fixes: Vec<String>,
+    pub zero_gradient_relations: Vec<String>,
+    pub rank: usize,
+}
+
+impl Diagnosis {
+    pub fn report(&self) -> String {
+        let width = 68;
+        let mut lines = Vec::new();
+        lines.push(format!("┌{}┐", "─".repeat(width)));
+
+        let add_row = |lines: &mut Vec<String>, s: &str| {
+            lines.push(format!("│ {:<width$} │", s, width = width - 2));
+        };
+
+        if self.dof == 0 {
+            add_row(
+                &mut lines,
+                "DETERMINED SYSTEM (0 DOF) — solver stalled, here is why:",
+            );
+            add_row(
+                &mut lines,
+                "  System has full rank (equations match unknowns).",
+            );
+            add_row(
+                &mut lines,
+                "  Stall caused by non-convergence, root non-existence, or flat slopes.",
+            );
+        } else {
+            add_row(
+                &mut lines,
+                "UNDER-DETERMINED SYSTEM — solver stalled, here is why:",
+            );
+        }
+        add_row(&mut lines, "");
+        add_row(
+            &mut lines,
+            &format!(
+                "  unknowns  ({}): {}",
+                self.unknowns.len(),
+                self.unknowns.join(", ")
+            ),
+        );
+        add_row(
+            &mut lines,
+            &format!("  relations ({}):", self.equations.len()),
+        );
+        for eq in &self.equations {
+            add_row(&mut lines, &format!("      {}", eq));
+        }
+        add_row(&mut lines, "");
+        add_row(
+            &mut lines,
+            &format!(
+                "  Jacobian rank: {} of {} columns ⟹ {} degree(s) of freedom",
+                self.rank,
+                self.unknowns.len(),
+                self.dof
+            ),
+        );
+
+        if !self.zero_gradient_relations.is_empty() {
+            add_row(&mut lines, "");
+            add_row(
+                &mut lines,
+                "  ZERO-GRADIENT INTRINSIC DETECTED (derivative is 0):",
+            );
+            for zr in &self.zero_gradient_relations {
+                add_row(&mut lines, &format!("      • {}", zr));
+            }
+            add_row(
+                &mut lines,
+                "  (piecewise functions like ceil/floor/round have zero slopes)",
+            );
+        }
+
+        if !self.free_vars.is_empty() && self.dof > 0 {
+            add_row(&mut lines, "  FREE variables (unconstrained directions):");
+            add_row(&mut lines, &format!("      {}", self.free_vars.join(", ")));
+        }
+
+        if !self.orphans.is_empty() {
+            add_row(
+                &mut lines,
+                "  ORPHAN variables (no relation constrains them):",
+            );
+            add_row(&mut lines, &format!("      {}", self.orphans.join(", ")));
+        }
+
+        if !self.minimal_fixes.is_empty() && self.dof > 0 {
+            add_row(&mut lines, "");
+            add_row(
+                &mut lines,
+                "  MINIMAL FIX — any ONE of these bindings resolves it:",
+            );
+            for fix in &self.minimal_fixes {
+                add_row(&mut lines, &format!("      • {}", fix));
+            }
+        } else if self.dof > 0 {
+            add_row(
+                &mut lines,
+                "  (no single binding suffices — combine bindings or add a relation)",
+            );
+        }
+
+        lines.push(format!("└{}┘", "─".repeat(width)));
+        lines.join("\n")
+    }
+}
+
+pub struct Diagnostician;
+
+impl Default for Diagnostician {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Diagnostician {
+    pub fn new() -> Self {
+        Self
+    }
+
+    fn probe_val(i: usize) -> f64 {
+        1.0 + 0.37 * (i as f64) + 0.11 * ((i % 3) as f64)
+    }
+
+    pub fn diagnose(
+        &self,
+        unknowns: &[String],
+        relations: &[Equation],
+        env: &HashMap<String, f64>,
+    ) -> Diagnosis {
+        let n = unknowns.len();
+        let m = relations.len();
+
+        let mut probe_env = env.clone();
+        for (i, u) in unknowns.iter().enumerate() {
+            probe_env.insert(u.clone(), Self::probe_val(i));
+        }
+
+        let mut jac = vec![vec![0.0; n]; m];
+
+        for (i, rel) in relations.iter().enumerate() {
+            for (j, u) in unknowns.iter().enumerate() {
+                let mut val = 0.0;
+                if let Ok(d_rhs) = diff(&rel.rhs, u) {
+                    if let Ok(eval_val) = eval_expr(&d_rhs, &probe_env) {
+                        if eval_val.is_finite() {
+                            val = eval_val;
+                        }
+                    }
+                }
+                // Subtract d(lhs)/du
+                if u == &rel.lhs {
+                    val -= 1.0;
+                }
+                jac[i][j] = val;
+            }
+        }
+
+        let (rank, pivots) = rank_and_pivots(&jac);
+        let free_cols: Vec<usize> = (0..n).filter(|c| !pivots.contains(c)).collect();
+        let free_vars: Vec<String> = free_cols.into_iter().map(|c| unknowns[c].clone()).collect();
+
+        // Identify zero-gradient relations (e.g. ceil, floor, round)
+        let mut zero_gradient_relations = Vec::new();
+        for (i, rel) in relations.iter().enumerate() {
+            let row_norm: f64 = jac[i].iter().map(|v| v.abs()).fold(0.0, f64::max);
+            if row_norm <= 1e-12 {
+                zero_gradient_relations.push(rel.original_text.clone());
+            }
+        }
+
+        // Check for orphan variables
+        let mut mentioned = BTreeSet::new();
+        for rel in relations {
+            let mut v = rel.rhs.vars();
+            v.insert(rel.lhs.clone());
+            mentioned.extend(v);
+        }
+        let orphans: Vec<String> = unknowns
+            .iter()
+            .filter(|u| !mentioned.contains(*u))
+            .cloned()
+            .collect();
+
+        // Minimal fixes: find if removing unknown v leaves sub-matrix with rank n - 1
+        let mut minimal_fixes = Vec::new();
+        if n > 1 {
+            for (v_idx, v) in unknowns.iter().enumerate() {
+                let keep_cols: Vec<usize> = (0..n).filter(|&c| c != v_idx).collect();
+                let sub_jac: Vec<Vec<f64>> = jac
+                    .iter()
+                    .map(|row| keep_cols.iter().map(|&c| row[c]).collect())
+                    .collect();
+
+                let (sub_rank, _) = rank_and_pivots(&sub_jac);
+                if sub_rank == n - 1 {
+                    let others: Vec<&String> = unknowns.iter().filter(|u| *u != v).collect();
+                    let others_str: Vec<String> = others.into_iter().cloned().collect();
+                    minimal_fixes.push(format!(
+                        "bind '{}' — reduces system to {} independent unknown(s) [{}] (0 DOF)",
+                        v,
+                        n - 1,
+                        others_str.join(", ")
+                    ));
+                }
+            }
+        }
+
+        Diagnosis {
+            unknowns: unknowns.to_vec(),
+            equations: relations.iter().map(|r| r.original_text.clone()).collect(),
+            dof: n.saturating_sub(rank),
+            free_vars,
+            orphans,
+            minimal_fixes,
+            zero_gradient_relations,
+            rank,
+        }
+    }
+}
+
+/// Gaussian elimination on matrix copy to compute rank and pivot columns with dynamic scale-aware tolerance
+fn rank_and_pivots(mat: &[Vec<f64>]) -> (usize, Vec<usize>) {
+    let rows = mat.len();
+    if rows == 0 {
+        return (0, Vec::new());
+    }
+    let cols = mat[0].len();
+    let mut a: Vec<Vec<f64>> = mat.to_vec();
+
+    // Dynamically scale tolerance to matrix magnitude to handle both micro (1e-9) and macro (1e9) scales
+    let max_entry: f64 = mat
+        .iter()
+        .flat_map(|row| row.iter())
+        .map(|v| v.abs())
+        .fold(0.0f64, f64::max);
+    let pivot_tol = 1e-12 * max_entry.max(1e-15);
+
+    let mut pivots = Vec::new();
+    let mut r = 0;
+
+    for c in 0..cols {
+        if r >= rows {
+            break;
+        }
+
+        // Find pivot
+        let mut max_row = r;
+        let mut max_val = a[r][c].abs();
+        for i in (r + 1)..rows {
+            let val = a[i][c].abs();
+            if val > max_val {
+                max_val = val;
+                max_row = i;
+            }
+        }
+
+        if max_val <= pivot_tol {
+            continue;
+        }
+
+        a.swap(r, max_row);
+
+        for i in 0..rows {
+            if i != r && a[i][c].abs() > pivot_tol {
+                let factor = a[i][c] / a[r][c];
+                for j in c..cols {
+                    let sub = factor * a[r][j];
+                    a[i][j] -= sub;
+                }
+            }
+        }
+
+        pivots.push(c);
+        r += 1;
+    }
+
+    (r, pivots)
+}

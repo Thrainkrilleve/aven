@@ -1,0 +1,137 @@
+name: CI/CD Pipeline — Lint, Test & Security Audit
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  pull_request:
+    branches: [ "master", "main" ]
+  workflow_dispatch:
+
+jobs:
+  lint-and-format:
+    name: Code Formatting & Clippy Linter
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-lint-
+
+      - name: Verify Code Formatting
+        run: cargo fmt --check
+
+      - name: Run Clippy Linter (Strict Zero Warnings)
+        run: cargo clippy --all-targets -- -D warnings
+
+  test-and-build:
+    name: Numerical Solver & Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-test-
+
+      - name: Execute Full Test Suite
+        run: cargo test --release --verbose
+
+      - name: Compile Release Binary
+        run: cargo build --release
+
+      - name: Run Multi-Pillar Core Demo
+        run: ./target/release/avenc demo
+
+  security-and-c-hardening:
+    name: Security Audit & C99 Hardened Emitter Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install GCC and Clang Hardening Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc clang checksec
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build avenc Compiler
+        run: cargo build --release
+
+      - name: Emit Direction-Pinned C99 with Domain Guards & Traceability
+        run: |
+          ./target/release/avenc build examples/server_capacity.aven --emit-c --traceable --checked-c > /tmp/server_capacity_checked.c
+
+      - name: Compile Emitted C with Enterprise Hardening Flags
+        run: |
+          gcc -std=c99 -O2 \
+            -Wall -Wextra -Werror -Wpedantic \
+            -fstack-protector-strong \
+            -fstack-clash-protection \
+            -fcf-protection=full \
+            -D_FORTIFY_SOURCE=2 \
+            -fPIE -pie \
+            -Wl,-z,relro,-z,now \
+            /tmp/server_capacity_checked.c \
+            -o /tmp/server_capacity_hardened -lm
+
+      - name: Verify ELF Hardening via Checksec
+        run: |
+          checksec --file=/tmp/server_capacity_hardened
+
+      - name: Run Hardened Binary
+        run: |
+          /tmp/server_capacity_hardened
+
+  validate-aven-models:
+    name: Validate Aven Relational Models
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build avenc Compiler
+        run: cargo build --release
+
+      - name: Validate Example Models (Syntax & Unit Checks)
+        run: |
+          for f in examples/*.aven benchmarks/rhel_llm/*.aven; do
+            if [ -f "$f" ]; then
+              echo "Validating $f..."
+              ./target/release/avenc run "$f" || exit 1
+            fi
+          done
