@@ -83,6 +83,7 @@ avenc pareto examples/server_capacity.aven reqs_per_second 100 50000
 ```
 
 Flags:
+- `--steps N`: Number of sweep intervals (N + 1 points; default 5).
 - `--backend native|external`: Selects solver backend.
 - `--cmd <command>`: Specifies command for external Pareto sweeps.
 

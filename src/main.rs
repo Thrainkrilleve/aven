@@ -45,7 +45,7 @@ fn print_usage() {
         "                                        (enforces fact freshness; blocks decision on stale/zero-TTL data)"
     );
     println!(
-        "  avenc pareto <file.aven> [var] [min] [max] [--backend native|external] [--cmd <command>]"
+        "  avenc pareto <file.aven> [var] [min] [max] [--steps N] [--backend native|external] [--cmd <command>]"
     );
     println!(
         "                                        Generate Pareto trade-off frontier & detect knee point"
@@ -178,7 +178,13 @@ fn real_main() {
                 .windows(2)
                 .find(|w| w[0] == "--cmd")
                 .map(|w| w[1].as_str());
-            cmd_pareto(&args[2], sweep_var, min_val, max_val, backend_arg, cmd_arg);
+            let steps = args
+                .windows(2)
+                .find(|w| w[0] == "--steps")
+                .and_then(|w| w[1].parse::<usize>().ok())
+                .unwrap_or(5)
+                .clamp(1, 1000);
+            cmd_pareto(&args[2], sweep_var, min_val, max_val, backend_arg, cmd_arg, steps);
         }
         "why" => {
             let mut non_flags = Vec::new();
@@ -1198,6 +1204,7 @@ fn cmd_pareto(
     max_val: Option<f64>,
     backend_arg: Option<&str>,
     cmd_arg: Option<&str>,
+    steps: usize,
 ) {
     let module = parse_file(path);
     if module.blocks.is_empty() {
@@ -1277,7 +1284,7 @@ fn cmd_pareto(
     }
     let obj_list: Vec<String> = all_vars.into_iter().collect();
 
-    match orchestrator.solve_pareto(&initial_inputs, var, (min, max), 5, &obj_list) {
+    match orchestrator.solve_pareto(&initial_inputs, var, (min, max), steps, &obj_list) {
         Ok(frontier) => {
             if let Some(first_pt) = frontier.first() {
                 let mut display_vars: Vec<String> = first_pt
