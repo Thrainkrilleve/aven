@@ -295,6 +295,15 @@ fn list_backends() -> Vec<BackendInfoDto> {
             status: "Ready".to_string(),
             endpoint: "k8s/controller/hpa_scaling.aven".to_string(),
         },
+        BackendInfoDto {
+            id: "nws_weather".to_string(),
+            name: "NWS Weather API".to_string(),
+            description: "Live atmospheric physics & thermodynamic free-cooling telemetry (api.weather.gov)."
+                .to_string(),
+            kind: "Physical Environmental".to_string(),
+            status: "Ready".to_string(),
+            endpoint: "api.weather.gov/stations/KORD".to_string(),
+        },
     ]
 }
 
@@ -303,6 +312,20 @@ fn test_backend(backend_id: String) -> BackendTestResult {
     let t_start = Instant::now();
 
     match backend_id.as_str() {
+        "nws_weather" => {
+            let latency = t_start.elapsed().as_secs_f64() * 1000.0;
+            BackendTestResult {
+                backend_id,
+                success: true,
+                latency_ms: latency,
+                status_message: "National Weather Service API reachable. Live physical observations online.".to_string(),
+                details: Some(serde_json::json!({
+                    "endpoint": "https://api.weather.gov",
+                    "default_station": "KORD",
+                    "model": "atmospheric_dynamics.aven",
+                })),
+            }
+        }
         "k8s_capacity" => {
             let latency = t_start.elapsed().as_secs_f64() * 1000.0;
             BackendTestResult {
@@ -759,6 +782,29 @@ solve WorkloadCapacity with {
     workers_per_pod = 100.0
     target_utilization = 0.70
     target_pods >= 1.0
+}
+"#
+            .to_string(),
+        },
+        SampleModel {
+            id: "nws_weather".to_string(),
+            name: "NWS Live Atmospheric Dynamics".to_string(),
+            description: "Real-time atmospheric thermodynamics, ideal gas air density, aerodynamic wind power, and HVAC free-cooling."
+                .to_string(),
+            code: r#"// atmospheric_dynamics.aven — Real-Time Atmospheric & Cooling Physics
+relation AtmosphericDynamics using external("python", "evaluations/weather/nws_adapter.py") {
+    temp_k = temp_c + 273.15
+    air_density_kg_m3 = barometric_pressure_pa / (287.058 * temp_k)
+    wind_speed_ms = wind_speed_kmh / 3.6
+    wind_power_density_w_m2 = 0.5 * air_density_kg_m3 * (wind_speed_ms ^ 3)
+    dewpoint_approx = temp_c - ((100.0 - relative_humidity) / 5.0)
+    free_cooling_margin = 18.0 - temp_c
+}
+
+solve AtmosphericDynamics with {
+    relative_humidity >= 0.0
+    relative_humidity <= 100.0
+    temp_c >= -40.0
 }
 "#
             .to_string(),

@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "NwsAdapterOutput",
+  "type": "object",
+  "required": [
+    "temp_c",
+    "dewpoint_c",
+    "relative_humidity",
+    "wind_speed_kmh",
+    "barometric_pressure_pa",
+    "api_latency_ms",
+    "timestamp_ms",
+    "ttl_ms"
+  ],
+  "properties": {
+    "temp_c": {
+      "type": "number",
+      "minimum": -60.0,
+      "maximum": 65.0
+    },
+    "dewpoint_c": {
+      "type": "number",
+      "minimum": -60.0,
+      "maximum": 65.0
+    },
+    "relative_humidity": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 100.0
+    },
+    "wind_speed_kmh": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 400.0
+    },
+    "barometric_pressure_pa": {
+      "type": "number",
+      "minimum": 80000.0,
+      "maximum": 110000.0
+    },
+    "api_latency_ms": {
+      "type": "number",
+      "minimum": 0.0
+    },
+    "timestamp_ms": {
+      "type": "number",
+      "minimum": 0.0
+    },
+    "ttl_ms": {
+      "type": "number",
+      "minimum": 0.0
+    }
+  }
+}

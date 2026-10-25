@@ -601,6 +601,7 @@
             <option value="flame">FlameTest (External Hostile)</option>
             <option value="openplc">OpenPLC Manufacturing Line</option>
             <option value="k8s_hpa">Kubernetes HPA Auto-Scaler</option>
+            <option value="nws_weather">NWS Live Atmospheric Physics</option>
             <option value="server_capacity">Server Capacity (RHEL Little's Law)</option>
             <option value="pendulum">Pendulum Dynamics (Native)</option>
           </select>
@@ -669,6 +670,17 @@ solve FlameTest with {
             <div class="backend-footer">
               <span class="status-badge status-ready">● Ready</span>
               <button class="secondary small" onclick="runBackendTest('k8s_capacity')">Test</button>
+            </div>
+          </div>
+          <div class="backend-card">
+            <div class="backend-top">
+              <span class="backend-name">NWS Weather API</span>
+              <span class="backend-type-pill">Live Environmental</span>
+            </div>
+            <div class="backend-desc">Real-time thermodynamic observations from api.weather.gov.</div>
+            <div class="backend-footer">
+              <span class="status-badge status-ready">● Ready</span>
+              <button class="secondary small" onclick="runBackendTest('nws_weather')">Test</button>
             </div>
           </div>
         </div>
@@ -1371,6 +1383,22 @@ solve K8sCapacity with {
     pod_capacity_workers = 100.0
 }
 `,
+      nws_weather: `// atmospheric_dynamics.aven — Real-Time Atmospheric & Cooling Physics
+relation AtmosphericDynamics using external("python", "evaluations/weather/nws_adapter.py") {
+    temp_k = temp_c + 273.15
+    air_density_kg_m3 = barometric_pressure_pa / (287.058 * temp_k)
+    wind_speed_ms = wind_speed_kmh / 3.6
+    wind_power_density_w_m2 = 0.5 * air_density_kg_m3 * (wind_speed_ms ^ 3)
+    dewpoint_approx = temp_c - ((100.0 - relative_humidity) / 5.0)
+    free_cooling_margin = 18.0 - temp_c
+}
+
+solve AtmosphericDynamics with {
+    relative_humidity >= 0.0
+    relative_humidity <= 100.0
+    temp_c >= -40.0
+}
+`,
       pendulum: `// Aven Mechanical Model — Non-linear Pendulum
 relation PendulumDynamics {
     omega = sqrt(9.81 / length)
@@ -1397,6 +1425,8 @@ solve PendulumDynamics with {
           document.getElementById("backend-select").value = "openplc_v4";
         } else if (key === "k8s_hpa") {
           document.getElementById("backend-select").value = "k8s_capacity";
+        } else if (key === "nws_weather") {
+          document.getElementById("backend-select").value = "nws_weather";
         } else if (key === "server_capacity" || key === "pendulum") {
           document.getElementById("backend-select").value = "native_analytic";
         } else {
