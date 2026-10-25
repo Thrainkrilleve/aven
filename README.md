@@ -2,7 +2,7 @@
 
 **Declarative Invariant Programming & Relational Multi-Physics Engine**
 
-[![Build & Test](https://img.shields.io/badge/tests-78%20passed-brightgreen.svg)](#testing--verification)
+[![Build & Test](https://img.shields.io/badge/tests-79%20passed-brightgreen.svg)](#testing--verification)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-pure%20Rust%20std-blue.svg)](#key-capabilities)
 [![Throughput](https://img.shields.io/badge/IPC%20Throughput-1%2C720%20solves%2Fsec-orange.svg)](#live-multi-stream-flight-dynamics-mesh)
 [![Median Latency](https://img.shields.io/badge/Median%20Latency-0.56%20ms-purple.svg)](#live-multi-stream-flight-dynamics-mesh)
@@ -227,7 +227,7 @@ f:\aven/
 │   ├── optimize.rs                         # Simplex, nonlinear and interval branch-and-bound optimizer
 │   ├── ledger.rs                           # Hash-chained, signable fact ledger
 │   └── main.rs                             # CLI entrypoint & Pareto orchestrator
-├── tests/                                  # Integration and documentation-claim tests (78)
+├── tests/                                  # Integration and documentation-claim tests (79)
 │   └── test_suite.rs                       # Comprehensive verification suite
 ├── examples/                               # Canonical domain specifications
 │   ├── aerodynamics.aven                   # Compressible flight dynamics
@@ -261,7 +261,7 @@ Aven includes a comprehensive test suite verifying forward evaluation, backward 
 cargo test
 ```
 ```text
-test result: ok. 29 passed; 0 failed   (tests/claims.rs: every documented claim)
+test result: ok. 30 passed; 0 failed   (tests/claims.rs: every documented claim)
 test result: ok. 49 passed; 0 failed   (tests/test_suite.rs)
 ```
 

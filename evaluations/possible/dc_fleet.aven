@@ -1,0 +1,45 @@
+// dc_fleet.aven — Fleet-level data-center trade-off model for the digital twin's Pareto view.
+//
+// `avenc pareto` sweeps cluster_util to trace energy (facility_kw) against served capacity
+// (served_rps) and thermal margin. dc_bridge.py writes a copy with the live outside
+// temperature, CRAC state and the capacity derived from real Wikimedia pageviews.
+
+relation Fleet {
+    // IT power: idle draw plus utilization-proportional dynamic draw per server; nodes carry
+    // cluster_util scaled by their placement weight, whose fleet mean is w_mean
+    server_w = idle_w + cluster_util * w_mean * dynamic_w
+    it_kw = servers * server_w / 1000.0
+
+    // Requests served at this utilization
+    served_rps = cluster_util * servers * rps_per_server
+
+    // Supply air: CRAC setpoint when healthy, outside air plus economizer rise when failed
+    supply_c = crac_ok * setpoint_c + (1.0 - crac_ok) * (outside_c + economizer_rise_c)
+
+    // Exhaust temperature from airflow heat transfer dT = P / (rho * cp * Q), with recirculation
+    exhaust_c = supply_c + (1.0 + recirc) * server_w / (air_rho * air_cp * airflow_m3s)
+    thermal_margin_c = limit_c - exhaust_c
+
+    // Chiller efficiency falls as outside air warms; fans run either way
+    cop = 7.5 - 0.12 * outside_c
+    facility_kw = it_kw + crac_ok * it_kw / cop + fan_fraction * it_kw
+}
+
+solve Fleet with {
+    servers = 2500
+    w_mean = 1.0
+    idle_w = 110
+    dynamic_w = 240
+    rps_per_server = 1.2
+    crac_ok = 1
+    setpoint_c = 18
+    outside_c = 15
+    economizer_rise_c = 4
+    recirc = 0.3
+    air_rho = 1.2
+    air_cp = 1005
+    airflow_m3s = 0.05
+    limit_c = 45
+    fan_fraction = 0.06
+    cluster_util = 0.5
+}
