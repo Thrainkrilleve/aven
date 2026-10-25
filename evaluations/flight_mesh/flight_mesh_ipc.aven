@@ -1,0 +1,40 @@
+// flight_mesh_ipc.aven — Real-Time Flight Dynamics, Atmospheric Lapse & Geospatial Mesh via Persistent IPC
+// Connects to local high-speed persistent telemetry daemon over loopback TCP (127.0.0.1:9090)
+
+relation FlightAtmosphericDynamics using ipc("127.0.0.1:9090") {
+    // 1. Barometric International Standard Atmosphere (ISA) Lapse Rate (Troposphere: 0 to 11,000m / 36,089ft)
+    surface_temp_k = surface_temp_c + 273.15
+    lapse_rate = 0.0065
+    ambient_temp_k = surface_temp_k - (lapse_rate * baro_altitude_m)
+    ambient_temp_c = ambient_temp_k - 273.15
+    
+    // Ambient Barometric Pressure at Altitude (Pa)
+    pressure_ratio = 1.0 - ((lapse_rate * baro_altitude_m) / surface_temp_k)
+    ambient_pressure_pa = (surface_altim_hpa * 100.0) * (pressure_ratio ^ 5.2561)
+    
+    // Ideal Gas Local Air Density (kg/m^3)
+    air_density_kg_m3 = ambient_pressure_pa / (287.058 * ambient_temp_k)
+    
+    // 2. High-Speed Aerodynamics & Compressibility (Guarded against domain hazards)
+    safe_temp_k = ambient_temp_k + 0.0001
+    speed_of_sound_ms = sqrt(1.4 * 287.058 * safe_temp_k)
+    mach_number = velocity_ms / (speed_of_sound_ms + 0.0001)
+    dynamic_pressure_pa = 0.5 * air_density_kg_m3 * (velocity_ms ^ 2)
+    
+    // Specific Excess Power (W/kg) for climb/descent energy rate
+    specific_excess_power_w_kg = 9.80665 * vertical_rate_ms
+    
+    // 3. Hydrological & Terrain Clearance (Regional Hydrological Proxy)
+    terrain_clearance_m = baro_altitude_m - gauge_elevation_m
+    relative_river_discharge_m3s = river_discharge_cfs * 0.0283168
+}
+
+solve FlightAtmosphericDynamics with {
+    velocity_ms >= 0.0
+    velocity_ms <= 400.0
+    mach_number >= 0.0
+    mach_number <= 1.2
+    ambient_temp_c >= -80.0
+    ambient_temp_c <= 60.0
+    terrain_clearance_m >= -100.0
+}

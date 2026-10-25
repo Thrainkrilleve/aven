@@ -591,6 +591,180 @@ impl Evaluator for ExternalEvaluator {
     }
 }
 
+/// Persistent IPC evaluator communicating over local TCP socket stream (pure std).
+pub struct IpcEvaluator {
+    pub endpoint: String,
+    pub backend_id: String,
+    pub required_keys: Vec<String>,
+}
+
+impl IpcEvaluator {
+    pub fn new(endpoint: &str) -> Self {
+        Self {
+            endpoint: endpoint.to_string(),
+            backend_id: format!("ipc_{}", endpoint),
+            required_keys: Vec::new(),
+        }
+    }
+
+    pub fn with_required_keys(mut self, keys: &[String]) -> Self {
+        self.required_keys = keys.to_vec();
+        self
+    }
+}
+
+impl Evaluator for IpcEvaluator {
+    fn evaluate(&self, inputs: &VarMap) -> Result<EvalResult, EvalError> {
+        use std::io::{BufRead, BufReader, Write};
+        use std::net::TcpStream;
+
+        let t_start = std::time::Instant::now();
+
+        // Resolve host and port (e.g. "9090" -> "127.0.0.1:9090", "localhost:9090" -> "127.0.0.1:9090")
+        let addr_str = if !self.endpoint.contains(':') {
+            format!("127.0.0.1:{}", self.endpoint)
+        } else if self.endpoint.starts_with("localhost:") {
+            self.endpoint.replacen("localhost:", "127.0.0.1:", 1)
+        } else {
+            self.endpoint.clone()
+        };
+
+        let socket_addr: std::net::SocketAddr = addr_str.parse().map_err(|e| {
+            EvalError::DomainError(format!("Invalid IPC socket address '{}': {}", addr_str, e))
+        })?;
+
+        let stream = TcpStream::connect_timeout(&socket_addr, std::time::Duration::from_millis(500)).map_err(|e| {
+            EvalError::BlackBoxFailure(format!(
+                "Failed to connect to IPC daemon at '{}': {}. Ensure the persistent daemon is running.",
+                addr_str, e
+            ))
+        })?;
+
+        let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(3)));
+        let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(3)));
+
+        let mut reader = BufReader::new(stream.try_clone().map_err(|e| {
+            EvalError::DomainError(format!("Failed to clone socket stream: {}", e))
+        })?);
+        let mut writer = stream;
+
+        // Serialize inputs to JSON payload
+        let mut json_str = String::from("{");
+        let mut first = true;
+        let mut keys: Vec<&String> = inputs.values.keys().collect();
+        keys.sort();
+        for k in keys {
+            if let Some(v) = inputs.values.get(k) {
+                if !first {
+                    json_str.push_str(", ");
+                }
+                use std::fmt::Write as FmtWrite;
+                let _ = write!(json_str, "\"{}\": {}", k, v);
+                first = false;
+            }
+        }
+        if let Ok(f_idx) = std::env::var("AVEN_FLIGHT_INDEX") {
+            if !first {
+                json_str.push_str(", ");
+            }
+            json_str.push_str(&format!("\"flight_index\": {}", f_idx));
+            first = false;
+        }
+        if let Ok(cs) = std::env::var("AVEN_FLIGHT_CALLSIGN") {
+            if !first {
+                json_str.push_str(", ");
+            }
+            json_str.push_str(&format!("\"callsign\": \"{}\"", cs));
+        }
+        json_str.push_str("}\n");
+
+        // Send query to daemon
+        writer.write_all(json_str.as_bytes()).map_err(|e| {
+            EvalError::DomainError(format!("Failed to send query to IPC daemon: {}", e))
+        })?;
+        writer.flush().map_err(|e| {
+            EvalError::DomainError(format!("Failed to flush IPC socket: {}", e))
+        })?;
+
+        // Read response line
+        let mut response_line = String::new();
+        reader.read_line(&mut response_line).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to read response from IPC daemon: {}", e))
+        })?;
+
+        let elapsed_us = t_start.elapsed().as_secs_f64() * 1_000_000.0;
+        let trimmed = response_line.trim();
+
+        if trimmed.is_empty() {
+            return Err(EvalError::BlackBoxFailure(format!(
+                "IPC daemon at '{}' closed connection without returning a response",
+                addr_str
+            )));
+        }
+
+        if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
+            return Err(EvalError::MalformedOutput(format!(
+                "Malformed output: IPC daemon response must be a JSON object '{{...}}', found: '{}'",
+                trimmed
+            )));
+        }
+
+        let backend_id = parse_json_string(trimmed, "backend_id")
+            .unwrap_or_else(|| self.backend_id.clone());
+
+        if let Some(err_msg) = parse_json_string(trimmed, "error") {
+            return Err(EvalError::BlackBoxFailure(format!(
+                "IPC daemon '{}' reported error: {}",
+                backend_id, err_msg
+            )));
+        }
+
+        let parsed_numbers = parse_json_object_numbers(trimmed);
+        if parsed_numbers.is_empty() {
+            return Err(EvalError::MalformedOutput(format!(
+                "Malformed output: IPC daemon '{}' returned no numeric key-value pairs",
+                backend_id
+            )));
+        }
+
+        // Schema validation: ensure required keys exist
+        for req in &self.required_keys {
+            if !parsed_numbers.contains_key(req) {
+                return Err(EvalError::MalformedOutput(format!(
+                    "Schema validation failed: IPC daemon '{}' omitted required numeric field '{}'",
+                    backend_id, req
+                )));
+            }
+        }
+
+        let timestamp_ms = parse_json_u64(trimmed, "timestamp_ms")
+            .or_else(|| parse_json_u64(trimmed, "timestamp"));
+        let ttl_ms = parse_json_u64(trimmed, "ttl_ms")
+            .or_else(|| parse_json_float(trimmed, "ttl").map(|s| (s * 1000.0) as u64));
+        let warnings = parse_json_string_array(trimmed, "warnings");
+
+        let mut out_values = inputs.values.clone();
+        out_values.extend(parsed_numbers);
+        if !out_values.contains_key("value") {
+            let first_val = out_values.values().next().copied().unwrap_or(0.0);
+            out_values.insert("value".to_string(), first_val);
+        }
+
+        Ok(EvalResult {
+            values: out_values,
+            backend_id,
+            solve_time_us: elapsed_us,
+            timestamp_ms,
+            ttl_ms,
+            warnings,
+        })
+    }
+
+    fn name(&self) -> &str {
+        &self.backend_id
+    }
+}
+
 /// Extracts all numeric key-value pairs from a flat JSON object string.
 pub fn parse_json_object_numbers(json: &str) -> HashMap<String, f64> {
     let mut map = HashMap::new();

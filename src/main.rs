@@ -431,128 +431,150 @@ fn execute_module(
         }
     }
 
-    // Execute external evaluators if declared via 'using external(...)'
+    // Execute external or persistent IPC evaluators if declared via 'using external(...)' or 'using ipc(...)'
     for blk in &module.blocks {
-        if let BackendDecl::External { command, args } = &blk.backend {
-            let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-            let mut ext_eval = evaluator::ExternalEvaluator::new(command, &arg_refs);
-            if let Some(dir) = working_dir {
-                ext_eval = ext_eval.with_working_dir(dir);
-            }
+        let is_external = matches!(&blk.backend, BackendDecl::External { .. });
+        let is_ipc = matches!(&blk.backend, BackendDecl::Ipc { .. });
+        if !is_external && !is_ipc {
+            continue;
+        }
 
-            // Collect expected required keys for this block from equations and solve constraints
-            let mut defined_in_block = std::collections::HashSet::new();
-            for eq in &blk.equations {
-                defined_in_block.insert(eq.lhs.clone());
-            }
+        // Collect expected required keys for this block from equations and solve constraints
+        let mut defined_in_block = std::collections::HashSet::new();
+        for eq in &blk.equations {
+            defined_in_block.insert(eq.lhs.clone());
+        }
 
-            let mut required_keys = Vec::new();
-            for eq in &blk.equations {
-                for v in eq.rhs.vars() {
-                    if !env.contains_key(&v)
-                        && !defined_in_block.contains(&v)
-                        && !required_keys.contains(&v)
+        let mut required_keys = Vec::new();
+        for eq in &blk.equations {
+            for v in eq.rhs.vars() {
+                if !env.contains_key(&v)
+                    && !defined_in_block.contains(&v)
+                    && !required_keys.contains(&v)
+                {
+                    required_keys.push(v);
+                }
+            }
+        }
+        for solve in &module.solves {
+            if solve.target == blk.name || solve.targets.contains(&blk.name) {
+                for c in &solve.constraints {
+                    if !env.contains_key(&c.lhs)
+                        && !defined_in_block.contains(&c.lhs)
+                        && !required_keys.contains(&c.lhs)
                     {
-                        required_keys.push(v);
+                        required_keys.push(c.lhs.clone());
                     }
-                }
-            }
-            for solve in &module.solves {
-                if solve.target == blk.name || solve.targets.contains(&blk.name) {
-                    for c in &solve.constraints {
-                        if !env.contains_key(&c.lhs)
-                            && !defined_in_block.contains(&c.lhs)
-                            && !required_keys.contains(&c.lhs)
+                    for v in c.rhs.vars() {
+                        if !env.contains_key(&v)
+                            && !defined_in_block.contains(&v)
+                            && !required_keys.contains(&v)
                         {
-                            required_keys.push(c.lhs.clone());
-                        }
-                        for v in c.rhs.vars() {
-                            if !env.contains_key(&v)
-                                && !defined_in_block.contains(&v)
-                                && !required_keys.contains(&v)
-                            {
-                                required_keys.push(v);
-                            }
+                            required_keys.push(v);
                         }
                     }
                 }
             }
-            ext_eval = ext_eval.with_required_keys(&required_keys);
+        }
 
-            let mut varmap = evaluator::VarMap::new();
-            for (k, v) in &env {
-                varmap.set(k, *v);
+        let mut varmap = evaluator::VarMap::new();
+        for (k, v) in &env {
+            varmap.set(k, *v);
+        }
+
+        let (eval_res, backend_type) = match &blk.backend {
+            BackendDecl::External { command, args } => {
+                let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+                let mut ext_eval = evaluator::ExternalEvaluator::new(command, &arg_refs);
+                if let Some(dir) = working_dir {
+                    ext_eval = ext_eval.with_working_dir(dir);
+                }
+                ext_eval = ext_eval.with_required_keys(&required_keys);
+                if verbose {
+                    println!(
+                        "Executing external evaluator '{}' for relation '{}'...",
+                        command, blk.name
+                    );
+                }
+                (ext_eval.evaluate(&varmap), "external")
             }
-            if verbose {
-                println!(
-                    "Executing external evaluator '{}' for relation '{}'...",
-                    command, blk.name
-                );
+            BackendDecl::Ipc { endpoint } => {
+                let ipc_eval = evaluator::IpcEvaluator::new(endpoint)
+                    .with_required_keys(&required_keys);
+                if verbose {
+                    println!(
+                        "Connecting to persistent IPC evaluator at '{}' for relation '{}'...",
+                        endpoint, blk.name
+                    );
+                }
+                (ipc_eval.evaluate(&varmap), "ipc")
             }
-            match ext_eval.evaluate(&varmap) {
-                Ok(res) => {
-                    if verbose {
-                        println!(
-                            "  [external] {} settled in {:.1} µs (backend: {})",
-                            blk.name, res.solve_time_us, res.backend_id
-                        );
-                    }
-                    let now_ms = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_millis() as u64)
-                        .unwrap_or(0);
+            BackendDecl::Native => unreachable!(),
+        };
 
-                    for (k, v) in res.values {
-                        if !env.contains_key(&k) {
-                            seq += 1;
-                            env.insert(k.clone(), v);
+        match eval_res {
+            Ok(res) => {
+                if verbose {
+                    println!(
+                        "  [{}] {} settled in {:.1} µs (backend: {})",
+                        backend_type, blk.name, res.solve_time_us, res.backend_id
+                    );
+                }
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
 
-                            let is_stale = if let Some(ttl) = res.ttl_ms {
-                                if ttl == 0 {
+                for (k, v) in res.values {
+                    if !env.contains_key(&k) {
+                        seq += 1;
+                        env.insert(k.clone(), v);
+
+                        let is_stale = if let Some(ttl) = res.ttl_ms {
+                            if ttl == 0 {
+                                if !stale_facts.contains(&k) {
+                                    stale_facts.push(k.clone());
+                                }
+                                true
+                            } else if let Some(ts) = res.timestamp_ms {
+                                if now_ms > ts + ttl {
                                     if !stale_facts.contains(&k) {
                                         stale_facts.push(k.clone());
                                     }
                                     true
-                                } else if let Some(ts) = res.timestamp_ms {
-                                    if now_ms > ts + ttl {
-                                        if !stale_facts.contains(&k) {
-                                            stale_facts.push(k.clone());
-                                        }
-                                        true
-                                    } else {
-                                        false
-                                    }
                                 } else {
                                     false
                                 }
                             } else {
                                 false
-                            };
+                            }
+                        } else {
+                            false
+                        };
 
-                            let metadata = ledger::FactMetadata {
-                                timestamp_ms: res.timestamp_ms,
-                                ttl_ms: res.ttl_ms,
-                                is_stale,
-                                warnings: res.warnings.clone(),
-                            };
+                        let metadata = ledger::FactMetadata {
+                            timestamp_ms: res.timestamp_ms,
+                            ttl_ms: res.ttl_ms,
+                            is_stale,
+                            warnings: res.warnings.clone(),
+                        };
 
-                            ledger.append(Fact {
-                                seq,
-                                tick: 0,
-                                kind: "derived".to_string(),
-                                name: k,
-                                value: v,
-                                causes: Vec::new(),
-                                origin: format!("external: {}", res.backend_id),
-                                metadata: Some(metadata),
-                            });
-                        }
+                        ledger.append(Fact {
+                            seq,
+                            tick: 0,
+                            kind: "derived".to_string(),
+                            name: k,
+                            value: v,
+                            causes: Vec::new(),
+                            origin: format!("{}: {}", backend_type, res.backend_id),
+                            metadata: Some(metadata),
+                        });
                     }
                 }
-                Err(e) => {
-                    eprintln!("External evaluation failed for block '{}': {}", blk.name, e);
-                    process::exit(1);
-                }
+            }
+            Err(e) => {
+                eprintln!("{} evaluation failed for block '{}': {}", backend_type, blk.name, e);
+                process::exit(1);
             }
         }
     }

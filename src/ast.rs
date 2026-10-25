@@ -194,6 +194,9 @@ pub enum BackendDecl {
         command: String,
         args: Vec<String>,
     },
+    Ipc {
+        endpoint: String,
+    },
 }
 
 #[derive(Debug, Clone)]

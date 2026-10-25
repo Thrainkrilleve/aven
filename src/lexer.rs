@@ -13,6 +13,7 @@ pub enum TokenKind {
     KwMaximize,
     KwUsing,
     KwExternal,
+    KwIpc,
     KwInt,
 
     // Literals & Identifiers
@@ -350,6 +351,7 @@ impl<'a> Lexer<'a> {
             "with" => TokenKind::KwWith,
             "using" => TokenKind::KwUsing,
             "external" => TokenKind::KwExternal,
+            "ipc" => TokenKind::KwIpc,
             "unit" => TokenKind::KwUnit,
             "signal" => TokenKind::KwSignal,
             "minimize" => TokenKind::KwMinimize,

@@ -367,7 +367,7 @@ def evaluate_single_flight(avenc_exe, model_path, root, flight_idx, snapshot_pat
 
     # Callsign extraction: regex from backend_id in trace with expected_callsign fallback
     callsign = None
-    m_cs = re.search(r"backend:\s*mesh_([A-Za-z0-9]+)", combined)
+    m_cs = re.search(r"backend:\s*(?:mesh|ipc)_([A-Za-z0-9]+)", combined)
     if m_cs:
         cand = m_cs.group(1).strip()
         if cand and cand != "00000000":
@@ -412,6 +412,7 @@ def main():
     parser.add_argument("--report", type=str, default="evaluations/flight_mesh/flight_mesh_summary_report.md", help="Output report")
     parser.add_argument("--summary-only", action="store_true", help="Compile report from existing ledger")
     parser.add_argument("--clean", action="store_true", help="Truncate ledger before benchmark run to ensure pure sample")
+    parser.add_argument("--model", type=str, default="evaluations/flight_mesh/flight_mesh_ipc.aven", help="Aven model to evaluate")
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parent.parent.parent
@@ -457,7 +458,7 @@ def main():
                 print("Error: Aven executable not found.")
                 sys.exit(1)
 
-    model_path = root / "evaluations" / "flight_mesh" / "flight_mesh.aven"
+    model_path = Path(args.model) if Path(args.model).is_absolute() else root / args.model
     ledger_path.parent.mkdir(parents=True, exist_ok=True)
     cache_dir = root / "evaluations" / "flight_mesh" / ".cache"
 

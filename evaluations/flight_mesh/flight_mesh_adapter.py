@@ -18,7 +18,6 @@ import os
 import re
 import sys
 import time
-import urllib.request
 from pathlib import Path
 
 # Local disk cache for bulk responses to respect public API rate limits
@@ -96,6 +95,8 @@ def fetch_cached_json(cache_name: str, url: str, ttl_sec: float = 30.0):
                     return data
         except Exception:
             pass
+
+    import urllib.request
 
     req = urllib.request.Request(url, headers={"User-Agent": "AvenFlightMeshOrchestrator/1.0"})
     try:

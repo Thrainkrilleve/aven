@@ -228,8 +228,34 @@ impl Parser {
                 let command = args.remove(0);
                 Ok(BackendDecl::External { command, args })
             }
+            TokenKind::KwIpc => {
+                self.take(); // consume 'ipc'
+                self.expect(&TokenKind::LeftParen, "'('")?;
+                let endpoint = match self.peek().kind.clone() {
+                    TokenKind::Str(s) => {
+                        self.take();
+                        s
+                    }
+                    _ => {
+                        let (t_line, t_col, t_text) = {
+                            let t = self.peek();
+                            (t.line, t.col, t.text.clone())
+                        };
+                        return Err(ParseError {
+                            message: format!(
+                                "expected string literal address in ipc(...) declaration (e.g. ipc(\"127.0.0.1:9090\")), found '{}'",
+                                t_text
+                            ),
+                            line: t_line,
+                            col: t_col,
+                        });
+                    }
+                };
+                self.expect(&TokenKind::RightParen, "')'")?;
+                Ok(BackendDecl::Ipc { endpoint })
+            }
             _ => Err(ParseError {
-                message: format!("expected 'external(...)', found '{}'", tok_text),
+                message: format!("expected 'external(...)' or 'ipc(...)', found '{}'", tok_text),
                 line: tok_line,
                 col: tok_col,
             }),

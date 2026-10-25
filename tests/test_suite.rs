@@ -737,7 +737,7 @@ fn test_first_class_external_relation_syntax_and_autobinding() {
                 seed: 42,
             }
         }
-        BackendDecl::Native => OrchestratorConfig::default(),
+        BackendDecl::Native | BackendDecl::Ipc { .. } => OrchestratorConfig::default(),
     };
 
     let orchestrator = Orchestrator::from_config(&config, blk.equations.clone());
@@ -761,6 +761,32 @@ fn test_first_class_external_relation_syntax_and_autobinding() {
     assert!(pt.is_feasible);
     assert_eq!(pt.diagnostics.backend_trace, vec!["flame_eval"]);
     assert!(pt.vars.get("value").is_some());
+}
+
+#[test]
+fn test_first_class_ipc_relation_syntax() {
+    use avenc::ast::BackendDecl;
+    use avenc::lexer::Lexer;
+    use avenc::parser::Parser;
+
+    let source = r#"
+relation TelemetryStream using ipc("127.0.0.1:9090") {
+    ambient_temp_k = surface_temp_k - (0.0065 * baro_altitude_m)
+}
+"#;
+    let tokens = Lexer::new(source).tokenize().expect("Tokenize failed");
+    let module = Parser::new(tokens)
+        .parse_module("test_ipc")
+        .expect("IPC relation parsing failed");
+    assert_eq!(module.blocks.len(), 1);
+    let blk = &module.blocks[0];
+    assert_eq!(blk.name, "TelemetryStream");
+    match &blk.backend {
+        BackendDecl::Ipc { endpoint } => {
+            assert_eq!(endpoint, "127.0.0.1:9090");
+        }
+        other => panic!("Expected BackendDecl::Ipc, got {:?}", other),
+    }
 }
 
 #[test]
