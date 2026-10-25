@@ -344,6 +344,8 @@ pub struct ExecutionResult {
     pub is_actionable: bool,
     pub stale_facts: Vec<String>,
     pub error: Option<solver::SolverError>,
+    /// "proven" / "local" when an objective was optimized
+    pub optimality: Option<&'static str>,
 }
 
 // Exit codes documented in wiki/Compiler-Toolchain-avenc.md §4
@@ -424,11 +426,20 @@ fn cmd_run(path: &str, allow_stale: bool, json: bool, ledger_out: Option<&str>) 
         } else {
             "settled"
         };
+        let optimality = match res.optimality {
+            Some(o) => format!("\"{}\"", o),
+            None => "null".to_string(),
+        };
         let fields: Vec<String> = sorted_keys
             .iter()
             .map(|k| format!("\"{}\": {}", k, res.env[*k]))
             .collect();
-        println!("{{\"status\": \"{}\", \"env\": {{{}}}}}", status, fields.join(", "));
+        println!(
+            "{{\"status\": \"{}\", \"optimality\": {}, \"env\": {{{}}}}}",
+            status,
+            optimality,
+            fields.join(", ")
+        );
         if res.diagnosis.is_some() {
             process::exit(EXIT_ERROR);
         }
@@ -607,6 +618,12 @@ fn cmd_build(
         }
         println!("Use --emit-c to view the emitted C code or -o <out.c> to save.");
     }
+}
+
+/// Whether the optimizer proved its result globally optimal, from its trace.
+fn optimality_of(trace: &[String]) -> Option<&'static str> {
+    let line = trace.iter().rev().find(|l| l.starts_with("[optimize]") && l.contains("objective ="))?;
+    Some(if line.contains("(proven optimal)") { "proven" } else { "local" })
 }
 
 fn execute_module(
@@ -862,6 +879,7 @@ fn execute_module(
             is_actionable: stale_facts.is_empty(),
             stale_facts,
             error: Some(e),
+            optimality: None,
         };
     }
 
@@ -976,6 +994,7 @@ fn execute_module(
                     is_actionable: stale_facts.is_empty(),
                     stale_facts,
                     error: Some(e),
+                    optimality: None,
                 };
             }
 
@@ -987,6 +1006,7 @@ fn execute_module(
                 is_actionable,
                 stale_facts,
                 error: None,
+                optimality: optimality_of(&solver.trace),
             }
         }
         Err(solver::SolverError::UnderDetermined(diag)) => {
@@ -1001,6 +1021,7 @@ fn execute_module(
                 is_actionable,
                 stale_facts,
                 error: None,
+                optimality: optimality_of(&solver.trace),
             }
         }
         Err(e) => {
@@ -1014,6 +1035,7 @@ fn execute_module(
                 is_actionable,
                 stale_facts,
                 error: Some(e),
+                optimality: None,
             }
         }
     }

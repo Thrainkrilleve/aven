@@ -61,7 +61,9 @@ def run_avenc(src):
         return "error", {}, p.stderr.strip()
     if out and out[-1].startswith("{"):
         doc = json.loads(out[-1])
-        return doc["status"], doc["env"], p.stderr.strip()
+        env = doc["env"]
+        env["__optimality"] = doc.get("optimality")
+        return doc["status"], env, p.stderr.strip()
     return "error", {}, (p.stderr.strip() or p.stdout.strip())[-300:]
 
 
@@ -356,8 +358,12 @@ def run_minlp(args):
                 verdict, info = "INFEASIBLE_ANSWER", f"k={k}"
             else:
                 got = cost_of([round(v) for v in k])
-                verdict = "ok" if got <= best[0] + 1e-6 * (1 + abs(best[0])) else "SUBOPTIMAL"
-                info = f"aven k={k} cost={got} vs optimum {best}"
+                optimal = got <= best[0] + 1e-6 * (1 + abs(best[0]))
+                proven = env.get("__optimality") == "proven"
+                verdict = "ok" if optimal else ("FALSE_PROOF" if proven else "SUBOPTIMAL")
+                if optimal:
+                    tally["proven optimal" if proven else "unproven"] = tally.get("proven optimal" if proven else "unproven", 0) + 1
+                info = f"aven k={k} cost={got} vs optimum {best} ({env.get('__optimality')})"
         tally[verdict] = tally.get(verdict, 0) + 1
         if verdict != "ok":
             record_failure("minlp", args.seed, case, src, f"optimum {best}", verdict, info)
@@ -410,7 +416,12 @@ def run_qp(args):
                     verdict, info = "INFEASIBLE_ANSWER", f"x={x} outside box"
                 else:
                     aven_obj = f(x)
-                    verdict = "ok" if aven_obj <= ref_obj + 1e-4 * (1 + abs(ref_obj)) else "SUBOPTIMAL"
+                    optimal = aven_obj <= ref_obj + 1e-4 * (1 + abs(ref_obj))
+                    proven = env.get("__optimality") == "proven"
+                    verdict = "ok" if optimal else ("FALSE_PROOF" if proven else "SUBOPTIMAL")
+                    if optimal:
+                        key = "proven optimal" if proven else "unproven"
+                        tally[key] = tally.get(key, 0) + 1
                     info = f"aven x={x} obj={aven_obj}"
         tally[verdict] = tally.get(verdict, 0) + 1
         if verdict != "ok":
@@ -541,11 +552,13 @@ def main():
             tally = run_qp(args)
         else:
             tally = run_eqsys(args)
+        notes = {k: tally.pop(k) for k in ("proven optimal", "unproven") if k in tally}
         total = sum(tally.values())
         ok = tally.get("ok", 0)
         any_fail |= ok != total
         summary = ", ".join(f"{v} {kk}" for kk, v in sorted(tally.items(), key=lambda t: -t[1]))
-        print(f"{k:9s} {ok}/{total} agree with reference - {summary}")
+        extra = f" ({', '.join(f'{v} {kk}' for kk, v in notes.items())})" if notes else ""
+        print(f"{k:9s} {ok}/{total} agree with reference - {summary}{extra}")
     sys.exit(1 if any_fail else 0)
 
 

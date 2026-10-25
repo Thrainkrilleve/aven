@@ -1201,23 +1201,641 @@ fn solve_nonlinear(p: &Problem) -> Outcome {
         }
     }
 
-    match best {
-        Some((x, objective)) => Outcome::Optimal {
+    // Certify (or improve) the result with interval branch-and-bound when the box is finite
+    let local_method = if int_idx.is_empty() {
+        "augmented Lagrangian".to_string()
+    } else {
+        format!(
+            "augmented Lagrangian branch-and-bound ({} nodes)",
+            nodes.min(NODE_LIMIT)
+        )
+    };
+    match interval_global_search(&c, &lo0, &hi0, &int_idx, best.clone()) {
+        Certificate::Optimal {
             x,
             objective,
-            proven: false,
-            method: if int_idx.is_empty() {
-                "augmented Lagrangian (local optimum)".to_string()
-            } else {
-                format!(
-                    "augmented Lagrangian branch-and-bound ({} nodes, local optimum)",
-                    nodes.min(NODE_LIMIT)
-                )
-            },
+            nodes: boxes,
+        } => Outcome::Optimal {
+            x,
+            objective,
+            proven: true,
+            method: format!(
+                "{}, certified by interval branch-and-bound ({} boxes, gap <= {:e} relative)",
+                local_method, boxes, INTERVAL_GAP
+            ),
         },
-        None => Outcome::Infeasible(
-            "no feasible point found from any starting point (nonlinear model; not a proof of infeasibility)"
-                .to_string(),
-        ),
+        Certificate::Infeasible { nodes: boxes } => Outcome::Infeasible(format!(
+            "no point satisfies every constraint (proven by interval branch-and-bound over {} boxes)",
+            boxes
+        )),
+        Certificate::Unproven(improved) => match improved.or(best) {
+            Some((x, objective)) => Outcome::Optimal {
+                x,
+                objective,
+                proven: false,
+                method: format!("{} (local optimum)", local_method),
+            },
+            None => Outcome::Infeasible(
+                "no feasible point found from any starting point (nonlinear model; not a proof of infeasibility)"
+                    .to_string(),
+            ),
+        },
     }
+}
+
+// ===========================================================================
+// Interval branch-and-bound: global optimality / infeasibility certificates
+// ===========================================================================
+
+/// Relative optimality gap the interval search certifies.
+const INTERVAL_GAP: f64 = 1e-6;
+
+/// A closed interval [lo, hi]; may be unbounded.
+#[derive(Debug, Clone, Copy)]
+struct Iv {
+    lo: f64,
+    hi: f64,
+}
+
+impl Iv {
+    const ENTIRE: Iv = Iv {
+        lo: f64::NEG_INFINITY,
+        hi: f64::INFINITY,
+    };
+
+    fn point(v: f64) -> Iv {
+        Iv { lo: v, hi: v }
+    }
+
+    /// Widen outward by a few ulps so floating-point rounding cannot make a bound too tight.
+    fn widen(self) -> Iv {
+        if self.lo.is_nan() || self.hi.is_nan() {
+            return Iv::ENTIRE;
+        }
+        // One IEEE operation errs by at most half an ulp of its result, so a relative pad
+        // (plus the smallest subnormal) is sound, and an exact zero stays exact. Padding a
+        // zero would turn 0 * inf into -inf and destroy bounds on unbounded variables.
+        let pad = |v: f64| {
+            if v == 0.0 {
+                0.0
+            } else {
+                4.0 * f64::EPSILON * v.abs() + 5e-324
+            }
+        };
+        Iv {
+            lo: self.lo - pad(self.lo),
+            hi: self.hi + pad(self.hi),
+        }
+    }
+
+    fn contains_zero(&self) -> bool {
+        self.lo <= 0.0 && self.hi >= 0.0
+    }
+
+    fn monotone(self, f: impl Fn(f64) -> f64) -> Iv {
+        Iv {
+            lo: f(self.lo),
+            hi: f(self.hi),
+        }
+    }
+
+    fn mul(a: Iv, b: Iv) -> Iv {
+        // 0 * inf is taken as 0: a zero endpoint times an unbounded factor
+        let m = |x: f64, y: f64| if x == 0.0 || y == 0.0 { 0.0 } else { x * y };
+        let c = [m(a.lo, b.lo), m(a.lo, b.hi), m(a.hi, b.lo), m(a.hi, b.hi)];
+        Iv {
+            lo: c.iter().cloned().fold(f64::INFINITY, f64::min),
+            hi: c.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
+        }
+    }
+
+    fn powi(a: Iv, n: i32) -> Iv {
+        if n == 0 {
+            return Iv::point(1.0);
+        }
+        if n < 0 {
+            let p = Iv::powi(a, -n);
+            if p.contains_zero() {
+                return Iv::ENTIRE;
+            }
+            return Iv {
+                lo: 1.0 / p.hi,
+                hi: 1.0 / p.lo,
+            };
+        }
+        if n % 2 == 1 {
+            return a.monotone(|v| v.powi(n));
+        }
+        let (l, h) = (a.lo.abs().powi(n), a.hi.abs().powi(n));
+        if a.contains_zero() {
+            Iv { lo: 0.0, hi: l.max(h) }
+        } else {
+            Iv {
+                lo: l.min(h),
+                hi: l.max(h),
+            }
+        }
+    }
+
+    /// Range of sin over the interval (cos uses a phase shift).
+    fn sin(a: Iv) -> Iv {
+        use std::f64::consts::{FRAC_PI_2, TAU};
+        if !(a.hi - a.lo < TAU) {
+            return Iv { lo: -1.0, hi: 1.0 };
+        }
+        let mut lo = a.lo.sin().min(a.hi.sin());
+        let mut hi = a.lo.sin().max(a.hi.sin());
+        // maxima at pi/2 + 2k pi, minima at -pi/2 + 2k pi
+        let has = |center: f64| {
+            let k = ((a.lo - center) / TAU).ceil();
+            center + k * TAU <= a.hi
+        };
+        if has(FRAC_PI_2) {
+            hi = 1.0;
+        }
+        if has(-FRAC_PI_2) {
+            lo = -1.0;
+        }
+        Iv { lo, hi }
+    }
+}
+
+impl CExpr {
+    /// Guaranteed enclosure of the expression's values over the box `b`.
+    fn ieval(&self, b: &[Iv]) -> Iv {
+        let r = match self {
+            CExpr::Const(c) => Iv::point(*c),
+            CExpr::Var(i) => b[*i],
+            CExpr::Neg(a) => {
+                let v = a.ieval(b);
+                Iv { lo: -v.hi, hi: -v.lo }
+            }
+            CExpr::Bin(op, l, r) => {
+                let (x, y) = (l.ieval(b), r.ieval(b));
+                match op {
+                    BinaryOp::Add => Iv {
+                        lo: x.lo + y.lo,
+                        hi: x.hi + y.hi,
+                    },
+                    BinaryOp::Sub => Iv {
+                        lo: x.lo - y.hi,
+                        hi: x.hi - y.lo,
+                    },
+                    BinaryOp::Mul => Iv::mul(x, y),
+                    BinaryOp::Div => {
+                        if y.contains_zero() {
+                            Iv::ENTIRE
+                        } else {
+                            Iv::mul(
+                                x,
+                                Iv {
+                                    lo: 1.0 / y.hi,
+                                    hi: 1.0 / y.lo,
+                                },
+                            )
+                        }
+                    }
+                    BinaryOp::Pow => {
+                        // Exponents are read from the expression: an interval of a constant
+                        // has been widened and would no longer look like an exact power
+                        let exponent = match r.as_ref() {
+                            CExpr::Const(p) => Some(*p),
+                            _ => None,
+                        };
+                        if let Some(p) = exponent.filter(|p| p.fract() == 0.0 && p.abs() < 64.0) {
+                            Iv::powi(x, p as i32)
+                        } else if let Some(p) = exponent.filter(|_| x.lo >= 0.0) {
+                            // real exponent on a non-negative base: monotone in the base
+                            if p >= 0.0 {
+                                x.monotone(|v| v.powf(p))
+                            } else if x.lo > 0.0 {
+                                Iv {
+                                    lo: x.hi.powf(p),
+                                    hi: x.lo.powf(p),
+                                }
+                            } else {
+                                Iv::ENTIRE
+                            }
+                        } else {
+                            Iv::ENTIRE
+                        }
+                    }
+                }
+            }
+            CExpr::Call(f, arg) => {
+                let a = arg.ieval(b);
+                let snap = |v: f64, r: f64| {
+                    if (v - v.round()).abs() < 1e-9 {
+                        v.round()
+                    } else {
+                        r
+                    }
+                };
+                let sign = |v: f64| {
+                    if v > 0.0 {
+                        1.0
+                    } else if v < 0.0 {
+                        -1.0
+                    } else {
+                        0.0
+                    }
+                };
+                match f.as_str() {
+                    "sqrt" if a.hi >= 0.0 => Iv {
+                        lo: a.lo.max(0.0).sqrt(),
+                        hi: a.hi.sqrt(),
+                    },
+                    "exp" => a.monotone(f64::exp),
+                    "log" | "ln" if a.hi > 0.0 => Iv {
+                        lo: if a.lo > 0.0 {
+                            a.lo.ln()
+                        } else {
+                            f64::NEG_INFINITY
+                        },
+                        hi: a.hi.ln(),
+                    },
+                    "abs" => {
+                        let (l, h) = (a.lo.abs(), a.hi.abs());
+                        if a.contains_zero() {
+                            Iv { lo: 0.0, hi: l.max(h) }
+                        } else {
+                            Iv {
+                                lo: l.min(h),
+                                hi: l.max(h),
+                            }
+                        }
+                    }
+                    "ceil" => Iv {
+                        lo: snap(a.lo, a.lo.ceil()),
+                        hi: snap(a.hi, a.hi.ceil()),
+                    },
+                    "floor" => Iv {
+                        lo: snap(a.lo, a.lo.floor()),
+                        hi: snap(a.hi, a.hi.floor()),
+                    },
+                    "round" => a.monotone(f64::round),
+                    "sign" => a.monotone(sign),
+                    "sin" => Iv::sin(a),
+                    "cos" => Iv::sin(Iv {
+                        lo: a.lo + std::f64::consts::FRAC_PI_2,
+                        hi: a.hi + std::f64::consts::FRAC_PI_2,
+                    }),
+                    "tan" => {
+                        // monotone between poles; a pole inside gives no bound
+                        let k = ((a.lo - std::f64::consts::FRAC_PI_2) / std::f64::consts::PI).ceil();
+                        if std::f64::consts::FRAC_PI_2 + k * std::f64::consts::PI <= a.hi {
+                            Iv::ENTIRE
+                        } else {
+                            a.monotone(f64::tan)
+                        }
+                    }
+                    _ => Iv::ENTIRE,
+                }
+            }
+        };
+        match self {
+            CExpr::Const(_) | CExpr::Var(_) => r,
+            _ => r.widen(),
+        }
+    }
+}
+
+enum Certificate {
+    /// Global optimum within INTERVAL_GAP over the whole box
+    Optimal {
+        x: Vec<f64>,
+        objective: f64,
+        nodes: usize,
+    },
+    /// No point of the box satisfies the constraints
+    Infeasible { nodes: usize },
+    /// Search incomplete; carries a better point if one was found
+    Unproven(Option<(Vec<f64>, f64)>),
+}
+
+/// Interval branch-and-bound over [lo, hi]. Discards boxes whose objective lower bound cannot
+/// beat the incumbent by more than the gap, or whose constraints cannot all hold; a finished
+/// search certifies the incumbent as globally optimal (or the model as infeasible).
+fn interval_global_search(
+    c: &Compiled,
+    lo: &[f64],
+    hi: &[f64],
+    int_idx: &[usize],
+    incumbent: Option<(Vec<f64>, f64)>,
+) -> Certificate {
+    const BOX_LIMIT: usize = 200_000;
+    let n = lo.len();
+    let is_int: Vec<bool> = (0..n).map(|j| int_idx.contains(&j)).collect();
+    let feasible = |x: &[f64]| {
+        let scale = 1.0 + x.iter().map(|v| v.abs()).fold(0.0, f64::max);
+        c.infeasibility(x) <= 1e-7 * scale
+    };
+    // Matches the point-feasibility tolerance (1e-7 relative to the largest coordinate), so
+    // pruning never discards a point the solver would accept
+    let feas_tol = |b: &[Iv]| {
+        let big = b
+            .iter()
+            .flat_map(|v| [v.lo.abs(), v.hi.abs()])
+            .fold(0.0, f64::max);
+        if big.is_finite() { 1e-7 * (1.0 + big) } else { 0.0 }
+    };
+
+    let mut best = incumbent;
+    let mut improved = false;
+    let mut certified = true;
+    let root: Vec<Iv> = (0..n)
+        .map(|j| {
+            if is_int[j] {
+                Iv {
+                    lo: (lo[j] - 1e-9).ceil(),
+                    hi: (hi[j] + 1e-9).floor(),
+                }
+            } else {
+                Iv { lo: lo[j], hi: hi[j] }
+            }
+        })
+        .collect();
+    let mut stack = vec![root];
+    let mut nodes = 0usize;
+
+    while let Some(mut bx) = stack.pop() {
+        nodes += 1;
+        if nodes > BOX_LIMIT {
+            certified = false;
+            break;
+        }
+        if bx.iter().any(|v| v.lo > v.hi) {
+            continue;
+        }
+        // Constraint propagation (with the objective cut) shrinks the box, or proves it empty
+        let tol = feas_tol(&bx);
+        if !contract(c, &mut bx, &is_int, tol, best.as_ref().map(|(_, ub)| *ub)) {
+            continue;
+        }
+        if bx.iter().any(|v| !v.lo.is_finite() || !v.hi.is_finite()) {
+            // Unbounded even after propagation: no finite search can cover it
+            certified = false;
+            continue;
+        }
+        let tol = feas_tol(&bx);
+        // Constraint pruning
+        if c.eqs.iter().any(|h| {
+            let v = h.f.ieval(&bx);
+            v.lo > tol || v.hi < -tol
+        }) {
+            continue;
+        }
+        if (0..c.ineqs.len()).any(|i| {
+            let (g, strict) = &c.ineqs[i];
+            g.f.ieval(&bx).lo + if *strict { STRICT_MARGIN } else { 0.0 } > tol
+        }) {
+            continue;
+        }
+        // Objective bound pruning
+        let bound = c.obj.as_ref().map_or(Iv::point(0.0), |o| o.f.ieval(&bx));
+        if let Some((_, ub)) = &best {
+            if bound.lo >= ub - INTERVAL_GAP * (1.0 + ub.abs()) {
+                continue;
+            }
+        }
+        // Probe the box centre for a better feasible point
+        let mid: Vec<f64> = (0..n)
+            .map(|j| {
+                let m = 0.5 * (bx[j].lo + bx[j].hi);
+                if is_int[j] {
+                    m.round().clamp(bx[j].lo, bx[j].hi)
+                } else {
+                    m
+                }
+            })
+            .collect();
+        if feasible(&mid) {
+            let f = c.objective(&mid);
+            let better = best
+                .as_ref()
+                .map_or(true, |(_, ub)| f < *ub - 1e-12 * (1.0 + ub.abs()));
+            if f.is_finite() && better {
+                best = Some((mid.clone(), f));
+                improved = true;
+                if bound.lo >= f - INTERVAL_GAP * (1.0 + f.abs()) {
+                    continue;
+                }
+            }
+        }
+        // Split the widest dimension (integers split between whole numbers)
+        let (j, width) = (0..n)
+            .map(|j| (j, bx[j].hi - bx[j].lo))
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+            .unwrap_or((0, 0.0));
+        let tiny = 1e-10 * (1.0 + bx[j].lo.abs().max(bx[j].hi.abs()));
+        if (is_int[j] && width < 0.5) || (!is_int[j] && width <= tiny) {
+            // A point-sized box that can be neither pruned nor improved: the remaining doubt
+            // is numerical, so the search cannot certify
+            certified = false;
+            continue;
+        }
+        let (mut left, mut right) = (bx.clone(), bx);
+        if is_int[j] {
+            let cut = (0.5 * (left[j].lo + left[j].hi)).floor();
+            left[j].hi = cut;
+            right[j].lo = cut + 1.0;
+        } else {
+            let m = 0.5 * (left[j].lo + left[j].hi);
+            left[j].hi = m;
+            right[j].lo = m;
+        }
+        stack.push(right);
+        stack.push(left);
+    }
+
+    if !certified {
+        return Certificate::Unproven(if improved { best } else { None });
+    }
+    match best {
+        Some((x, objective)) => Certificate::Optimal {
+            x,
+            objective,
+            nodes,
+        },
+        None => Certificate::Infeasible { nodes },
+    }
+}
+
+// ---------------------------------------------------------------------------
+// HC4 constraint propagation: narrows a box to the values a constraint allows
+// ---------------------------------------------------------------------------
+
+impl Iv {
+    fn meet(self, o: Iv) -> Iv {
+        Iv {
+            lo: self.lo.max(o.lo),
+            hi: self.hi.min(o.hi),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.lo > self.hi
+    }
+
+    fn excludes_zero(&self) -> bool {
+        self.lo > 0.0 || self.hi < 0.0
+    }
+
+    /// Division for narrowing; None when the divisor contains zero (no information)
+    fn div(a: Iv, b: Iv) -> Option<Iv> {
+        if b.excludes_zero() {
+            Some(Iv::mul(
+                a,
+                Iv {
+                    lo: 1.0 / b.hi,
+                    hi: 1.0 / b.lo,
+                },
+            ))
+        } else {
+            None
+        }
+    }
+}
+
+impl CExpr {
+    /// Backward pass of HC4Revise: given that this expression's value lies in `z`, narrows
+    /// the variables in `b`. Returns false if the box holds no consistent value.
+    fn narrow(&self, b: &mut [Iv], z: Iv) -> bool {
+        let z = z.meet(self.ieval(b));
+        if z.is_empty() {
+            return false;
+        }
+        match self {
+            CExpr::Const(_) => true,
+            CExpr::Var(i) => {
+                b[*i] = b[*i].meet(z);
+                !b[*i].is_empty()
+            }
+            CExpr::Neg(a) => a.narrow(b, Iv { lo: -z.hi, hi: -z.lo }),
+            CExpr::Bin(op, l, r) => {
+                let (lv, rv) = (l.ieval(b), r.ieval(b));
+                match op {
+                    BinaryOp::Add => {
+                        l.narrow(b, Iv { lo: z.lo - rv.hi, hi: z.hi - rv.lo }.widen())
+                            && r.narrow(b, {
+                                let lv = l.ieval(b);
+                                Iv { lo: z.lo - lv.hi, hi: z.hi - lv.lo }.widen()
+                            })
+                    }
+                    BinaryOp::Sub => {
+                        l.narrow(b, Iv { lo: z.lo + rv.lo, hi: z.hi + rv.hi }.widen())
+                            && r.narrow(b, {
+                                let lv = l.ieval(b);
+                                Iv { lo: lv.lo - z.hi, hi: lv.hi - z.lo }.widen()
+                            })
+                    }
+                    BinaryOp::Mul => {
+                        if let Some(t) = Iv::div(z, rv) {
+                            if !l.narrow(b, t.widen()) {
+                                return false;
+                            }
+                        }
+                        match Iv::div(z, l.ieval(b)) {
+                            Some(t) => r.narrow(b, t.widen()),
+                            None => true,
+                        }
+                    }
+                    BinaryOp::Div => {
+                        // l = z * r ; r = l / z
+                        if !l.narrow(b, Iv::mul(z, rv).widen()) {
+                            return false;
+                        }
+                        match Iv::div(l.ieval(b), z) {
+                            Some(t) if lv.excludes_zero() => r.narrow(b, t.widen()),
+                            _ => true,
+                        }
+                    }
+                    BinaryOp::Pow => {
+                        let n = match r.as_ref() {
+                            CExpr::Const(c) if c.fract() == 0.0 && *c >= 1.0 && *c < 64.0 => *c as i32,
+                            _ => return true,
+                        };
+                        let root = |v: f64| {
+                            if v.is_infinite() {
+                                v
+                            } else if v < 0.0 {
+                                -(-v).powf(1.0 / n as f64)
+                            } else {
+                                v.powf(1.0 / n as f64)
+                            }
+                        };
+                        if n % 2 == 1 {
+                            l.narrow(b, Iv { lo: root(z.lo), hi: root(z.hi) }.widen())
+                        } else {
+                            if z.hi < 0.0 {
+                                return false;
+                            }
+                            let m = root(z.hi);
+                            l.narrow(b, Iv { lo: -m, hi: m }.widen())
+                        }
+                    }
+                }
+            }
+            CExpr::Call(f, a) => match f.as_str() {
+                "exp" => {
+                    if z.hi <= 0.0 {
+                        return false;
+                    }
+                    let lo = if z.lo > 0.0 { z.lo.ln() } else { f64::NEG_INFINITY };
+                    a.narrow(b, Iv { lo, hi: z.hi.ln() }.widen())
+                }
+                "ln" | "log" => a.narrow(b, z.monotone(f64::exp).widen()),
+                "sqrt" => {
+                    if z.hi < 0.0 {
+                        return false;
+                    }
+                    let lo = z.lo.max(0.0);
+                    a.narrow(b, Iv { lo: lo * lo, hi: z.hi * z.hi }.widen())
+                }
+                _ => true,
+            },
+        }
+    }
+}
+
+/// Narrows `b` with every constraint (and the objective cut `obj <= cut`) until it stops
+/// shrinking. Integer variables are rounded inward. Returns false if the box is infeasible.
+fn contract(c: &Compiled, b: &mut [Iv], is_int: &[bool], tol: f64, cut: Option<f64>) -> bool {
+    for _ in 0..30 {
+        let before: Vec<Iv> = b.to_vec();
+        for h in &c.eqs {
+            if !h.f.narrow(b, Iv { lo: -tol, hi: tol }) {
+                return false;
+            }
+        }
+        for (g, strict) in &c.ineqs {
+            let limit = tol - if *strict { STRICT_MARGIN } else { 0.0 };
+            if !g.f.narrow(b, Iv { lo: f64::NEG_INFINITY, hi: limit }) {
+                return false;
+            }
+        }
+        if let (Some(o), Some(ub)) = (&c.obj, cut) {
+            if !o.f.narrow(b, Iv { lo: f64::NEG_INFINITY, hi: ub }) {
+                return false;
+            }
+        }
+        for j in 0..b.len() {
+            if is_int[j] {
+                b[j].lo = (b[j].lo - 1e-9).ceil();
+                b[j].hi = (b[j].hi + 1e-9).floor();
+            }
+            if b[j].is_empty() {
+                return false;
+            }
+        }
+        let shrank = b.iter().zip(&before).any(|(n, o)| {
+            let w_old = o.hi - o.lo;
+            let w_new = n.hi - n.lo;
+            (w_old.is_infinite() && w_new.is_finite()) || w_new < 0.99 * w_old
+        });
+        if !shrank {
+            break;
+        }
+    }
+    true
 }
