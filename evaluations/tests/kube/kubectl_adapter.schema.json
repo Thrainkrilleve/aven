@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "KubernetesClusterCapacityContract",
+  "type": "object",
+  "required": [
+    "node_count",
+    "total_cpu_cores",
+    "total_mem_gi",
+    "cpu_headroom",
+    "mem_headroom"
+  ],
+  "properties": {
+    "node_count": { "type": "number", "minimum": 1.0 },
+    "total_cpu_cores": { "type": "number", "minimum": 1.0 },
+    "total_mem_gi": { "type": "number", "minimum": 1.0 },
+    "cpu_headroom": { "type": "number", "minimum": 0.0 },
+    "mem_headroom": { "type": "number", "minimum": 0.0 }
+  }
+}

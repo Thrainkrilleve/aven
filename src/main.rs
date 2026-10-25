@@ -441,10 +441,18 @@ fn execute_module(
             }
 
             // Collect expected required keys for this block from equations and solve constraints
+            let mut defined_in_block = std::collections::HashSet::new();
+            for eq in &blk.equations {
+                defined_in_block.insert(eq.lhs.clone());
+            }
+
             let mut required_keys = Vec::new();
             for eq in &blk.equations {
                 for v in eq.rhs.vars() {
-                    if !env.contains_key(&v) && !required_keys.contains(&v) {
+                    if !env.contains_key(&v)
+                        && !defined_in_block.contains(&v)
+                        && !required_keys.contains(&v)
+                    {
                         required_keys.push(v);
                     }
                 }
@@ -452,11 +460,17 @@ fn execute_module(
             for solve in &module.solves {
                 if solve.target == blk.name || solve.targets.contains(&blk.name) {
                     for c in &solve.constraints {
-                        if !env.contains_key(&c.lhs) && !required_keys.contains(&c.lhs) {
+                        if !env.contains_key(&c.lhs)
+                            && !defined_in_block.contains(&c.lhs)
+                            && !required_keys.contains(&c.lhs)
+                        {
                             required_keys.push(c.lhs.clone());
                         }
                         for v in c.rhs.vars() {
-                            if !env.contains_key(&v) && !required_keys.contains(&v) {
+                            if !env.contains_key(&v)
+                                && !defined_in_block.contains(&v)
+                                && !required_keys.contains(&v)
+                            {
                                 required_keys.push(v);
                             }
                         }

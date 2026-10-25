@@ -2111,3 +2111,147 @@ fn test_concurrent_50_threads_frontier_cache_and_simultaneous_stale_taint() {
     assert!(why_coupled.contains("total_cpu_cores"));
     assert!(why_coupled.contains("total_mem_gi"));
 }
+
+#[test]
+fn test_json_schema_file_validation_and_bound_enforcement() {
+    use avenc::evaluator::JsonSchema;
+    use std::collections::HashMap;
+
+    let schema_str = r#"{
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "title": "ClusterContract",
+        "type": "object",
+        "required": ["total_cpu_cores", "node_count"],
+        "properties": {
+            "total_cpu_cores": { "type": "number", "minimum": 1.0, "maximum": 256.0 },
+            "node_count": { "type": "number", "minimum": 1.0 }
+        }
+    }"#;
+
+    let schema = JsonSchema::parse(schema_str);
+    assert_eq!(schema.required.len(), 2);
+    assert_eq!(
+        schema
+            .number_properties
+            .get("total_cpu_cores")
+            .unwrap()
+            .minimum,
+        Some(1.0)
+    );
+    assert_eq!(
+        schema
+            .number_properties
+            .get("total_cpu_cores")
+            .unwrap()
+            .maximum,
+        Some(256.0)
+    );
+
+    // 1. Valid numbers
+    let mut valid_map = HashMap::new();
+    valid_map.insert("total_cpu_cores".to_string(), 32.0);
+    valid_map.insert("node_count".to_string(), 4.0);
+    assert!(schema.validate(&valid_map, "mock-backend").is_ok());
+
+    // 2. Below minimum bound
+    let mut invalid_min = HashMap::new();
+    invalid_min.insert("total_cpu_cores".to_string(), 0.5);
+    invalid_min.insert("node_count".to_string(), 4.0);
+    let err = schema.validate(&invalid_min, "mock-backend").unwrap_err();
+    assert!(err.to_string().contains("is below schema minimum 1.0000"));
+
+    // 3. Exceeds maximum bound
+    let mut invalid_max = HashMap::new();
+    invalid_max.insert("total_cpu_cores".to_string(), 512.0);
+    invalid_max.insert("node_count".to_string(), 4.0);
+    let err_max = schema.validate(&invalid_max, "mock-backend").unwrap_err();
+    assert!(
+        err_max
+            .to_string()
+            .contains("exceeds schema maximum 256.0000")
+    );
+
+    // 4. Missing required property
+    let mut missing_prop = HashMap::new();
+    missing_prop.insert("total_cpu_cores".to_string(), 32.0);
+    let err_missing = schema.validate(&missing_prop, "mock-backend").unwrap_err();
+    assert!(
+        err_missing
+            .to_string()
+            .contains("missing required property 'node_count'")
+    );
+}
+
+#[test]
+fn test_microbenchmark_frontier_rebuild_under_mutating_external_facts() {
+    use avenc::ast::*;
+    use avenc::evaluator::{NativeEvaluator, Orchestrator, VarMap};
+    use std::sync::Arc;
+
+    let eq = Equation {
+        lhs: "active_cpu".to_string(),
+        op: ConstraintOp::Equal,
+        rhs: Expr::Bin(
+            BinaryOp::Mul,
+            Box::new(Expr::Var("target_pods".to_string())),
+            Box::new(Expr::Num(0.5)),
+        ),
+        original_text: "active_cpu = target_pods * 0.5".to_string(),
+        line: 1,
+        col: 1,
+    };
+
+    let evaluator = Arc::new(NativeEvaluator::new(vec![eq]));
+    let orchestrator = Orchestrator::new(evaluator);
+    let objectives = vec!["target_pods".to_string(), "active_cpu".to_string()];
+
+    let mut rebuild_durations_us = Vec::new();
+    let iterations = 30;
+
+    for i in 0..iterations {
+        // Mutating external facts: each iteration provides a distinct telemetry input
+        let mut inputs = VarMap::new();
+        inputs.set("traffic_rate", 1000.0 + (i as f64 * 500.0));
+        inputs.set("target_pods", 10.0 + (i as f64));
+
+        let t0 = std::time::Instant::now();
+        let frontier = orchestrator
+            .solve_pareto(&inputs, "target_pods", (10.0, 50.0), 5, &objectives)
+            .expect("Frontier solve must succeed");
+        let elapsed_us = t0.elapsed().as_secs_f64() * 1_000_000.0;
+        rebuild_durations_us.push(elapsed_us);
+
+        assert_eq!(frontier.len(), 6);
+    }
+
+    // Cache should hold all 30 distinct spec hashes
+    let cache_len = orchestrator.frontier_cache.lock().unwrap().len();
+    assert_eq!(cache_len, iterations);
+
+    // Warm cache hit test: second solve with identical inputs is instant
+    let mut repeat_inputs = VarMap::new();
+    repeat_inputs.set("traffic_rate", 1000.0);
+    repeat_inputs.set("target_pods", 10.0);
+
+    let t_warm = std::time::Instant::now();
+    let warm_frontier = orchestrator
+        .solve_pareto(&repeat_inputs, "target_pods", (10.0, 50.0), 5, &objectives)
+        .expect("Cached solve must succeed");
+    let warm_elapsed_us = t_warm.elapsed().as_secs_f64() * 1_000_000.0;
+
+    assert_eq!(warm_frontier.len(), 6);
+    // Warm retrieval should be sub-10 microseconds
+    assert!(
+        warm_elapsed_us < 50.0,
+        "Warm cache retrieval took {:.2} µs (expected < 50 µs)",
+        warm_elapsed_us
+    );
+
+    let avg_rebuild_us: f64 = rebuild_durations_us.iter().sum::<f64>() / iterations as f64;
+    // Internal solve should comfortably be < 200 µs (0.2 ms)
+    assert!(
+        avg_rebuild_us < 200.0,
+        "Average frontier rebuild took {:.2} µs (expected < 200 µs)",
+        avg_rebuild_us
+    );
+}

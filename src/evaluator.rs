@@ -279,6 +279,7 @@ pub struct ExternalEvaluator {
     pub working_dir: Option<std::path::PathBuf>,
     pub timeout: Option<std::time::Duration>,
     pub required_keys: Vec<String>,
+    pub schema_path: Option<std::path::PathBuf>,
 }
 
 impl ExternalEvaluator {
@@ -290,6 +291,7 @@ impl ExternalEvaluator {
             working_dir: None,
             timeout: None,
             required_keys: Vec::new(),
+            schema_path: None,
         }
     }
 
@@ -311,6 +313,104 @@ impl ExternalEvaluator {
     pub fn with_required_keys(mut self, keys: &[String]) -> Self {
         self.required_keys = keys.to_vec();
         self
+    }
+
+    pub fn with_schema_path<P: Into<std::path::PathBuf>>(mut self, path: P) -> Self {
+        self.schema_path = Some(path.into());
+        self
+    }
+}
+
+/// Lightweight JSON Schema contract validator for external adapter stdout (pure std).
+#[derive(Clone, Debug, Default)]
+pub struct JsonSchema {
+    pub required: Vec<String>,
+    pub number_properties: HashMap<String, NumberPropertySchema>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct NumberPropertySchema {
+    pub minimum: Option<f64>,
+    pub maximum: Option<f64>,
+}
+
+impl JsonSchema {
+    pub fn parse(schema_str: &str) -> Self {
+        let required = parse_json_string_array(schema_str, "required");
+        let mut number_properties = HashMap::new();
+
+        // Scan "properties": { ... }
+        if let Some(pos) = schema_str.find("\"properties\"") {
+            let rest = &schema_str[pos + 12..];
+            if let Some(brace_start) = rest.find('{') {
+                let inside = &rest[brace_start + 1..];
+                for key in &required {
+                    let prop_needle = format!("\"{}\"", key);
+                    if let Some(kpos) = inside.find(&prop_needle) {
+                        let prop_block = &inside[kpos + prop_needle.len()..];
+                        if let Some(bstart) = prop_block.find('{') {
+                            if let Some(bend) = prop_block[bstart..].find('}') {
+                                let block = &prop_block[bstart..bstart + bend + 1];
+                                let min_val = parse_json_float(block, "minimum");
+                                let max_val = parse_json_float(block, "maximum");
+                                number_properties.insert(
+                                    key.clone(),
+                                    NumberPropertySchema {
+                                        minimum: min_val,
+                                        maximum: max_val,
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Self {
+            required,
+            number_properties,
+        }
+    }
+
+    pub fn validate(
+        &self,
+        parsed_numbers: &HashMap<String, f64>,
+        backend_id: &str,
+    ) -> Result<(), EvalError> {
+        // 1. Check required keys
+        for req in &self.required {
+            if !parsed_numbers.contains_key(req) {
+                return Err(EvalError::MalformedOutput(format!(
+                    "JSON Schema validation failed for adapter '{}': missing required property '{}'",
+                    backend_id, req
+                )));
+            }
+        }
+
+        // 2. Check property constraints (minimum / maximum bounds)
+        for (prop, schema) in &self.number_properties {
+            if let Some(&val) = parsed_numbers.get(prop) {
+                if let Some(min) = schema.minimum {
+                    if val < min {
+                        return Err(EvalError::MalformedOutput(format!(
+                            "JSON Schema validation failed for adapter '{}': property '{}' value {:.4} is below schema minimum {:.4}",
+                            backend_id, prop, val, min
+                        )));
+                    }
+                }
+                if let Some(max) = schema.maximum {
+                    if val > max {
+                        return Err(EvalError::MalformedOutput(format!(
+                            "JSON Schema validation failed for adapter '{}': property '{}' value {:.4} exceeds schema maximum {:.4}",
+                            backend_id, prop, val, max
+                        )));
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -424,13 +524,42 @@ impl Evaluator for ExternalEvaluator {
             )));
         }
 
-        // Schema validation: verify all required keys are present
-        for req in &self.required_keys {
-            if !parsed_numbers.contains_key(req) {
-                return Err(EvalError::MalformedOutput(format!(
-                    "Schema validation failed: external adapter '{}' omitted required numeric field '{}'",
-                    backend_id, req
-                )));
+        // Discover or use explicit JSON Schema file if present
+        let mut active_schema: Option<JsonSchema> = None;
+        if let Some(sp) = &self.schema_path {
+            if let Ok(content) = std::fs::read_to_string(sp) {
+                active_schema = Some(JsonSchema::parse(&content));
+            }
+        } else {
+            // Auto-discover sibling schema file: e.g. adapter.py -> adapter.schema.json
+            for arg in &self.args {
+                let p = std::path::Path::new(arg);
+                let schema_sibling = p.with_extension("schema.json");
+                let candidate = if let Some(dir) = &self.working_dir {
+                    dir.join(&schema_sibling)
+                } else {
+                    schema_sibling
+                };
+                if candidate.exists() {
+                    if let Ok(content) = std::fs::read_to_string(&candidate) {
+                        active_schema = Some(JsonSchema::parse(&content));
+                        break;
+                    }
+                }
+            }
+        }
+
+        if let Some(ref schema) = active_schema {
+            schema.validate(&parsed_numbers, &backend_id)?;
+        } else {
+            // Fallback: Validate all required_keys are present
+            for req in &self.required_keys {
+                if !parsed_numbers.contains_key(req) {
+                    return Err(EvalError::MalformedOutput(format!(
+                        "Schema validation failed: external adapter '{}' omitted required numeric field '{}'",
+                        backend_id, req
+                    )));
+                }
             }
         }
 

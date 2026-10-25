@@ -59,8 +59,16 @@ def main():
     time.sleep(5)
     print_cluster_status()
 
-    # Stage 3: Operator Safety Freeze (Lock scaling during incident)
-    print("\n--- STAGE 3: Operator Safety Freeze Switch (aven.sh/freeze=true) ---")
+    # Stage 3: Freshness Enforcement / Stale Telemetry Protection
+    print("\n--- STAGE 3: Freshness Enforcement / Stale Telemetry Injection ---")
+    print("Simulating telemetry failure (TTL=0 injected during network partition)...")
+    out_stale = run_cmd("python f:/aven/k8s/controller/aven_controller.py 50000 --inject-stale")
+    print(f"Controller Audit Log:\n  {out_stale}")
+    print("Cluster state (stale metrics rejected, replicas held constant):")
+    print_cluster_status()
+
+    # Stage 4: Operator Safety Freeze (Lock scaling during incident)
+    print("\n--- STAGE 4: Operator Safety Freeze Switch (aven.sh/freeze=true) ---")
     print("Operator activates emergency freeze annotation:")
     run_cmd(f"kubectl annotate deployment/{DEPLOYMENT} -n {NAMESPACE} aven.sh/freeze=true --overwrite")
     print("Simulating traffic drop to 5,000 req/s while frozen...")
@@ -69,8 +77,8 @@ def main():
     print("Cluster state (frozen, no pods terminated):")
     print_cluster_status()
 
-    # Stage 4: Unfreeze & Cooldown
-    print("\n--- STAGE 4: Unfreeze & Normal Cooldown ---")
+    # Stage 5: Unfreeze & Cooldown
+    print("\n--- STAGE 5: Unfreeze & Normal Cooldown ---")
     print("Operator removes freeze annotation:")
     run_cmd(f"kubectl annotate deployment/{DEPLOYMENT} -n {NAMESPACE} aven.sh/freeze=false --overwrite")
     print("Controller reconciles to calm baseline (10,000 req/s)...")

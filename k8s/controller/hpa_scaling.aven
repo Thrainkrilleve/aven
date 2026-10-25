@@ -1,0 +1,15 @@
+// k8s/controller/hpa_scaling.aven
+// Declarative multi-objective Kubernetes HPA Capacity Model
+// Solves target pod replicas with queueing headroom ceiling
+
+relation WorkloadCapacity using external("python", "k8s/controller/workload_adapter.py") {
+    raw_workers = (reqs_per_second * avg_latency_ms) / 1000.0
+    allocated_workers = ceil(raw_workers / target_utilization)
+    target_pods = ceil(allocated_workers / workers_per_pod)
+}
+
+solve WorkloadCapacity with {
+    workers_per_pod = 100.0
+    target_utilization = 0.70
+    target_pods >= 1.0
+}
