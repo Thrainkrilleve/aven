@@ -32,7 +32,9 @@ relation AtmosphericDynamics using external("python", "evaluations/weather/nws_a
      "backend_id": "nws_metar_kden"
    }
    ```
-4. `avenc` validates the response against the sibling schema (`nws_adapter.schema.json`), records the SHA-256 provenance hash, and binds the values into the relational solver.
+4. `avenc` validates the response against the sibling schema (`nws_adapter.schema.json`), records the SHA-256 of the raw output, and binds the values into the relational solver.
+   - Only fields the model uses become variables: fields that appear in an equation, constraint or objective, or are declared with `signal name`. Other numeric fields (e.g. an adapter's own timing) are ignored and listed in verbose output. `timestamp_ms` / `ttl_ms` are freshness metadata, never variables.
+   - A variable the block needs but the adapter omits is an error only if the block's equations cannot derive it from what the adapter returned.
 
 ### 1.3 Latency Characteristics
 - Subprocess mode provides complete isolation, making it ideal for scheduled cron checks, CI runs, and batch operations.

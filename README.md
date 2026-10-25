@@ -2,7 +2,7 @@
 
 **Declarative Invariant Programming & Relational Multi-Physics Engine**
 
-[![Build & Test](https://img.shields.io/badge/tests-44%20passed-brightgreen.svg)](#testing--verification)
+[![Build & Test](https://img.shields.io/badge/tests-78%20passed-brightgreen.svg)](#testing--verification)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-pure%20Rust%20std-blue.svg)](#zero-dependency-architecture)
 [![Throughput](https://img.shields.io/badge/IPC%20Throughput-352.9%20solves%2Fsec-orange.svg)](#high-performance-persistent-ipc-daemon)
 [![Median Latency](https://img.shields.io/badge/Median%20Latency-9.7%20ms-purple.svg)](#high-performance-persistent-ipc-daemon)
@@ -20,7 +20,7 @@ Unlike traditional imperative languages where functions require hardcoded input/
 - **Pure-Rust Zero-Dependency Core:** The `avenc` compiler, lexer, parser, AST, evaluator, and fact ledger are written strictly in standard library Rust (`std`), requiring zero external crates.
 - **Direction-Pinning & C Code Generation (`avenc emit-c`):** Transpile declarative Aven blocks into standalone, branchless ANSI C code with no runtime solver overhead, suitable for bare-metal embedded targets and hard real-time control loops.
 - **First-Class External Adapters & Persistent IPC Daemons:** Connect relations to real-world sensors, telemetry streams, and black-box simulators via standard I/O subshells (`using external(...)`) or high-throughput persistent TCP/IPC daemons (`using ipc(...)`) executing in $< 3\,\text{ms}$.
-- **Immutable Fact Ledgers with Cryptographic Provenance:** Every solved fact is stamped into an append-only ledger carrying SHA-256 provenance hashes, cycle timestamps, and explicit time-to-live (`ttl_ms`) freshness tracking (`DECISION BLOCKED` / `HOLD` triggers automatically on stale data).
+- **Tamper-Evident Fact Ledgers:** Every settled fact extends a SHA-256 hash chain (optionally HMAC-signed with `AVEN_LEDGER_KEY`); facts from adapters record the SHA-256 of the adapter's raw output. `avenc run --ledger out.jsonl` writes the audit log and `avenc verify-ledger out.jsonl` detects any edit, deletion, reordering or truncation. Time-to-live (`ttl_ms`) freshness tracking blocks decisions on stale data (`DECISION BLOCKED`, exit code 3).
 - **Multi-Objective Pareto Optimization:** Explore multi-dimensional tradeoff frontiers across competing constraints (e.g., latency vs. compute capacity vs. cost).
 
 ---
@@ -62,7 +62,7 @@ Unlike traditional imperative languages where functions require hardcoded input/
 ┌──────────────────────────────────────────────────────────────┐
 │             Cryptographic Fact Ledger & Provenance           │
 │  - Immutable append-only audit trail                         │
-│  - SHA-256 payload integrity hashing                         │
+│  - SHA-256 hash chain, HMAC signing, payload hashes          │
 │  - Freshness (TTL) enforcement & stale state protection      │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -152,7 +152,7 @@ Fusing real-time commercial transponder data from **OpenSky Network** (4,700+ ac
 
 - **In-Memory Physics Resolution:** $144.3\,\mu\text{s}$ compute time inside daemon.
 - **Round-Trip Loopback Settle:** $2.95\,\text{ms}$ total connection and solve duration.
-- **Enforced Safety Bounds:** Caught high-altitude commercial cruise violations ($> 43,000\,\text{ft}$) where linear tropospheric lapse cooled ambient air below safety envelope ($-80^\circ\text{C}$).
+- **Standard Atmosphere Verified:** Temperature, pressure and Mach number match an independent ISA computation for all 150 live aircraft checked, including 30 cruising above the 11 km tropopause (up to $43{,}000\,\text{ft}$); see `verify/live_atmosphere.py`. (An earlier model extended the tropospheric lapse rate above the tropopause and reported spurious $-80^\circ\text{C}$ bound violations at cruise altitude; that model error is fixed.)
 
 ### 8-Hour Overnight Weather Operations Monitor
 Continuous live validation across 5 major US airport hubs (Denver KDEN, Dallas KDFW, New York KJFK, Chicago KORD, Seattle KSEA):
@@ -221,9 +221,10 @@ f:\aven/
 │   ├── parser.rs                           # Recursive descent parser
 │   ├── evaluator.rs                        # Solver engine, SHA-256 hasher & IPC evaluator
 │   ├── codegen_c.rs                        # ANSI C code emitter
-│   ├── ledger.rs                           # Cryptographic fact ledger
+│   ├── optimize.rs                         # Simplex, nonlinear and interval branch-and-bound optimizer
+│   ├── ledger.rs                           # Hash-chained, signable fact ledger
 │   └── main.rs                             # CLI entrypoint & Pareto orchestrator
-├── tests/                                  # Integration test suite (44 unit tests)
+├── tests/                                  # Integration and documentation-claim tests (78)
 │   └── test_suite.rs                       # Comprehensive verification suite
 ├── examples/                               # Canonical domain specifications
 │   ├── aerodynamics.aven                   # Compressible flight dynamics
@@ -257,10 +258,23 @@ Aven includes a comprehensive test suite verifying forward evaluation, backward 
 cargo test
 ```
 ```text
-running 44 tests
-............................................
-test result: ok. 44 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.57s
+test result: ok. 29 passed; 0 failed   (tests/claims.rs: every documented claim)
+test result: ok. 49 passed; 0 failed   (tests/test_suite.rs)
 ```
+
+---
+
+### Verifying the claims
+
+`verify/` checks Aven against independent references (install `scipy` and `highspy` in a Python environment first):
+
+| Harness | What it proves |
+| :--- | :--- |
+| `verify/oracle.py all` | Answers match HiGHS and SciPy on random integer, linear, infeasible/unbounded, nonconvex-integer and smooth models; optimization results are reported `proven` only when certified |
+| `verify/c_diff.py` | `avenc emit-c` output compiles warning-free, is branchless, and matches `avenc run` exactly |
+| `verify/fuzz.py` | Malformed and adversarial input never crashes, panics or hangs |
+| `verify/ledger_tamper.py` | Every tampering technique on an audit log is detected |
+| `verify/live_atmosphere.py` | The flight model matches the standard atmosphere on live aircraft |
 
 ---
 

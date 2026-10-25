@@ -14,22 +14,27 @@ In Aven, variables are not mutable memory locations; they are **immutable settle
 pub struct Fact {
     pub seq: usize,                     // Global sequence number
     pub tick: usize,                    // Execution tick / cycle index
-    pub kind: String,                   // "observed", "derived", or "override"
+    pub kind: String,                   // "input", "derived", "effect" or "committed-effect"
     pub name: String,                   // Variable identifier
     pub value: f64,                     // Settled numerical value
-    pub causes: Vec<String>,            // Causal dependency list
-    pub origin: String,                 // Origin source (e.g. "ipc: mesh_UAL605")
-    pub metadata: Option<FactMetadata>, // Freshness & cryptographic signature
+    pub causes: Vec<usize>,             // Sequence numbers of the facts it was derived from
+    pub origin: String,                 // e.g. "= y + 1", "ipc: mesh_UAL605 sha256:…"
+    pub metadata: Option<FactMetadata>, // Freshness (timestamp, TTL, stale flag, warnings)
 }
 ```
 
 ---
 
-## 2. Cryptographic Provenance (SHA-256)
+## 2. Cryptographic Provenance and Tamper Evidence
 
-Every fact derived from an external sensor, IPC daemon, or relational evaluation carries a cryptographic SHA-256 fingerprint of the raw source payload:
-- **Zero External Crates:** Computed natively via Aven's standard-library FIPS 180-4 compliant SHA-256 implementation.
-- **Tamper Evidence:** Confirms that the external telemetry received by `avenc` matches the exact bytes emitted by the sensor adapter.
+All hashing uses Aven's own standard-library SHA-256 (FIPS 180-4 algorithm; not a FIPS-validated module).
+
+- **Payload fingerprints:** every fact received from an external adapter or IPC daemon records `sha256:<hash>` of the adapter's raw output in its origin, so it can be matched against the bytes the adapter emitted.
+- **Hash chain:** every appended fact extends a chain, `hash_i = SHA-256(hash_{i-1} ‖ canonical(fact_i))`, starting from 64 zeros. The canonical form covers every field, with the value as its exact bit pattern. Editing, deleting, reordering or inserting a fact changes every later hash. Inside `avenc` the ledger's facts are only reachable read-only.
+- **Signing:** with `AVEN_LEDGER_KEY` set, each chain hash is signed with HMAC-SHA256, and the log ends with a signed seal recording the fact count and head hash.
+- **Audit log:** `avenc run model.aven --ledger out.jsonl` writes one JSON object per fact (with `prev`, `hash` and, when signed, `sig`) followed by the seal. `avenc verify-ledger out.jsonl` recomputes everything and names the first broken line (exit 1).
+
+What this protects against: with a key, any modification, deletion, insertion, reordering or truncation of the log, even by someone who recomputes the whole chain. Without a key, any partial edit is detected, but someone who rewrites the entire log (chain and seal) cannot be detected — use a key, or record the head hash elsewhere. `verify/ledger_tamper.py` exercises each of these cases.
 
 ---
 
@@ -53,7 +58,9 @@ Aven natively enforces **Time-to-Live (TTL)**:
 
 ---
 
-## 4. Audit Trail Ledger Schema (JSONL)
+## 4. Monitor Audit Logs (JSONL)
+
+The evaluation harnesses below write their own per-cycle JSON Lines logs (different from the hash-chained `--ledger` output above):
 
 When running monitors or batch benchmarks (`overnight_monitor.py`, `stream_ringer.py`), Aven emits an append-only JSON Lines (`.jsonl`) audit log:
 
