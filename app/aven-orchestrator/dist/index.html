@@ -6,10 +6,10 @@
   <title>Aven Relational Orchestrator</title>
   <style>
     :root {
-      --bg: #090d16;
-      --panel: #111827;
-      --panel-alt: #172033;
-      --border: #243049;
+      --bg: #080c14;
+      --panel: #0e1524;
+      --panel-alt: #141d30;
+      --border: #222e47;
       --border-highlight: #38bdf8;
       --accent: #38bdf8;
       --accent-glow: rgba(56, 189, 248, 0.25);
@@ -41,7 +41,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      background: #060910;
+      background: #05080f;
     }
     .brand {
       display: flex;
@@ -49,8 +49,8 @@
       gap: 10px;
     }
     .logo-badge {
-      width: 26px;
-      height: 26px;
+      width: 28px;
+      height: 28px;
       background: linear-gradient(135deg, #0284c7, #38bdf8);
       border-radius: 6px;
       display: flex;
@@ -58,7 +58,7 @@
       justify-content: center;
       box-shadow: 0 0 12px var(--accent-glow);
       font-weight: 800;
-      font-size: 14px;
+      font-size: 15px;
       color: #fff;
     }
     header h1 {
@@ -92,6 +92,11 @@
       box-shadow: 0 0 8px var(--success);
       display: inline-block;
       margin-right: 4px;
+      animation: pulse-glow 2s infinite ease-in-out;
+    }
+    @keyframes pulse-glow {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.3); opacity: 0.6; }
     }
 
     /* Main layout */
@@ -111,7 +116,7 @@
       overflow-y: auto;
     }
     .panel {
-      padding: 16px;
+      padding: 14px 16px;
       border-bottom: 1px solid var(--border);
     }
     .panel-header {
@@ -128,7 +133,7 @@
       color: var(--muted);
     }
     select, input, textarea {
-      background: #0a0e17;
+      background: #080c14;
       color: var(--text);
       border: 1px solid var(--border);
       border-radius: 6px;
@@ -143,7 +148,7 @@
     }
     textarea {
       width: 100%;
-      height: 200px;
+      height: 190px;
       font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
       font-size: 11px;
       line-height: 1.5;
@@ -182,14 +187,21 @@
       padding: 3px 8px;
       font-size: 11px;
     }
+    button.danger {
+      background: var(--danger);
+      color: #fff;
+    }
+    button.danger:hover {
+      box-shadow: 0 0 10px var(--danger-glow);
+    }
 
-    /* Backend items */
+    /* Backend cards */
     .backend-card {
-      background: #0d121c;
+      background: #0a0f1a;
       border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 12px;
-      margin-bottom: 10px;
+      padding: 11px;
+      margin-bottom: 8px;
       transition: border-color 0.2s;
     }
     .backend-card:hover {
@@ -199,7 +211,7 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 6px;
+      margin-bottom: 5px;
     }
     .backend-name {
       font-weight: 600;
@@ -216,7 +228,7 @@
     .backend-desc {
       font-size: 11px;
       color: var(--muted);
-      margin-bottom: 8px;
+      margin-bottom: 7px;
       line-height: 1.35;
     }
     .backend-footer {
@@ -241,7 +253,7 @@
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      background: #0c101a;
+      background: #090e18;
     }
     .toolbar {
       padding: 10px 18px;
@@ -249,7 +261,7 @@
       display: flex;
       gap: 12px;
       align-items: center;
-      background: #090d16;
+      background: #060a12;
       flex-wrap: wrap;
     }
     .control-group {
@@ -267,7 +279,7 @@
     /* Tabs */
     .tab-bar {
       display: flex;
-      background: #090d16;
+      background: #060a12;
       border-bottom: 1px solid var(--border);
       padding: 0 16px;
       gap: 8px;
@@ -295,16 +307,16 @@
     /* Workspace Body */
     .workspace {
       flex: 1;
-      padding: 20px;
+      padding: 16px;
       overflow-y: auto;
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 14px;
     }
     .tab-pane {
       display: none;
       flex-direction: column;
-      gap: 16px;
+      gap: 14px;
       height: 100%;
     }
     .tab-pane.active {
@@ -313,14 +325,13 @@
 
     /* Chart Container */
     .chart-container {
-      background: #0e1422;
+      background: #0c1220;
       border: 1px solid var(--border);
       border-radius: 10px;
       padding: 16px;
       position: relative;
       display: flex;
       flex-direction: column;
-      min-height: 380px;
     }
     .chart-header {
       display: flex;
@@ -330,9 +341,10 @@
     }
     .stats-strip {
       display: flex;
-      gap: 16px;
+      gap: 12px;
       font-size: 11px;
       color: var(--muted);
+      flex-wrap: wrap;
     }
     .stat-badge {
       display: flex;
@@ -346,10 +358,9 @@
     .stat-badge b { color: #fff; }
     svg {
       width: 100%;
-      height: 320px;
-      background: #070a12;
+      background: #050811;
       border-radius: 6px;
-      border: 1px solid #1a2234;
+      border: 1px solid #1a243a;
     }
     .knee-legend {
       display: flex;
@@ -358,6 +369,7 @@
       font-size: 11px;
       color: var(--muted);
       align-items: center;
+      flex-wrap: wrap;
     }
     .legend-item {
       display: flex;
@@ -370,32 +382,75 @@
       border-radius: 50%;
     }
 
-    /* Diagnostics Grid */
+    /* KPI Cards */
     .diag-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
       gap: 12px;
     }
     .diag-card {
-      background: #0e1422;
+      background: #0c1220;
       border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 14px;
+      padding: 12px 14px;
       display: flex;
       flex-direction: column;
       gap: 6px;
+      position: relative;
+      overflow: hidden;
     }
     .diag-card-title {
-      font-size: 11px;
+      font-size: 10px;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.6px;
       color: var(--muted);
     }
     .diag-card-val {
-      font-size: 16px;
+      font-size: 18px;
       font-weight: 700;
       color: #fff;
-      font-family: ui-monospace, monospace;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+    .gauge-track {
+      width: 100%;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 4px;
+    }
+    .gauge-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width 0.3s ease;
+    }
+
+    /* Supervisor Invariant Banner */
+    .supervisor-banner {
+      padding: 10px 14px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: 500;
+      transition: all 0.3s ease;
+    }
+    .supervisor-banner.converged {
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: #34d399;
+    }
+    .supervisor-banner.alarm {
+      background: rgba(239, 68, 68, 0.16);
+      border: 1px solid rgba(239, 68, 68, 0.5);
+      color: #f87171;
+      animation: banner-flash 1.5s infinite;
+    }
+    @keyframes banner-flash {
+      0%, 100% { border-color: rgba(239, 68, 68, 0.5); }
+      50% { border-color: #ef4444; box-shadow: 0 0 12px rgba(239, 68, 68, 0.3); }
     }
 
     /* Settled Output Table */
@@ -403,32 +458,32 @@
       width: 100%;
       border-collapse: collapse;
       font-size: 12px;
-      background: #0e1422;
+      background: #0c1220;
       border: 1px solid var(--border);
       border-radius: 8px;
       overflow: hidden;
     }
     th, td {
-      padding: 8px 14px;
+      padding: 8px 12px;
       text-align: left;
       border-bottom: 1px solid var(--border);
     }
     th {
-      background: #090d16;
+      background: #060912;
       color: var(--muted);
       font-size: 11px;
       text-transform: uppercase;
       letter-spacing: 0.5px;
     }
     td.mono {
-      font-family: ui-monospace, monospace;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
       color: var(--accent);
     }
 
     /* Bottom Bar */
     .diagnostics-bar {
       padding: 8px 20px;
-      background: #060910;
+      background: #05080f;
       border-top: 1px solid var(--border);
       display: flex;
       align-items: center;
@@ -451,6 +506,21 @@
     .status-ok {
       color: var(--success);
       font-weight: 600;
+    }
+
+    /* Point Inspector Drawer */
+    #inspector-box {
+      background: #0b101c;
+      border: 1px solid #38bdf8;
+      border-radius: 8px;
+      padding: 12px 16px;
+      display: none;
+      box-shadow: 0 0 16px rgba(56, 189, 248, 0.15);
+      animation: fadeIn 0.2s ease;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
     }
 
     /* Tooltip */
@@ -481,6 +551,7 @@
     <div class="header-status">
       <span><span class="pulse-dot"></span> Core Engine Active</span>
       <span id="active-backend-indicator">Backend: <b>flame_eval</b></span>
+      <span id="live-stream-badge" style="font-size:11px; padding:2px 8px; border-radius:12px; background:rgba(255,255,255,0.06); color:var(--muted);">Stream: IDLE</span>
     </div>
   </header>
 
@@ -491,19 +562,20 @@
         <div class="panel-header">
           <span class="panel-title">Model Workspace</span>
           <select id="example-select" onchange="loadSelectedExample()" style="font-size:11px;">
-            <option value="flame">FlameTest (External)</option>
-            <option value="openplc">OpenPLC Manufacturing</option>
-            <option value="pendulum">Pendulum (Native)</option>
+            <option value="flame">FlameTest (External Hostile)</option>
+            <option value="openplc">OpenPLC Manufacturing Line</option>
+            <option value="server_capacity">Server Capacity (RHEL Little's Law)</option>
+            <option value="pendulum">Pendulum Dynamics (Native)</option>
           </select>
         </div>
         <textarea id="model-code" spellcheck="false">// Aven Relational Model — FlameTest with Pluggable Subprocess
 relation FlameTest using external("python", "flame_eval.py") {
-    value = 0.0;
+    value = 0.0
 }
 
-solve FlameTest {
-    x: 0.5,
-    y: -0.2
+solve FlameTest with {
+    x = 0.5
+    y = -0.2
 }
 </textarea>
         <div style="display:flex; gap:8px; margin-top:10px;">
@@ -518,7 +590,6 @@ solve FlameTest {
           <button class="secondary small" onclick="refreshBackends()">Refresh</button>
         </div>
         <div id="backend-list">
-          <!-- Backend cards populated by JS -->
           <div class="backend-card">
             <div class="backend-top">
               <span class="backend-name">FlameTest</span>
@@ -562,6 +633,7 @@ solve FlameTest {
       <div class="toolbar">
         <button onclick="handleSolve()">▶ Solve Point</button>
         <button class="secondary" onclick="handlePareto()">📈 Compute Pareto</button>
+        <button class="secondary" onclick="switchTab('industrial-tab'); toggleLiveStream();" id="btn-quick-stream">⚡ Live Stream Monitor</button>
 
         <div style="height:20px; width:1px; background:var(--border); margin:0 4px;"></div>
 
@@ -576,17 +648,17 @@ solve FlameTest {
 
         <div class="control-group">
           <label>x:</label>
-          <input type="number" id="input-x" value="0.5" step="0.1" style="width:70px;">
+          <input type="number" id="input-x" value="0.5" step="0.1" style="width:65px;">
         </div>
 
         <div class="control-group">
           <label>y:</label>
-          <input type="number" id="input-y" value="-0.2" step="0.1" style="width:70px;">
+          <input type="number" id="input-y" value="-0.2" step="0.1" style="width:65px;">
         </div>
 
         <div class="control-group">
           <label>Steps:</label>
-          <input type="number" id="input-steps" value="20" min="5" max="80" style="width:55px;">
+          <input type="number" id="input-steps" value="20" min="5" max="80" style="width:50px;">
         </div>
       </div>
 
@@ -594,7 +666,7 @@ solve FlameTest {
       <div class="tab-bar">
         <button class="tab-btn active" onclick="switchTab('pareto-tab')">Pareto Frontier & Knee</button>
         <button class="tab-btn" onclick="switchTab('diagnostics-tab')">Solve Point Diagnostics</button>
-        <button class="tab-btn" onclick="switchTab('industrial-tab')">OpenPLC Manufacturing</button>
+        <button class="tab-btn" onclick="switchTab('industrial-tab')">OpenPLC Stream Supervisor</button>
       </div>
 
       <!-- Main Workspace Panels -->
@@ -613,7 +685,7 @@ solve FlameTest {
             </div>
 
             <!-- SVG Chart -->
-            <svg id="pareto-svg" viewBox="0 0 800 320">
+            <svg id="pareto-svg" viewBox="0 0 800 320" style="height:320px;">
               <text x="400" y="160" fill="#64748b" text-anchor="middle" font-size="13">
                 Click "Compute Pareto" to generate trade-off frontier and detect knee point.
               </text>
@@ -622,7 +694,7 @@ solve FlameTest {
             <div class="knee-legend">
               <div class="legend-item">
                 <div class="legend-dot" style="background:#38bdf8; box-shadow:0 0 6px #38bdf8;"></div>
-                <span>Feasible Points</span>
+                <span>Feasible Points (Click to inspect)</span>
               </div>
               <div class="legend-item">
                 <div class="legend-dot" style="background:#ef4444;"></div>
@@ -632,6 +704,22 @@ solve FlameTest {
                 <div class="legend-dot" style="background:#f59e0b; box-shadow:0 0 8px #f59e0b;"></div>
                 <span style="color:#f59e0b; font-weight:600;">★ Knee Point (Optimal Balance)</span>
               </div>
+            </div>
+          </div>
+
+          <!-- Click-to-Inspect Drawer -->
+          <div id="inspector-box">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <span style="font-weight:700; color:#fff; font-size:12px;">🔍 Frontier Point Inspector</span>
+              <button class="secondary small" onclick="loadInspectedToPoint()">Copy to Point Solver</button>
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:10px; font-size:11px;">
+              <div>Point Index: <b id="insp-idx" style="color:#fff;">#0</b></div>
+              <div>x Value: <b id="insp-x" style="color:var(--accent);">0.000</b></div>
+              <div>Objective Value: <b id="insp-val" style="color:var(--accent);">0.000</b></div>
+              <div>Residual: <b id="insp-res" style="color:#fff;">0.000000</b></div>
+              <div>Spec Hash: <b id="insp-hash" style="color:var(--muted); font-family:monospace;">—</b></div>
+              <div>Status: <b id="insp-status" style="color:var(--success);">Converged</b></div>
             </div>
           </div>
         </div>
@@ -677,33 +765,130 @@ solve FlameTest {
           </div>
         </div>
 
-        <!-- OpenPLC Industrial Tab -->
+        <!-- OpenPLC Stream Supervisor Tab -->
         <div id="industrial-tab" class="tab-pane">
-          <div class="diag-grid">
-            <div class="diag-card">
-              <span class="diag-card-title">OpenPLC Runtime</span>
-              <span class="diag-card-val" style="color:var(--success);" id="plc-card-status">Online (v4.3.1)</span>
+          <!-- Streaming Header Control Bar -->
+          <div style="display:flex; justify-content:space-between; align-items:center; background:#0c1220; padding:12px 16px; border-radius:8px; border:1px solid var(--border); flex-wrap:wrap; gap:10px;">
+            <div style="display:flex; align-items:center; gap:12px;">
+              <button id="btn-stream-toggle" onclick="toggleLiveStream()" style="background:#10b981; color:#06140c;">▶ Start Stream Monitor</button>
+              <div class="control-group">
+                <label>Polling Rate:</label>
+                <select id="stream-rate-select" onchange="updateStreamInterval()" style="padding:4px 8px; font-size:11px;">
+                  <option value="500">500 ms (Fast)</option>
+                  <option value="1000" selected>1000 ms (Normal)</option>
+                  <option value="2000">2000 ms (Low CPU)</option>
+                </select>
+              </div>
+              <button class="secondary small" onclick="clearStreamHistory()">Clear History</button>
             </div>
-            <div class="diag-card">
-              <span class="diag-card-title">Modbus TCP</span>
-              <span class="diag-card-val" style="color:var(--accent);">Port 502</span>
-            </div>
-            <div class="diag-card">
-              <span class="diag-card-title">Scan Time</span>
-              <span class="diag-card-val">8.2 ms</span>
-            </div>
-            <div class="diag-card">
-              <span class="diag-card-title">Quality Index</span>
-              <span class="diag-card-val" style="color:#10b981;">99.4%</span>
+            <div style="display:flex; align-items:center; gap:10px; font-size:11px;">
+              <span>Total Ticks: <b id="stream-tick-counter" style="color:#fff;">0</b></span>
+              <span id="plc-stream-status-pill" class="status-badge status-ready" style="padding:3px 8px; border-radius:12px; background:rgba(255,255,255,0.06);">● Ready</span>
             </div>
           </div>
 
-          <div style="background:#0e1422; border:1px solid var(--border); border-radius:8px; padding:16px;">
-            <div style="font-weight:600; color:#fff; margin-bottom:8px;">Industrial Simulation State (test.st)</div>
-            <p style="font-size:12px; color:var(--muted); line-height:1.6;">
-              Aven coordinates industrial line parameters across IEC 61131-3 PLC logic running inside Docker.
-              Variables tracked: <code>scan_ms</code>, <code>power_w</code>, <code>temp_c</code>, <code>throughput_pph</code>, <code>quality_pct</code>.
-            </p>
+          <!-- Supervisor Invariant Banner -->
+          <div id="supervisor-banner" class="supervisor-banner converged">
+            <span id="supervisor-banner-text">✓ Supervisory Invariant: All constraints satisfied (scan_ms &le; 9.0ms, alarm_count &le; 0)</span>
+            <span id="supervisor-spec-hash" style="font-family:monospace; font-size:11px;">Spec Hash: —</span>
+          </div>
+
+          <!-- Live KPI Card Grid -->
+          <div class="diag-grid">
+            <div class="diag-card">
+              <span class="diag-card-title">PLC Scan Time</span>
+              <span class="diag-card-val" id="live-scan">8.20 ms</span>
+              <div class="gauge-track"><div id="gauge-scan" class="gauge-fill" style="width:54%;"></div></div>
+              <span style="font-size:10px; color:var(--muted); margin-top:2px;">Limit: &le; 9.00 ms</span>
+            </div>
+            <div class="diag-card">
+              <span class="diag-card-title">Cabinet Power</span>
+              <span class="diag-card-val" id="live-power" style="color:#f59e0b;">185.2 W</span>
+              <div class="gauge-track"><div id="gauge-power" class="gauge-fill" style="width:72%; background:#f59e0b;"></div></div>
+              <span style="font-size:10px; color:var(--muted); margin-top:2px;">Nominal: 180.0 W</span>
+            </div>
+            <div class="diag-card">
+              <span class="diag-card-title">Cabinet Core Temp</span>
+              <span class="diag-card-val" id="live-temp" style="color:#34d399;">38.4 °C</span>
+              <div class="gauge-track"><div id="gauge-temp" class="gauge-fill" style="width:62%; background:#34d399;"></div></div>
+              <span style="font-size:10px; color:var(--muted); margin-top:2px;">Safe: &lt; 45.0 °C</span>
+            </div>
+            <div class="diag-card">
+              <span class="diag-card-title">Line Throughput</span>
+              <span class="diag-card-val" id="live-throughput" style="color:#38bdf8;">123.6 pph</span>
+              <div class="gauge-track"><div id="gauge-throughput" class="gauge-fill" style="width:82%; background:#38bdf8;"></div></div>
+              <span style="font-size:10px; color:var(--muted); margin-top:2px;">Target: &ge; 120.0</span>
+            </div>
+            <div class="diag-card">
+              <span class="diag-card-title">Quality Score</span>
+              <span class="diag-card-val" id="live-quality" style="color:#10b981;">99.12%</span>
+              <div class="gauge-track"><div id="gauge-quality" class="gauge-fill" style="width:99%; background:#10b981;"></div></div>
+              <span style="font-size:10px; color:var(--muted); margin-top:2px;">Tolerance: &ge; 98.5%</span>
+            </div>
+            <div class="diag-card">
+              <span class="diag-card-title">Active Alarms</span>
+              <span class="diag-card-val" id="live-alarms" style="color:#10b981;">0</span>
+              <span id="live-alarm-msg" style="font-size:10px; color:var(--success); margin-top:6px;">System Normal</span>
+            </div>
+          </div>
+
+          <!-- Multi-Metric Strip Chart -->
+          <div class="chart-container">
+            <div class="chart-header">
+              <div style="font-weight:600; color:#fff; font-size:13px;">Real-Time Telemetry Strip Chart (Last 30 Cycles)</div>
+              <div style="font-size:11px; color:var(--muted);" id="strip-chart-status">Awaiting telemetry frames...</div>
+            </div>
+
+            <svg id="strip-svg" viewBox="0 0 800 220" style="height:220px;">
+              <text x="400" y="110" fill="#64748b" text-anchor="middle" font-size="12">
+                Click "Start Stream Monitor" to begin ingesting real-time OpenPLC data frames.
+              </text>
+            </svg>
+
+            <div class="knee-legend">
+              <div class="legend-item">
+                <div class="legend-dot" style="background:#38bdf8;"></div>
+                <span>Scan Time ms (Cyan)</span>
+              </div>
+              <div class="legend-item">
+                <div class="legend-dot" style="background:#f43f5e;"></div>
+                <span>Temp °C (Rose)</span>
+              </div>
+              <div class="legend-item">
+                <div class="legend-dot" style="background:#f59e0b;"></div>
+                <span>Cabinet Power / 20 (Amber)</span>
+              </div>
+              <div class="legend-item">
+                <div style="width:16px; height:2px; background:#ef4444; border-top:1px dashed #ef4444;"></div>
+                <span style="color:#ef4444;">9.0 ms Threshold</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Rolling Fact Ledger Table -->
+          <div>
+            <div style="font-size:12px; font-weight:600; margin-bottom:8px; color:#fff; display:flex; justify-content:space-between;">
+              <span>Streaming Fact Ledger (Supervisory Log)</span>
+              <span style="font-size:11px; color:var(--muted); font-weight:normal;">Auto-retained latest 8 frames</span>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Cycle</th>
+                  <th>Spec Hash</th>
+                  <th>Scan Time</th>
+                  <th>Power</th>
+                  <th>Core Temp</th>
+                  <th>Quality</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="stream-table-body">
+                <tr>
+                  <td colspan="7" style="color:var(--muted); text-align:center;">Stream idle. Click "Start Stream Monitor" to engage continuous supervision.</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -729,18 +914,27 @@ solve FlameTest {
     // -----------------------------------------------------------------------
     // Tauri Backend Bridge with Seamless Browser Fallback
     // -----------------------------------------------------------------------
-    const hasTauri = !!(window.__TAURI__ && (window.__TAURI__.invoke || (window.__TAURI__.tauri && window.__TAURI__.tauri.invoke)));
+    const inTauri = !!window.__TAURI_INTERNALS__;
+    const tauriInvoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
 
     async function callBackend(cmd, args = {}) {
-      if (hasTauri) {
-        const fn = window.__TAURI__.invoke || window.__TAURI__.tauri.invoke;
-        return await fn(cmd, args);
-      } else {
-        return mockBackend(cmd, args);
+      if (tauriInvoke) {
+        return await tauriInvoke(cmd, args);
       }
+      return mockBackend(cmd, args);
     }
 
-    // Browser mock fallback so previews run even outside Tauri
+    function showBridgeBanner() {
+      if (tauriInvoke) return;
+      const banner = document.createElement("div");
+      banner.style.cssText = "position:sticky;top:0;z-index:1000;padding:6px 12px;text-align:center;font-size:12px;font-weight:600;color:#0f172a;background:var(--warning, #f59e0b);";
+      banner.textContent = inTauri
+        ? "Backend bridge initializing: connect to Tauri native IPC."
+        : "Browser Preview Mode: Simulated Aven Relational Engine & Live Stream active.";
+      document.body.prepend(banner);
+    }
+
+    let mockCycle = 0;
     function mockBackend(cmd, args) {
       if (cmd === "list_backends") {
         return [
@@ -749,23 +943,26 @@ solve FlameTest {
           { id: "openplc_v4", name: "OpenPLC Runtime", description: "Industrial runtime", kind: "Industrial", status: "Online (Port 502)", endpoint: "127.0.0.1:502" }
         ];
       }
+      if (cmd === "validate_model") {
+        return { success: true, detected_backend: "Native", message: "Model validated successfully." };
+      }
       if (cmd === "test_backend") {
-        return { backend_id: args.backend_id, success: true, latency_ms: 45.2, status_message: "Mock backend test passed" };
+        return { backend_id: args.backend_id, success: true, latency_ms: 32.4, status_message: "Backend reachable and responsive." };
       }
       if (cmd === "solve_point") {
-        const x = args.x, y = args.y;
+        const x = args.x || 0.5, y = args.y || -0.2;
         const val = Math.sin(5*x)*Math.cos(3*y) + 0.1*(x*x + y*y);
         return {
           values: { x, y, value: val },
           diagnostics: {
-            spec_hash: "a4f891b2c3d4e5f6",
+            spec_hash: "77b981ec0429aead",
             free_vars: ["x", "y"],
             residual: 0.0,
             residual_str: "0.000000",
             rank: 2,
             binding_constraints: [],
             backend_trace: [args.backend || "flame_eval"],
-            solve_time_us: 48200.0,
+            solve_time_us: 14200.0,
             status: "Converged",
             is_feasible: true
           },
@@ -777,7 +974,7 @@ solve FlameTest {
         const n = args.steps || 20;
         for (let i = 0; i <= n; i++) {
           const x = args.sweep_min + (i/n) * (args.sweep_max - args.sweep_min);
-          const is_feasible = !(x > 1.4 && x < 1.6);
+          const is_feasible = !(x > 1.35 && x < 1.65);
           const val = is_feasible ? (Math.sin(5*x)*Math.cos(-0.6) + 0.1*(x*x + 0.04)) : 10.5;
           pts.push({
             x,
@@ -785,71 +982,119 @@ solve FlameTest {
             vars: { x, y: -0.2, value: val },
             is_feasible,
             diagnostics: {
-              spec_hash: "mock" + i,
+              spec_hash: "a4f891b2c3d4e5f6",
               free_vars: ["x", "y"],
               residual: is_feasible ? 0.0 : NaN,
-              residual_str: is_feasible ? "0.000000" : "NaN (black-box failure)",
+              residual_str: is_feasible ? "0.000000" : "NaN (discontinuity)",
               rank: 2,
               binding_constraints: [],
               backend_trace: ["flame_eval"],
-              solve_time_us: 52000.0,
-              status: is_feasible ? "Converged" : "Black-box failure: wall",
+              solve_time_us: 16000.0,
+              status: is_feasible ? "Converged" : "Discontinuity",
               is_feasible
             }
           });
         }
         return {
           frontier: pts,
-          knee_index: 8,
+          knee_index: Math.min(8, pts.length - 1),
           total_evaluated: n + 1,
           feasible_count: n - 1,
           fail_count: 2,
-          total_time_ms: 1240.0
+          total_time_ms: 380.0
+        };
+      }
+      if (cmd === "get_live_telemetry") {
+        mockCycle++;
+        const t = Date.now() / 1000;
+        const scan_ms = +(8.0 + 1.8 * Math.sin(t / 4) + (Math.random() - 0.5) * 0.4).toFixed(2);
+        const power_w = +(180 + 18 * Math.sin(t / 6)).toFixed(1);
+        const temp_c = +(38.0 + 3 * Math.sin(t / 9)).toFixed(1);
+        const throughput_pph = +(122 + 14 * Math.sin(t / 5)).toFixed(1);
+        const quality_pct = +(99.2 - 0.4 * Math.sin(t / 8)).toFixed(2);
+        const alarm_count = scan_ms > 9.0 ? 1 : 0;
+        const alarms = [];
+        if (scan_ms > 9.0) alarms.push(`High Scan Time: ${scan_ms} ms > 9.00 ms`);
+        if (alarm_count > 0) alarms.push("Active PLC Alarm trip");
+        const is_alarm = alarms.length > 0;
+        return {
+          cycle: mockCycle,
+          spec_hash: "77b981ec0429aead",
+          scan_ms,
+          power_w,
+          temp_c,
+          throughput_pph,
+          quality_pct,
+          alarm_count,
+          cpu_load_pct: 35.0,
+          network_load_pct: 12.0,
+          status: is_alarm ? `ALARM: ${alarms.join("; ")}` : "CONVERGED (Invariant satisfied)",
+          is_alarm,
+          alarms,
+          values: { scan_ms, power_w, temp_c, throughput_pph, quality_pct, alarm_count }
         };
       }
       return null;
     }
 
     // -----------------------------------------------------------------------
-    // UI Logic & State
+    // UI Models & State
     // -----------------------------------------------------------------------
     const sampleModels = {
       flame: `// Aven Relational Model — FlameTest with Pluggable Subprocess
 relation FlameTest using external("python", "flame_eval.py") {
-    value = 0.0;
+    value = 0.0
 }
 
-solve FlameTest {
-    x: 0.5,
-    y: -0.2
+solve FlameTest with {
+    x = 0.5
+    y = -0.2
 }
 `,
       openplc: `// Aven Industrial Model — OpenPLC Manufacturing Line
-relation ManufacturingLine {
-    power_w = 120.0 + io_points * 2.8;
-    scan_ms = 7.5 + cpu_load_pct * 0.04;
-    throughput_pph = 140.0 - scan_ms * 2.0;
-    quality_pct = 99.8 - scan_ms * 0.05;
+relation ManufacturingLine using external("python", "evaluations/tests/PLC-test/openplc_adapter.py") {
 }
 
-solve ManufacturingLine {
-    io_points: 24,
-    cpu_load_pct: 35.0
+solve ManufacturingLine with {
+    io_points = 28.0
+    cpu_load_pct = 35.0
+    scan_ms <= 9.0
+    alarm_count <= 0.0
+}
+`,
+      server_capacity: `// Aven Infrastructure Capacity Model — Little's Law with Framing
+relation ServerCapacity {
+    raw_workers = (reqs_per_second * avg_latency_ms) / 1000.0
+    allocated_workers = raw_workers / target_utilization
+    total_ram_needed = allocated_workers * ram_per_worker_mb
+    payload_gbps = (reqs_per_second * avg_payload_kb * 8.0) / 1000000.0
+    wire_rate_gbps = payload_gbps * 1.05
+}
+
+solve ServerCapacity with {
+    reqs_per_second = 50000.0
+    avg_latency_ms = 20.0
+    target_utilization = 0.70
+    ram_per_worker_mb = 20.0
+    avg_payload_kb = 64.0
 }
 `,
       pendulum: `// Aven Mechanical Model — Non-linear Pendulum
 relation PendulumDynamics {
-    omega = sqrt(9.81 / length);
-    period = 2.0 * 3.14159265 * sqrt(length / 9.81);
-    energy = 0.5 * mass * (length * omega)^2;
+    omega = sqrt(9.81 / length)
+    period = 2.0 * 3.14159265 * sqrt(length / 9.81)
+    energy = 0.5 * mass * (length * omega)^2
 }
 
-solve PendulumDynamics {
-    length: 1.5,
-    mass: 2.0
+solve PendulumDynamics with {
+    length = 1.5
+    mass = 2.0
 }
 `
     };
+
+    let lastParetoResult = null;
+    let selectedParetoPoint = null;
 
     function loadSelectedExample() {
       const key = document.getElementById("example-select").value;
@@ -858,7 +1103,7 @@ solve PendulumDynamics {
         validateCurrentModel();
         if (key === "openplc") {
           document.getElementById("backend-select").value = "openplc_v4";
-        } else if (key === "pendulum") {
+        } else if (key === "server_capacity" || key === "pendulum") {
           document.getElementById("backend-select").value = "native_analytic";
         } else {
           document.getElementById("backend-select").value = "flame_eval";
@@ -870,8 +1115,16 @@ solve PendulumDynamics {
     function switchTab(tabId) {
       document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
       document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("active"));
-      event.target.classList.add("active");
-      document.getElementById(tabId).classList.add("active");
+      
+      const btn = Array.from(document.querySelectorAll(".tab-btn")).find(b => {
+        if (tabId === "pareto-tab") return b.textContent.includes("Pareto");
+        if (tabId === "diagnostics-tab") return b.textContent.includes("Diagnostics");
+        if (tabId === "industrial-tab") return b.textContent.includes("OpenPLC");
+        return false;
+      });
+      if (btn) btn.classList.add("active");
+      const pane = document.getElementById(tabId);
+      if (pane) pane.classList.add("active");
     }
 
     function updateBackendIndicator() {
@@ -891,10 +1144,12 @@ solve PendulumDynamics {
         } else {
           pill.style.color = "var(--danger)";
           pill.textContent = "✗ Syntax Error";
+          pill.title = res ? res.message : "";
         }
       } catch (e) {
-        pill.style.color = "var(--success)";
-        pill.textContent = "✓ Verified";
+        pill.style.color = "var(--danger)";
+        pill.textContent = "✗ Validation unavailable";
+        pill.title = String(e);
       }
     }
 
@@ -905,16 +1160,11 @@ solve PendulumDynamics {
           const plc = list.find(b => b.id === "openplc_v4");
           if (plc) {
             const pill = document.getElementById("plc-status-pill");
-            const card = document.getElementById("plc-card-status");
             pill.textContent = `● ${plc.status}`;
             if (plc.status.includes("Online")) {
               pill.className = "status-badge status-ready";
-              card.textContent = plc.status;
-              card.style.color = "var(--success)";
             } else {
               pill.className = "status-badge status-warn";
-              card.textContent = plc.status;
-              card.style.color = "var(--warning)";
             }
           }
         }
@@ -954,7 +1204,9 @@ solve PendulumDynamics {
         const res = await callBackend("solve_point", { x, y, backend, modelSource });
         if (res) {
           updateDiagnosticsDisplay(res);
-          document.getElementById("bar-status-msg").textContent = "● Settled successfully";
+          document.getElementById("bar-status-msg").textContent = res.error
+            ? `✗ Solve failed: ${res.error}`
+            : "● Settled successfully";
         }
       } catch (e) {
         alert("Solve failed: " + e);
@@ -977,7 +1229,6 @@ solve PendulumDynamics {
       document.getElementById("bar-hash").textContent = d.spec_hash.substring(0, 10) + "…";
       document.getElementById("bar-time").textContent = `${(d.solve_time_us / 1000).toFixed(1)} ms`;
 
-      // Settled table
       const tbody = document.getElementById("settled-table-body");
       tbody.innerHTML = "";
       if (res.values) {
@@ -1010,12 +1261,17 @@ solve PendulumDynamics {
         });
 
         if (res && res.frontier) {
+          lastParetoResult = res;
           renderParetoChart(res);
           document.getElementById("stat-eval").textContent = res.total_evaluated;
           document.getElementById("stat-feasible").textContent = res.feasible_count;
           document.getElementById("stat-fail").textContent = res.fail_count;
           document.getElementById("stat-time").textContent = `${res.total_time_ms.toFixed(0)} ms`;
           document.getElementById("bar-status-msg").textContent = `● Pareto Settled (${res.feasible_count} feasible, knee detected)`;
+          
+          if (res.knee_index !== null && res.frontier[res.knee_index]) {
+            inspectParetoPoint(res.frontier[res.knee_index], res.knee_index);
+          }
         }
       } catch (e) {
         alert("Pareto execution failed: " + e);
@@ -1042,65 +1298,327 @@ solve PendulumDynamics {
 
       let html = "";
 
-      // Grid lines
       for (let i = 0; i <= 5; i++) {
         const gx = padL + (i / 5) * plotW;
         const gy = padT + (i / 5) * plotH;
-        html += `<line x1="${gx}" y1="${padT}" x2="${gx}" y2="${padT + plotH}" stroke="#1e293b" stroke-dasharray="2,3"/>`;
-        html += `<line x1="${padL}" y1="${gy}" x2="${padL + plotW}" y2="${gy}" stroke="#1e293b" stroke-dasharray="2,3"/>`;
+        html += `<line x1="${gx}" y1="${padT}" x2="${gx}" y2="${padT + plotH}" stroke="#162033" stroke-dasharray="2,3"/>`;
+        html += `<line x1="${padL}" y1="${gy}" x2="${padL + plotW}" y2="${gy}" stroke="#162033" stroke-dasharray="2,3"/>`;
       }
 
-      // Axes
       html += `<line x1="${padL}" y1="${padT + plotH}" x2="${padL + plotW}" y2="${padT + plotH}" stroke="#334155" stroke-width="2"/>`;
       html += `<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + plotH}" stroke="#334155" stroke-width="2"/>`;
 
-      // Labels
       html += `<text x="${padL + plotW/2}" y="${H - 10}" fill="#94a3b8" font-size="11" text-anchor="middle">Decision Variable (x)</text>`;
       html += `<text x="${20}" y="${padT + plotH/2}" fill="#94a3b8" font-size="11" text-anchor="middle" transform="rotate(-90 20 ${padT + plotH/2})">Objective (value)</text>`;
 
-      // Line path connecting feasible points
       const feasiblePts = pts.filter(p => p.is_feasible);
       if (feasiblePts.length > 1) {
         let d = `M ${scaleX(feasiblePts[0].x)} ${scaleY(feasiblePts[0].value)}`;
         for (let i = 1; i < feasiblePts.length; i++) {
           d += ` L ${scaleX(feasiblePts[i].x)} ${scaleY(feasiblePts[i].value)}`;
         }
-        html += `<path d="${d}" fill="none" stroke="#0284c7" stroke-width="2" opacity="0.6"/>`;
+        html += `<path d="${d}" fill="none" stroke="#0284c7" stroke-width="2.5" opacity="0.6"/>`;
       }
 
-      // Draw points
       pts.forEach((p, idx) => {
         const cx = scaleX(p.x);
         const cy = scaleY(p.value);
         const isKnee = res.knee_index === idx;
 
         if (isKnee) {
-          // Knee point gold highlight with pulse ring
-          html += `<circle cx="${cx}" cy="${cy}" r="14" fill="none" stroke="#f59e0b" stroke-width="2" opacity="0.75"/>`;
-          html += `<polygon points="${cx},${cy-9} ${cx+3},${cy-3} ${cx+9},${cy-3} ${cx+4},${cy+1} ${cx+6},${cy+7} ${cx},${cy+3} ${cx-6},${cy+7} ${cx-4},${cy+1} ${cx-9},${cy-3} ${cx-3},${cy-3}" fill="#f59e0b" stroke="#ffffff" stroke-width="1"/>`;
+          html += `<circle cx="${cx}" cy="${cy}" r="14" fill="none" stroke="#f59e0b" stroke-width="2" opacity="0.8"/>`;
+          html += `<polygon points="${cx},${cy-9} ${cx+3},${cy-3} ${cx+9},${cy-3} ${cx+4},${cy+1} ${cx+6},${cy+7} ${cx},${cy+3} ${cx-6},${cy+7} ${cx-4},${cy+1} ${cx-9},${cy-3} ${cx-3},${cy-3}" fill="#f59e0b" stroke="#ffffff" stroke-width="1" class="clickable-point" data-idx="${idx}" style="cursor:pointer;"/>`;
         } else if (p.is_feasible) {
-          html += `<circle cx="${cx}" cy="${cy}" r="5" fill="#38bdf8" stroke="#0284c7" stroke-width="1.5" class="point-hover" data-idx="${idx}"/>`;
+          html += `<circle cx="${cx}" cy="${cy}" r="6" fill="#38bdf8" stroke="#0284c7" stroke-width="1.5" class="clickable-point" data-idx="${idx}" style="cursor:pointer;"/>`;
         } else {
-          // Failure cross
           html += `
-            <line x1="${cx-4}" y1="${cy-4}" x2="${cx+4}" y2="${cy+4}" stroke="#ef4444" stroke-width="2"/>
-            <line x1="${cx-4}" y1="${cy+4}" x2="${cx+4}" y2="${cy-4}" stroke="#ef4444" stroke-width="2"/>
+            <g class="clickable-point" data-idx="${idx}" style="cursor:pointer;">
+              <line x1="${cx-4}" y1="${cy-4}" x2="${cx+4}" y2="${cy+4}" stroke="#ef4444" stroke-width="2"/>
+              <line x1="${cx-4}" y1="${cy+4}" x2="${cx+4}" y2="${cy-4}" stroke="#ef4444" stroke-width="2"/>
+            </g>
           `;
         }
       });
 
       svg.innerHTML = html;
 
-      // Attach tooltip listeners
-      svg.querySelectorAll("circle, polygon").forEach(elem => {
+      svg.querySelectorAll(".clickable-point").forEach(elem => {
+        elem.addEventListener("click", () => {
+          const idx = parseInt(elem.getAttribute("data-idx"));
+          if (!isNaN(idx) && pts[idx]) {
+            inspectParetoPoint(pts[idx], idx);
+          }
+        });
+
         elem.addEventListener("mouseenter", (e) => {
-          const idx = elem.getAttribute("data-idx");
-          if (idx !== null) {
-            const pt = pts[parseInt(idx)];
-            showTooltip(e, `Point [${idx}]:\nx: ${pt.x.toFixed(4)}\nval: ${pt.value.toFixed(4)}\nhash: ${pt.diagnostics.spec_hash}\ntime: ${(pt.diagnostics.solve_time_us/1000).toFixed(1)}ms`);
+          const idx = parseInt(elem.getAttribute("data-idx"));
+          if (!isNaN(idx) && pts[idx]) {
+            const pt = pts[idx];
+            showTooltip(e, `Point [${idx}]:\nx: ${pt.x.toFixed(4)}\nval: ${pt.value.toFixed(4)}\nhash: ${pt.diagnostics.spec_hash.substring(0,8)}…\nstatus: ${pt.diagnostics.status}`);
           }
         });
         elem.addEventListener("mouseleave", hideTooltip);
+      });
+    }
+
+    function inspectParetoPoint(pt, idx) {
+      selectedParetoPoint = pt;
+      const box = document.getElementById("inspector-box");
+      box.style.display = "block";
+
+      document.getElementById("insp-idx").textContent = `#${idx}`;
+      document.getElementById("insp-x").textContent = pt.x.toFixed(4);
+      document.getElementById("insp-val").textContent = pt.value.toFixed(4);
+      document.getElementById("insp-res").textContent = pt.diagnostics.residual_str;
+      document.getElementById("insp-hash").textContent = pt.diagnostics.spec_hash;
+      document.getElementById("insp-status").textContent = pt.diagnostics.status;
+      document.getElementById("insp-status").style.color = pt.is_feasible ? "var(--success)" : "var(--danger)";
+    }
+
+    function loadInspectedToPoint() {
+      if (selectedParetoPoint) {
+        document.getElementById("input-x").value = selectedParetoPoint.x.toFixed(3);
+        if (selectedParetoPoint.vars && selectedParetoPoint.vars.y !== undefined) {
+          document.getElementById("input-y").value = selectedParetoPoint.vars.y.toFixed(3);
+        }
+        switchTab("diagnostics-tab");
+        handleSolve();
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Live Stream Supervisor Engine
+    // -----------------------------------------------------------------------
+    let streamTimer = null;
+    let isStreaming = false;
+    let streamHistory = [];
+    const MAX_HISTORY = 30;
+
+    function toggleLiveStream() {
+      if (isStreaming) {
+        stopLiveStream();
+      } else {
+        startLiveStream();
+      }
+    }
+
+    function startLiveStream() {
+      isStreaming = true;
+      const btn = document.getElementById("btn-stream-toggle");
+      btn.textContent = "⏹ Stop Stream Monitor";
+      btn.style.background = "#ef4444";
+      btn.style.color = "#fff";
+
+      document.getElementById("live-stream-badge").textContent = "Stream: ACTIVE";
+      document.getElementById("live-stream-badge").style.color = "var(--success)";
+      document.getElementById("plc-stream-status-pill").textContent = "● Streaming";
+      document.getElementById("plc-stream-status-pill").className = "status-badge status-ready";
+
+      const intervalMs = parseInt(document.getElementById("stream-rate-select").value) || 1000;
+      pollTelemetryCycle();
+      streamTimer = setInterval(pollTelemetryCycle, intervalMs);
+    }
+
+    function stopLiveStream() {
+      isStreaming = false;
+      if (streamTimer) clearInterval(streamTimer);
+      streamTimer = null;
+
+      const btn = document.getElementById("btn-stream-toggle");
+      btn.textContent = "▶ Start Stream Monitor";
+      btn.style.background = "#10b981";
+      btn.style.color = "#06140c";
+
+      document.getElementById("live-stream-badge").textContent = "Stream: IDLE";
+      document.getElementById("live-stream-badge").style.color = "var(--muted)";
+      document.getElementById("plc-stream-status-pill").textContent = "● Paused";
+      document.getElementById("plc-stream-status-pill").className = "status-badge status-warn";
+    }
+
+    function updateStreamInterval() {
+      if (isStreaming) {
+        stopLiveStream();
+        startLiveStream();
+      }
+    }
+
+    function clearStreamHistory() {
+      streamHistory = [];
+      document.getElementById("stream-table-body").innerHTML = `
+        <tr><td colspan="7" style="color:var(--muted); text-align:center;">History cleared. Stream running.</td></tr>
+      `;
+      renderStripChart([]);
+    }
+
+    async function pollTelemetryCycle() {
+      try {
+        const frame = await callBackend("get_live_telemetry");
+        if (frame) {
+          updateStreamDisplay(frame);
+        }
+      } catch (e) {
+        console.error("Telemetry poll failed:", e);
+      }
+    }
+
+    function updateStreamDisplay(frame) {
+      document.getElementById("stream-tick-counter").textContent = frame.cycle;
+      document.getElementById("bar-status-msg").textContent = `● Stream Tick #${frame.cycle} settled`;
+
+      // Update KPIs
+      document.getElementById("live-scan").textContent = `${frame.scan_ms.toFixed(2)} ms`;
+      document.getElementById("live-scan").style.color = frame.scan_ms > 9.0 ? "var(--danger)" : "#fff";
+      document.getElementById("gauge-scan").style.width = `${Math.min(100, (frame.scan_ms / 15.0) * 100)}%`;
+      document.getElementById("gauge-scan").style.background = frame.scan_ms > 9.0 ? "var(--danger)" : "var(--accent)";
+
+      document.getElementById("live-power").textContent = `${frame.power_w.toFixed(1)} W`;
+      document.getElementById("gauge-power").style.width = `${Math.min(100, (frame.power_w / 250.0) * 100)}%`;
+
+      document.getElementById("live-temp").textContent = `${frame.temp_c.toFixed(1)} °C`;
+      document.getElementById("gauge-temp").style.width = `${Math.min(100, (frame.temp_c / 60.0) * 100)}%`;
+      document.getElementById("live-temp").style.color = frame.temp_c > 45.0 ? "var(--danger)" : "#34d399";
+
+      document.getElementById("live-throughput").textContent = `${frame.throughput_pph.toFixed(1)} pph`;
+      document.getElementById("gauge-throughput").style.width = `${Math.min(100, (frame.throughput_pph / 160.0) * 100)}%`;
+
+      document.getElementById("live-quality").textContent = `${frame.quality_pct.toFixed(2)}%`;
+      document.getElementById("gauge-quality").style.width = `${Math.min(100, frame.quality_pct)}%`;
+
+      const alarmCount = Math.round(frame.alarm_count);
+      document.getElementById("live-alarms").textContent = alarmCount;
+      if (frame.is_alarm) {
+        document.getElementById("live-alarms").style.color = "var(--danger)";
+        document.getElementById("live-alarm-msg").textContent = frame.alarms.join(", ") || "Alarm Active";
+        document.getElementById("live-alarm-msg").style.color = "var(--danger)";
+      } else {
+        document.getElementById("live-alarms").style.color = "var(--success)";
+        document.getElementById("live-alarm-msg").textContent = "System Invariant Nominal";
+        document.getElementById("live-alarm-msg").style.color = "var(--success)";
+      }
+
+      // Supervisor Banner
+      const banner = document.getElementById("supervisor-banner");
+      const bannerText = document.getElementById("supervisor-banner-text");
+      const bannerHash = document.getElementById("supervisor-spec-hash");
+      bannerHash.textContent = `Spec Hash: ${frame.spec_hash.substring(0, 10)}…`;
+
+      if (frame.is_alarm) {
+        banner.className = "supervisor-banner alarm";
+        bannerText.textContent = `⚠️ SUPERVISORY ALARM TRIPPED: ${frame.alarms.join("; ")}`;
+      } else {
+        banner.className = "supervisor-banner converged";
+        bannerText.textContent = `✓ Invariant Satisfied: All supervisory relations converged (scan_ms <= 9.0ms, alarm_count <= 0)`;
+      }
+
+      // Update history buffer
+      streamHistory.push(frame);
+      if (streamHistory.length > MAX_HISTORY) {
+        streamHistory.shift();
+      }
+
+      renderStripChart(streamHistory);
+      updateStreamTable(streamHistory);
+    }
+
+    function renderStripChart(history) {
+      const svg = document.getElementById("strip-svg");
+      if (!history || history.length === 0) return;
+
+      const W = 800, H = 220;
+      const padL = 40, padR = 20, padT = 20, padB = 30;
+      const plotW = W - padL - padR;
+      const plotH = H - padT - padB;
+
+      // Range for Y (0 to 16 for scan_ms and temp/3)
+      const minY = 0.0, maxY = 15.0;
+      const scaleX = i => padL + (i / Math.max(1, MAX_HISTORY - 1)) * plotW;
+      const scaleY = y => padT + plotH - (Math.max(0, Math.min(maxY, y)) / maxY) * plotH;
+
+      let html = "";
+
+      // Grid lines
+      for (let i = 0; i <= 3; i++) {
+        const gy = padT + (i / 3) * plotH;
+        const val = (maxY - (i / 3) * maxY).toFixed(1);
+        html += `<line x1="${padL}" y1="${gy}" x2="${padL + plotW}" y2="${gy}" stroke="#162033" stroke-dasharray="2,3"/>`;
+        html += `<text x="${padL - 8}" y="${gy + 4}" fill="#64748b" font-size="9" text-anchor="end">${val}</text>`;
+      }
+
+      // Critical Threshold line at 9.0 ms
+      const critY = scaleY(9.0);
+      html += `<line x1="${padL}" y1="${critY}" x2="${padL + plotW}" y2="${critY}" stroke="#ef4444" stroke-dasharray="4,4" stroke-width="1.5" opacity="0.8"/>`;
+      html += `<text x="${padL + plotW - 5}" y="${critY - 5}" fill="#ef4444" font-size="10" text-anchor="end">9.0 ms Limit</text>`;
+
+      // Paths for metrics
+      // 1. scan_ms (cyan)
+      let dScan = `M ${scaleX(0)} ${scaleY(history[0].scan_ms)}`;
+      // 2. temp_c / 3.0 (rose)
+      let dTemp = `M ${scaleX(0)} ${scaleY(history[0].temp_c / 3.0)}`;
+      // 3. power_w / 20.0 (amber)
+      let dPower = `M ${scaleX(0)} ${scaleY(history[0].power_w / 20.0)}`;
+
+      for (let i = 1; i < history.length; i++) {
+        dScan += ` L ${scaleX(i)} ${scaleY(history[i].scan_ms)}`;
+        dTemp += ` L ${scaleX(i)} ${scaleY(history[i].temp_c / 3.0)}`;
+        dPower += ` L ${scaleX(i)} ${scaleY(history[i].power_w / 20.0)}`;
+      }
+
+      html += `<path d="${dPower}" fill="none" stroke="#f59e0b" stroke-width="1.8" opacity="0.75"/>`;
+      html += `<path d="${dTemp}" fill="none" stroke="#f43f5e" stroke-width="1.8" opacity="0.75"/>`;
+      html += `<path d="${dScan}" fill="none" stroke="#38bdf8" stroke-width="2.5"/>`;
+
+      // Draw dots on last 5 points
+      const startDot = Math.max(0, history.length - 8);
+      for (let i = startDot; i < history.length; i++) {
+        const cx = scaleX(i);
+        const cy = scaleY(history[i].scan_ms);
+        const isAlarm = history[i].scan_ms > 9.0;
+        html += `<circle cx="${cx}" cy="${cy}" r="${isAlarm ? 4.5 : 3}" fill="${isAlarm ? '#ef4444' : '#38bdf8'}" stroke="#fff" stroke-width="1"/>`;
+      }
+
+      svg.innerHTML = html;
+      document.getElementById("strip-chart-status").textContent = `Tracking ${history.length} samples at live line rate`;
+    }
+
+    function updateStreamTable(history) {
+      const tbody = document.getElementById("stream-table-body");
+      const recent = history.slice(-8).reverse();
+      tbody.innerHTML = "";
+
+      recent.forEach(frame => {
+        const row = document.createElement("tr");
+        const isAlarm = frame.is_alarm;
+        row.style.cursor = "pointer";
+        row.innerHTML = `
+          <td><b>#${frame.cycle}</b></td>
+          <td class="mono" style="font-size:11px;">${frame.spec_hash.substring(0, 12)}…</td>
+          <td class="mono" style="color:${frame.scan_ms > 9.0 ? 'var(--danger)' : 'var(--accent)'}">${frame.scan_ms.toFixed(2)} ms</td>
+          <td>${frame.power_w.toFixed(1)} W</td>
+          <td>${frame.temp_c.toFixed(1)} °C</td>
+          <td>${frame.quality_pct.toFixed(2)}%</td>
+          <td style="color:${isAlarm ? 'var(--danger)' : 'var(--success)'}; font-weight:600;">
+            ${isAlarm ? '⚠️ ALARM' : '✓ CONVERGED'}
+          </td>
+        `;
+        row.onclick = () => {
+          updateDiagnosticsDisplay({
+            values: frame.values,
+            diagnostics: {
+              spec_hash: frame.spec_hash,
+              free_vars: Object.keys(frame.values),
+              residual: isAlarm ? 0.04 : 0.0,
+              residual_str: isAlarm ? "0.040000 (Inequality Violation)" : "0.000000",
+              rank: 10,
+              binding_constraints: ["scan_ms <= 9.0", "alarm_count <= 0.0"],
+              backend_trace: ["openplc"],
+              solve_time_us: 12000.0,
+              status: frame.status,
+              is_feasible: !isAlarm
+            }
+          });
+          switchTab("diagnostics-tab");
+        };
+        tbody.appendChild(row);
       });
     }
 
@@ -1117,6 +1635,7 @@ solve PendulumDynamics {
 
     // Initialize on load
     window.addEventListener("DOMContentLoaded", () => {
+      showBridgeBanner();
       refreshBackends();
       validateCurrentModel();
     });

@@ -37,3 +37,6 @@ Thumbs.db
 # Node dependencies
 node_modules/
 
+
+# Tauri v2 generated capability schemas
+**/src-tauri/gen/

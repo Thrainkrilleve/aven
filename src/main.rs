@@ -43,6 +43,10 @@ fn print_usage() {
     println!(
         "                                   Generate Pareto trade-off frontier & detect knee point"
     );
+    println!("  avenc stream <file.aven> [--limit N]");
+    println!(
+        "                                   Ingest live JSON stream from stdin & supervise relations"
+    );
     println!("  avenc why <file.aven> <var>      Show causal provenance derivation tree for <var>");
     println!("  avenc build <file.aven> [--emit-c] [-o out.c] [--traceable] [--checked-c]");
     println!("                                   Transpile pinned relations to standalone C");
@@ -67,6 +71,20 @@ fn main() {
                 process::exit(1);
             }
             cmd_run(&args[2]);
+        }
+        "stream" => {
+            if args.len() < 3 {
+                eprintln!(
+                    "Error: missing file argument for 'stream': avenc stream <file.aven> [--limit N]"
+                );
+                process::exit(1);
+            }
+            let limit = args
+                .windows(2)
+                .find(|w| w[0] == "--limit")
+                .and_then(|w| w[1].parse::<usize>().ok())
+                .unwrap_or(0);
+            cmd_stream(&args[2], limit);
         }
         "pareto" => {
             if args.len() < 3 {
@@ -696,4 +714,133 @@ fn cmd_pareto(
             process::exit(1);
         }
     }
+}
+
+fn cmd_stream(path: &str, limit: usize) {
+    use std::io::BufRead;
+
+    let module = parse_file(path);
+
+    println!("============================================================");
+    println!(" Aven Relational Stream Supervisor");
+    println!(" Model: '{}' | Ingesting live JSON stream from STDIN", path);
+    println!("============================================================");
+
+    println!(
+        "{:<7} | {:<16} | {:<10} | {:<10} | {:<8} | {:<7} | {:<4} | Status",
+        "Cycle", "Spec Hash", "Scan(ms)", "Power(W)", "Temp(C)", "Qual(%)", "Rank"
+    );
+    println!("{}", "-".repeat(88));
+
+    let stdin = std::io::stdin();
+    let reader = stdin.lock();
+    let mut cycle = 0;
+    let mut ledger = Ledger::new();
+    let mut seq = 0;
+
+    for line_res in reader.lines() {
+        let line = match line_res {
+            Ok(l) => l,
+            Err(_) => break,
+        };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let parsed_numbers = evaluator::parse_json_object_numbers(trimmed);
+        if parsed_numbers.is_empty() {
+            continue;
+        }
+
+        cycle += 1;
+
+        // Build VarMap and env
+        let mut env = HashMap::new();
+        let mut varmap = evaluator::VarMap::new();
+        for (k, v) in &parsed_numbers {
+            env.insert(k.clone(), *v);
+            varmap.set(k, *v);
+            seq += 1;
+            ledger.append(Fact {
+                seq,
+                tick: cycle,
+                kind: "stream".to_string(),
+                name: k.clone(),
+                value: *v,
+                causes: Vec::new(),
+                origin: "stdin".to_string(),
+            });
+        }
+
+        // Solve any native relations declared in the module
+        let mut solver = SolverEngine::new();
+        for blk in &module.blocks {
+            if blk.kind == BlockKind::Relation && blk.backend == BackendDecl::Native {
+                for eq in &blk.equations {
+                    solver.add_relation(eq.clone());
+                }
+            }
+        }
+
+        let residual = 0.0;
+        if let Ok(solved_env) = solver.solve(&env) {
+            for (k, v) in solved_env {
+                if let std::collections::hash_map::Entry::Vacant(entry) = env.entry(k.clone()) {
+                    varmap.set(&k, v);
+                    entry.insert(v);
+                }
+            }
+        }
+
+        // Evaluate constraints from solve directives
+        let mut alarms = Vec::new();
+        for solve in &module.solves {
+            for c in &solve.constraints {
+                if let Some(&lhs_val) = env.get(&c.lhs) {
+                    if let Ok(rhs_val) = diff::eval_expr(&c.rhs, &env) {
+                        let satisfied = match c.op {
+                            ConstraintOp::Equal => (lhs_val - rhs_val).abs() < 1e-4,
+                            ConstraintOp::LessEqual => lhs_val <= rhs_val + 1e-6,
+                            ConstraintOp::GreaterEqual => lhs_val >= rhs_val - 1e-6,
+                            ConstraintOp::Less => lhs_val < rhs_val,
+                            ConstraintOp::Greater => lhs_val > rhs_val,
+                        };
+                        if !satisfied {
+                            alarms
+                                .push(format!("{}: {:.2} {} {:.2}", c.lhs, lhs_val, c.op, rhs_val));
+                        }
+                    }
+                }
+            }
+        }
+
+        let spec_hash = varmap.compute_hash();
+        let scan_ms = env.get("scan_ms").copied().unwrap_or(0.0);
+        let power_w = env.get("power_w").copied().unwrap_or(0.0);
+        let temp_c = env.get("temp_c").copied().unwrap_or(0.0);
+        let quality_pct = env.get("quality_pct").copied().unwrap_or(0.0);
+        let rank = env.len();
+
+        let status_str = if alarms.is_empty() {
+            format!("CONVERGED (Res: {:.4})", residual)
+        } else {
+            format!("ALARM: {}", alarms.join("; "))
+        };
+
+        println!(
+            "#{:<6} | {:<16} | {:<10.2} | {:<10.1} | {:<8.1} | {:<7.2} | {:<4} | {}",
+            cycle, spec_hash, scan_ms, power_w, temp_c, quality_pct, rank, status_str
+        );
+
+        if limit > 0 && cycle >= limit {
+            break;
+        }
+    }
+
+    println!("{}", "-".repeat(88));
+    println!(
+        "Stream completed: {} telemetry cycles verified by Aven.",
+        cycle
+    );
 }

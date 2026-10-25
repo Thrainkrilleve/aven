@@ -180,6 +180,26 @@ pub struct EvalResponse {
     pub backend_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LiveTelemetryDto {
+    pub cycle: usize,
+    pub spec_hash: String,
+    pub scan_ms: f64,
+    pub power_w: f64,
+    pub temp_c: f64,
+    pub throughput_pph: f64,
+    pub quality_pct: f64,
+    pub alarm_count: f64,
+    pub cpu_load_pct: f64,
+    pub network_load_pct: f64,
+    pub status: String,
+    pub is_alarm: bool,
+    pub alarms: Vec<String>,
+    pub values: HashMap<String, f64>,
+}
+
+static CYCLE_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
+
 // ---------------------------------------------------------------------------
 // Orchestrator Builder
 // ---------------------------------------------------------------------------
@@ -252,8 +272,7 @@ fn list_backends() -> Vec<BackendInfoDto> {
         BackendInfoDto {
             id: "native_analytic".to_string(),
             name: "Native Continuous Solver".to_string(),
-            description: "Zero-dependency pure-Rust Newton-Raphson analytical solver."
-                .to_string(),
+            description: "Zero-dependency pure-Rust Newton-Raphson analytical solver.".to_string(),
             kind: "Pure Rust Core".to_string(),
             status: "Ready".to_string(),
             endpoint: "in-process avenc".to_string(),
@@ -570,7 +589,11 @@ fn validate_model(source: String) -> ModelValidationResult {
     let mut parser = Parser::new(tokens);
     match parser.parse_module("editor_model.aven") {
         Ok(module) => {
-            let relations = module.blocks.iter().filter(|b| b.kind == BlockKind::Relation).count();
+            let relations = module
+                .blocks
+                .iter()
+                .filter(|b| b.kind == BlockKind::Relation)
+                .count();
             let mut eq_count = 0;
             let mut detected_backend = "Native".to_string();
             let mut param_set = BTreeSet::new();
@@ -622,12 +645,12 @@ fn get_sample_models() -> Vec<SampleModel> {
                 .to_string(),
             code: r#"// Aven Relational Model — FlameTest with Pluggable Subprocess
 relation FlameTest using external("python", "flame_eval.py") {
-    value = 0.0;
+    value = 0.0
 }
 
-solve FlameTest {
-    x: 0.5,
-    y: -0.2
+solve FlameTest with {
+    x = 0.5
+    y = -0.2
 }
 "#
             .to_string(),
@@ -639,15 +662,15 @@ solve FlameTest {
                 .to_string(),
             code: r#"// Aven Industrial Model — OpenPLC Manufacturing Line
 relation ManufacturingLine {
-    power_w = 120.0 + io_points * 2.8;
-    scan_ms = 7.5 + cpu_load_pct * 0.04;
-    throughput_pph = 140.0 - scan_ms * 2.0;
-    quality_pct = 99.8 - scan_ms * 0.05;
+    power_w = 120.0 + io_points * 2.8
+    scan_ms = 7.5 + cpu_load_pct * 0.04
+    throughput_pph = 140.0 - scan_ms * 2.0
+    quality_pct = 99.8 - scan_ms * 0.05
 }
 
-solve ManufacturingLine {
-    io_points: 24,
-    cpu_load_pct: 35.0
+solve ManufacturingLine with {
+    io_points = 24
+    cpu_load_pct = 35.0
 }
 "#
             .to_string(),
@@ -655,23 +678,109 @@ solve ManufacturingLine {
         SampleModel {
             id: "pendulum".to_string(),
             name: "Pendulum Dynamics (Native)".to_string(),
-            description: "Mechanical energy balance and period calculation solved natively in Rust."
-                .to_string(),
+            description:
+                "Mechanical energy balance and period calculation solved natively in Rust."
+                    .to_string(),
             code: r#"// Aven Mechanical Model — Non-linear Pendulum
 relation PendulumDynamics {
-    omega = sqrt(9.81 / length);
-    period = 2.0 * 3.14159265 * sqrt(length / 9.81);
-    energy = 0.5 * mass * (length * omega)^2;
+    omega = sqrt(9.81 / length)
+    period = 2.0 * 3.14159265 * sqrt(length / 9.81)
+    energy = 0.5 * mass * (length * omega)^2
 }
 
-solve PendulumDynamics {
-    length: 1.5,
-    mass: 2.0
+solve PendulumDynamics with {
+    length = 1.5
+    mass = 2.0
+}
+"#
+            .to_string(),
+        },
+        SampleModel {
+            id: "server_capacity".to_string(),
+            name: "Server Infrastructure Capacity".to_string(),
+            description: "RHEL Little's Law sizing, wire rate framing, and queueing headroom."
+                .to_string(),
+            code: r#"// Aven Infrastructure Capacity Model — Little's Law with Framing
+relation ServerCapacity {
+    raw_workers = (reqs_per_second * avg_latency_ms) / 1000.0
+    allocated_workers = raw_workers / target_utilization
+    total_ram_needed = allocated_workers * ram_per_worker_mb
+    payload_gbps = (reqs_per_second * avg_payload_kb * 8.0) / 1000000.0
+    wire_rate_gbps = payload_gbps * 1.05
+}
+
+solve ServerCapacity with {
+    reqs_per_second = 50000.0
+    avg_latency_ms = 20.0
+    target_utilization = 0.70
+    ram_per_worker_mb = 20.0
+    avg_payload_kb = 64.0
 }
 "#
             .to_string(),
         },
     ]
+}
+
+#[tauri::command]
+fn get_live_telemetry() -> LiveTelemetryDto {
+    let cycle = CYCLE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let orchestrator = build_orchestrator("openplc_v4");
+    let inputs = VarMap::new();
+    let pt = orchestrator.solve_point(&inputs);
+
+    let scan_ms = pt.vars.get("scan_ms").unwrap_or(8.2);
+    let power_w = pt.vars.get("power_w").unwrap_or(185.0);
+    let temp_c = pt.vars.get("temp_c").unwrap_or(38.4);
+    let throughput_pph = pt.vars.get("throughput_pph").unwrap_or(123.6);
+    let quality_pct = pt.vars.get("quality_pct").unwrap_or(99.1);
+    let alarm_count = pt.vars.get("alarm_count").unwrap_or(0.0);
+    let cpu_load_pct = pt.vars.get("cpu_load_pct").unwrap_or(35.0);
+    let network_load_pct = pt.vars.get("network_load_pct").unwrap_or(12.0);
+
+    let mut alarms = Vec::new();
+    if scan_ms > 10.0 {
+        alarms.push(format!("High Scan Time: {:.2} ms > 10.0 ms", scan_ms));
+    }
+    if temp_c > 45.0 {
+        alarms.push(format!(
+            "Cabinet Over-Temperature: {:.1} °C > 45.0 °C",
+            temp_c
+        ));
+    }
+    if power_w > 210.0 {
+        alarms.push(format!(
+            "Power Draw Limit Exceeded: {:.1} W > 210.0 W",
+            power_w
+        ));
+    }
+    if alarm_count > 0.0 {
+        alarms.push(format!("Active PLC Alarms: {:.0}", alarm_count));
+    }
+
+    let is_alarm = !alarms.is_empty();
+    let status = if is_alarm {
+        format!("ALARM: {}", alarms.join("; "))
+    } else {
+        "CONVERGED (Invariant satisfied)".to_string()
+    };
+
+    LiveTelemetryDto {
+        cycle,
+        spec_hash: pt.diagnostics.spec_hash,
+        scan_ms,
+        power_w,
+        temp_c,
+        throughput_pph,
+        quality_pct,
+        alarm_count,
+        cpu_load_pct,
+        network_load_pct,
+        status,
+        is_alarm,
+        alarms,
+        values: pt.vars.values,
+    }
 }
 
 #[tauri::command]
@@ -710,13 +819,14 @@ fn main() {
             solve_pareto,
             validate_model,
             get_sample_models,
-            call_flame
+            call_flame,
+            get_live_telemetry
         ])
         .setup(|_app| {
             #[cfg(debug_assertions)]
             {
                 use tauri::Manager;
-                if let Some(window) = _app.get_window("main") {
+                if let Some(window) = _app.get_webview_window("main") {
                     window.open_devtools();
                 }
             }

@@ -795,3 +795,38 @@ fn test_openplc_external_adapter_and_stream_varmap() {
     assert_eq!(vars.get("cpu_load_pct"), Some(40.0));
     assert_eq!(vars.get("power_w"), Some(120.0 + 30.0 * 2.8)); // 204.0 W
 }
+
+#[test]
+fn test_parser_inequality_constraints_with_numeric_bindings() {
+    use avenc::ast::*;
+    use avenc::lexer::Lexer;
+    use avenc::parser::Parser;
+
+    let src = r#"
+    relation IndustrialLine {
+        quality = 99.8 - scan_ms * 0.05
+    }
+
+    solve IndustrialLine with {
+        io_points = 28.0
+        cpu_load = 35.0
+        scan_ms <= 9.0
+        alarm_count <= 0.0
+    }
+    "#;
+
+    let mut lexer = Lexer::new(src);
+    let tokens = lexer.tokenize().expect("tokenize failed");
+    let mut parser = Parser::new(tokens);
+    let module = parser.parse_module("TestModule").expect("parse failed");
+
+    let solve = &module.solves[0];
+    assert_eq!(solve.bindings.len(), 2);
+    assert_eq!(solve.bindings[0].name, "io_points");
+    assert_eq!(solve.bindings[1].name, "cpu_load");
+    assert_eq!(solve.constraints.len(), 2);
+    assert_eq!(solve.constraints[0].lhs, "scan_ms");
+    assert_eq!(solve.constraints[0].op, ConstraintOp::LessEqual);
+    assert_eq!(solve.constraints[1].lhs, "alarm_count");
+    assert_eq!(solve.constraints[1].op, ConstraintOp::LessEqual);
+}

@@ -7,4 +7,6 @@ relation ManufacturingLine using external("python", "evaluations/tests/PLC-test/
 solve ManufacturingLine with {
     io_points = 28.0
     cpu_load_pct = 35.0
+    scan_ms <= 9.0
+    alarm_count <= 0.0
 }

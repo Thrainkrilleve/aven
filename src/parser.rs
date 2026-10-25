@@ -367,8 +367,8 @@ impl Parser {
                 });
             };
 
-            // Optional unit literal: e.g. "km/h", "m", "s", "eur"
-            let unit = self.parse_optional_unit();
+            // Optional unit literal on same line: e.g. "km/h", "m", "s", "eur"
+            let unit = self.parse_optional_unit(val_tok.line);
 
             bindings.push(Binding {
                 name,
@@ -391,11 +391,21 @@ impl Parser {
         })
     }
 
-    fn parse_optional_unit(&mut self) -> Option<String> {
+    fn parse_optional_unit(&mut self, line: usize) -> Option<String> {
         let mut parts = String::new();
         while matches!(self.peek().kind, TokenKind::Ident(_) | TokenKind::Slash) {
+            if self.peek().line != line {
+                break;
+            }
             if matches!(self.peek().kind, TokenKind::Ident(_))
-                && self.peek_at(1).kind == TokenKind::Equal
+                && matches!(
+                    self.peek_at(1).kind,
+                    TokenKind::Equal
+                        | TokenKind::LessEqual
+                        | TokenKind::GreaterEqual
+                        | TokenKind::Less
+                        | TokenKind::Greater
+                )
             {
                 break;
             }
