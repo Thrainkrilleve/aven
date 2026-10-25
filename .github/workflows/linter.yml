@@ -8,64 +8,50 @@ on:
   workflow_dispatch:
 
 jobs:
-  rust-linter:
-    name: Rustfmt & Strict Clippy
+  linter:
+    name: Code Quality & Model Linter
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Rust Toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      - name: Install System Dependencies
+        run: |
+          SUDO=$(command -v sudo || true)
+          $SUDO apt-get update && $SUDO apt-get install -y --no-install-recommends curl ca-certificates build-essential gcc clang
+
+      - name: Install Rust Toolchain
+        run: |
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal --component rustfmt clippy
+          fi
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
 
       - name: Cargo Format Check
-        run: cargo fmt --check
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo fmt --check
 
       - name: Clippy Linter (-D warnings)
-        run: cargo clippy --all-targets -- -D warnings
-
-  c99-linter:
-    name: Emitted C99 Static Analysis
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Install Compilers
-        run: sudo apt-get update && sudo apt-get install -y gcc clang
-
-      - name: Setup Rust Toolchain
-        uses: dtolnay/rust-toolchain@stable
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo clippy --all-targets -- -D warnings
 
       - name: Build avenc Release
-        run: cargo build --release
-
-      - name: Emit C99 Artifacts
         run: |
-          ./target/release/avenc build examples/server_capacity.aven --emit-c --traceable --checked-c > /tmp/server_capacity.c
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo build --release
 
       - name: Strict C99 Compilation & Static Analysis
         run: |
+          ./target/release/avenc build examples/server_capacity.aven --emit-c --traceable --checked-c > /tmp/server_capacity.c
           gcc -std=c99 -Wall -Wextra -Wpedantic -Werror -Wconversion \
             -c /tmp/server_capacity.c -o /tmp/server_capacity.o
 
-  aven-model-linter:
-    name: Aven Relational Model Validator
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Rust Toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build avenc Release
-        run: cargo build --release
-
       - name: Validate All Aven Models
         run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
           for file in examples/*.aven benchmarks/rhel_llm/*.aven; do
             if [ -f "$file" ]; then
               echo "Validating Aven model: $file"
