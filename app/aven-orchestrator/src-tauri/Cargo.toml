@@ -1,0 +1,21 @@
+[package]
+name = "aven-orchestrator"
+version = "0.1.0"
+description = "Aven Relational Orchestrator"
+authors = ["you"]
+license = ""
+repository = ""
+edition = "2021"
+rust-version = "1.60"
+
+[build-dependencies]
+tauri-build = { version = "1.5", features = [] }
+
+[dependencies]
+tauri = { version = "1.5", features = ["shell-open"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+avenc = { path = "../../.." }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

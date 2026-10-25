@@ -1,0 +1,12 @@
+{
+  "name": "aven-orchestrator",
+  "version": "0.1.0",
+  "description": "Aven Relational Orchestrator",
+  "main": "index.js",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^1.5.0"
+  }
+}
