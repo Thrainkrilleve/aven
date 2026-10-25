@@ -216,7 +216,11 @@ def run_linstatus(args):
         m = rng.randint(1, 8)
         integer = rng.random() < 0.4
         names = [f"x{j}" for j in range(n)]
-        lb = [rng.choice([None, rng.randint(-5, 3)]) for _ in range(n)]
+        # Give integer variables an explicit lower bound. avenc's "integer defaults to >= 0"
+        # applies only to free decision variables, not ones pinned by an equality, so an
+        # implicit default would make the reference (which applies >= 0 uniformly) disagree on
+        # semantics rather than on the solver — not what this harness is testing.
+        lb = [(rng.randint(-5, 3) if integer else rng.choice([None, rng.randint(-5, 3)])) for _ in range(n)]
         ub = [None if l is None and rng.random() < 0.5 else (l or 0) + rng.randint(2, 15) for l in lb]
         ub = [rng.choice([u, None]) for u in ub]
         rows = []
