@@ -11,6 +11,7 @@ mod ast;
 mod codegen_c;
 mod diagnostics;
 mod diff;
+mod evaluator;
 mod ledger;
 mod lexer;
 mod parser;
@@ -29,12 +30,16 @@ use std::env;
 use std::fs;
 use std::process;
 
-const VERSION: &str = "0.5.0";
+const VERSION: &str = "0.6.0";
 
 fn print_usage() {
     println!("avenc v{} — The Aven Language Toolchain", VERSION);
     println!("Usage:");
     println!("  avenc run <file.aven>            Execute .aven file and print settled relations");
+    println!("  avenc pareto <file.aven> [var] [min] [max]");
+    println!(
+        "                                   Generate Pareto trade-off frontier & detect knee point"
+    );
     println!("  avenc why <file.aven> <var>      Show causal provenance derivation tree for <var>");
     println!("  avenc build <file.aven> [--emit-c] [-o out.c] [--traceable] [--checked-c]");
     println!("                                   Transpile pinned relations to standalone C");
@@ -59,6 +64,16 @@ fn main() {
                 process::exit(1);
             }
             cmd_run(&args[2]);
+        }
+        "pareto" => {
+            if args.len() < 3 {
+                eprintln!("Error: missing file argument for 'pareto'");
+                process::exit(1);
+            }
+            let sweep_var = args.get(3).map(|s| s.as_str());
+            let min_val = args.get(4).and_then(|s| s.parse::<f64>().ok());
+            let max_val = args.get(5).and_then(|s| s.parse::<f64>().ok());
+            cmd_pareto(&args[2], sweep_var, min_val, max_val);
         }
         "why" => {
             if args.len() < 4 {
@@ -426,7 +441,135 @@ fn cmd_demo() {
     let (_, ledger3, _) = execute_module(&mod3, false);
     println!("why cost:\n{}\n", ledger3.why("cost"));
 
+    // 5. Multi-Objective Pareto Frontier & Knee-Point Optimization
+    println!("Pillar 5: Multi-Objective Pareto Frontier & Knee Detection");
+    println!("------------------------------------------------------------");
+    let src5 = r#"
+        relation Capacity {
+            raw_workers = (reqs_per_second * avg_latency_ms) / 1000.0
+            allocated_workers = ceil(raw_workers / target_utilization)
+        }
+    "#;
+    let mut lex5 = Lexer::new(src5);
+    let mut parser5 = Parser::new(lex5.tokenize().unwrap());
+    let mod5 = parser5.parse_module("capacity").unwrap();
+    let evaluator5 = std::sync::Arc::new(evaluator::NativeEvaluator::new(
+        mod5.blocks[0].equations.clone(),
+    ));
+    let orchestrator5 = evaluator::Orchestrator::new(evaluator5);
+
+    let mut inputs5 = evaluator::VarMap::new();
+    inputs5.set("avg_latency_ms", 20.0);
+    inputs5.set("target_utilization", 0.70);
+
+    let frontier5 = orchestrator5
+        .solve_pareto(
+            &inputs5,
+            "reqs_per_second",
+            (10000.0, 50000.0),
+            4,
+            &[
+                "reqs_per_second".to_string(),
+                "allocated_workers".to_string(),
+            ],
+        )
+        .unwrap();
+
+    for (i, p) in frontier5.iter().enumerate() {
+        println!(
+            "  Point {}: reqs = {:.0}/s => workers = {:.0} (solve: {:.1} µs, spec: {})",
+            i + 1,
+            p.vars.get("reqs_per_second").unwrap_or(0.0),
+            p.vars.get("allocated_workers").unwrap_or(0.0),
+            p.diagnostics.solve_time_us,
+            p.diagnostics.spec_hash
+        );
+    }
+    if let Some(k) = evaluator::Orchestrator::find_knee_point(&frontier5) {
+        println!(
+            "  => Knee Point: Point {} (Optimal trade-off balance)\n",
+            k + 1
+        );
+    }
+
     println!("============================================================");
-    println!("Verification Complete: All 4 Pillars Functioning Natively.");
+    println!("Verification Complete: All 5 Pillars Functioning Natively.");
     println!("============================================================");
+}
+
+fn cmd_pareto(path: &str, sweep_var: Option<&str>, min_val: Option<f64>, max_val: Option<f64>) {
+    let module = parse_file(path);
+    if module.blocks.is_empty() {
+        eprintln!("Error: no relation blocks found in '{}'", path);
+        process::exit(1);
+    }
+
+    let rel_block = &module.blocks[0];
+    let mut initial_inputs = evaluator::VarMap::new();
+
+    // Default bindings from solve block if present
+    if !module.solves.is_empty() {
+        for b in &module.solves[0].bindings {
+            initial_inputs.set(&b.name, b.value);
+        }
+    }
+
+    let evaluator =
+        std::sync::Arc::new(evaluator::NativeEvaluator::new(rel_block.equations.clone()));
+    let orchestrator = evaluator::Orchestrator::new(evaluator);
+
+    let var = sweep_var.unwrap_or("reqs_per_second");
+    let min = min_val.unwrap_or(10000.0);
+    let max = max_val.unwrap_or(50000.0);
+
+    println!("============================================================");
+    println!(" Aven Pareto Multi-Objective Frontier Engine");
+    println!(
+        " Relation: '{}' | Sweep: {} in [{:.1}, {:.1}]",
+        rel_block.name, var, min, max
+    );
+    println!("============================================================");
+
+    let mut all_vars = std::collections::BTreeSet::new();
+    for eq in &rel_block.equations {
+        all_vars.insert(eq.lhs.clone());
+        for v in eq.rhs.vars() {
+            all_vars.insert(v);
+        }
+    }
+    let obj_list: Vec<String> = all_vars.into_iter().collect();
+
+    match orchestrator.solve_pareto(&initial_inputs, var, (min, max), 5, &obj_list) {
+        Ok(frontier) => {
+            println!(
+                "\n{:<6} {:<18} {:<18} {:<18}",
+                "Step", var, "raw_workers", "allocated_workers"
+            );
+            println!("{}", "-".repeat(60));
+            for (idx, pt) in frontier.iter().enumerate() {
+                let v_sweep = pt.vars.get(var).unwrap_or(0.0);
+                let raw = pt.vars.get("raw_workers").unwrap_or(0.0);
+                let alloc = pt.vars.get("allocated_workers").unwrap_or(0.0);
+                println!(
+                    "{:<6} {:<18.2} {:<18.2} {:<18.0}",
+                    idx + 1,
+                    v_sweep,
+                    raw,
+                    alloc
+                );
+            }
+
+            if let Some(knee) = evaluator::Orchestrator::find_knee_point(&frontier) {
+                println!(
+                    "\nOptimal Knee Point Detected: Step {} (Best trade-off balance)",
+                    knee + 1
+                );
+            }
+            println!("Spec Hash: {}", initial_inputs.compute_hash());
+        }
+        Err(e) => {
+            eprintln!("Pareto solve failed: {}", e);
+            process::exit(1);
+        }
+    }
 }

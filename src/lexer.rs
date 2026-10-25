@@ -9,6 +9,8 @@ pub enum TokenKind {
     KwWith,
     KwUnit,
     KwSignal,
+    KwMinimize,
+    KwMaximize,
 
     // Literals & Identifiers
     Ident(String),
@@ -21,6 +23,10 @@ pub enum TokenKind {
     Slash,
     Caret,
     Equal,
+    LessEqual,
+    GreaterEqual,
+    Less,
+    Greater,
     Colon,
     Comma,
     LeftBrace,
@@ -149,6 +155,51 @@ impl<'a> Lexer<'a> {
                 continue;
             }
 
+            // Multi-char operators: <= and >=
+            if c == '<' {
+                if self.peek_next() == Some('=') {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token {
+                        kind: TokenKind::LessEqual,
+                        text: "<=".to_string(),
+                        line: start_line,
+                        col: start_col,
+                    });
+                } else {
+                    self.advance();
+                    tokens.push(Token {
+                        kind: TokenKind::Less,
+                        text: "<".to_string(),
+                        line: start_line,
+                        col: start_col,
+                    });
+                }
+                continue;
+            }
+
+            if c == '>' {
+                if self.peek_next() == Some('=') {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token {
+                        kind: TokenKind::GreaterEqual,
+                        text: ">=".to_string(),
+                        line: start_line,
+                        col: start_col,
+                    });
+                } else {
+                    self.advance();
+                    tokens.push(Token {
+                        kind: TokenKind::Greater,
+                        text: ">".to_string(),
+                        line: start_line,
+                        col: start_col,
+                    });
+                }
+                continue;
+            }
+
             // Punctuation & Operators
             self.advance();
             let kind = match c {
@@ -251,6 +302,8 @@ impl<'a> Lexer<'a> {
             "with" => TokenKind::KwWith,
             "unit" => TokenKind::KwUnit,
             "signal" => TokenKind::KwSignal,
+            "minimize" => TokenKind::KwMinimize,
+            "maximize" => TokenKind::KwMaximize,
             _ => TokenKind::Ident(s.clone()),
         };
 

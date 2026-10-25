@@ -73,6 +73,7 @@ fn test_backward_1d_newton_solving() {
 
     solver.add_relation(Equation {
         lhs: "depth".to_string(),
+        op: ConstraintOp::Equal,
         rhs,
         original_text: "depth = 0.5 * gravity * time * time".to_string(),
         line: 1,
@@ -103,6 +104,7 @@ fn test_coupled_multidimensional_newton_exact_jacobian() {
 
     solver.add_relation(Equation {
         lhs: "x".to_string(),
+        op: ConstraintOp::Equal,
         rhs: Expr::Bin(
             BinaryOp::Add,
             Box::new(Expr::Var("y".to_string())),
@@ -115,6 +117,7 @@ fn test_coupled_multidimensional_newton_exact_jacobian() {
 
     solver.add_relation(Equation {
         lhs: "x".to_string(),
+        op: ConstraintOp::Equal,
         rhs: Expr::Bin(
             BinaryOp::Mul,
             Box::new(Expr::Num(2.0)),
@@ -144,6 +147,7 @@ fn test_underdetermination_diagnostics() {
     // Degrees of freedom = 1
     let eq = Equation {
         lhs: "revenue".to_string(),
+        op: ConstraintOp::Equal,
         rhs: Expr::Bin(
             BinaryOp::Mul,
             Box::new(Expr::Var("price".to_string())),
@@ -177,6 +181,7 @@ fn test_c_code_generation() {
         equations: vec![
             Equation {
                 lhs: "distance".to_string(),
+                op: ConstraintOp::Equal,
                 rhs: Expr::Bin(
                     BinaryOp::Mul,
                     Box::new(Expr::Var("speed".to_string())),
@@ -188,6 +193,7 @@ fn test_c_code_generation() {
             },
             Equation {
                 lhs: "fuel".to_string(),
+                op: ConstraintOp::Equal,
                 rhs: Expr::Bin(
                     BinaryOp::Mul,
                     Box::new(Expr::Var("distance".to_string())),
@@ -265,6 +271,7 @@ fn test_symmetric_system_coupled_solving() {
     // total = a * b
     solver.add_relation(Equation {
         lhs: "total".to_string(),
+        op: ConstraintOp::Equal,
         rhs: Expr::Bin(
             BinaryOp::Mul,
             Box::new(Expr::Var("a".to_string())),
@@ -277,6 +284,7 @@ fn test_symmetric_system_coupled_solving() {
     // other = a + b
     solver.add_relation(Equation {
         lhs: "other".to_string(),
+        op: ConstraintOp::Equal,
         rhs: Expr::Bin(
             BinaryOp::Add,
             Box::new(Expr::Var("a".to_string())),
@@ -312,6 +320,7 @@ fn test_backward_ceil_inversion() {
     // allocated_workers = ceil(raw_workers / target_utilization)
     solver.add_relation(Equation {
         lhs: "allocated_workers".to_string(),
+        op: ConstraintOp::Equal,
         rhs: Expr::Call(
             "ceil".to_string(),
             Box::new(Expr::Bin(
@@ -355,4 +364,171 @@ fn test_abs_derivative_sign() {
     env_neg.insert("x".to_string(), -5.0);
     let slope_neg = eval_expr(&d_expr, &env_neg).expect("eval negative failed");
     assert_eq!(slope_neg, -1.0);
+}
+
+#[test]
+fn test_sha256_spec_hashing() {
+    use avenc::evaluator::{VarMap, sha256_hex};
+
+    // Standard FIPS test vector for empty string
+    let empty_hash = sha256_hex(b"");
+    assert_eq!(
+        empty_hash,
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
+
+    // Deterministic 16-char spec hash from VarMap
+    let mut vars = VarMap::new();
+    vars.set("reqs_per_second", 50000.0);
+    vars.set("avg_latency_ms", 20.0);
+
+    let hash1 = vars.compute_hash();
+    let hash2 = vars.compute_hash();
+    assert_eq!(hash1, hash2);
+    assert_eq!(hash1.len(), 16);
+}
+
+#[test]
+fn test_inequality_and_objective_parsing() {
+    use avenc::ast::*;
+    use avenc::lexer::Lexer;
+    use avenc::parser::Parser;
+
+    let src = r#"
+    relation ServiceSizing {
+        latency = 1000.0 / rps
+    }
+
+    solve ServiceSizing with {
+        rps >= 50.0
+        latency <= 20.0
+        minimize(latency)
+        maximize(rps)
+    }
+    "#;
+
+    let mut lexer = Lexer::new(src);
+    let tokens = lexer.tokenize().expect("tokenize failed");
+    let mut parser = Parser::new(tokens);
+    let module = parser.parse_module("Service").expect("parse failed");
+
+    assert_eq!(module.blocks.len(), 1);
+    assert_eq!(module.solves.len(), 1);
+
+    let solve = &module.solves[0];
+    assert_eq!(solve.constraints.len(), 2);
+    assert_eq!(solve.constraints[0].lhs, "rps");
+    assert_eq!(solve.constraints[0].op, ConstraintOp::GreaterEqual);
+    assert_eq!(solve.constraints[1].lhs, "latency");
+    assert_eq!(solve.constraints[1].op, ConstraintOp::LessEqual);
+
+    assert_eq!(solve.objectives.len(), 2);
+    assert_eq!(solve.objectives[0].kind, ObjectiveKind::Minimize);
+    assert_eq!(solve.objectives[0].target, "latency");
+    assert_eq!(solve.objectives[1].kind, ObjectiveKind::Maximize);
+    assert_eq!(solve.objectives[1].target, "rps");
+}
+
+#[test]
+fn test_evaluator_trait_and_native_backend() {
+    use avenc::ast::*;
+    use avenc::evaluator::{Evaluator, NativeEvaluator, VarMap};
+    use std::sync::Arc;
+
+    let eq = Equation {
+        lhs: "distance".to_string(),
+        op: ConstraintOp::Equal,
+        rhs: Expr::Bin(
+            BinaryOp::Mul,
+            Box::new(Expr::Var("speed".to_string())),
+            Box::new(Expr::Var("time".to_string())),
+        ),
+        original_text: "distance = speed * time".to_string(),
+        line: 1,
+        col: 1,
+    };
+
+    let backend: Arc<dyn Evaluator> = Arc::new(NativeEvaluator::new(vec![eq]));
+    assert_eq!(backend.name(), "native_analytic");
+
+    let mut inputs = VarMap::new();
+    inputs.set("speed", 100.0);
+    inputs.set("time", 2.5);
+
+    let res = backend.evaluate(&inputs).expect("evaluation failed");
+    assert_eq!(res.values.get("distance").copied(), Some(250.0));
+    assert_eq!(res.backend_id, "native_analytic");
+}
+
+#[test]
+fn test_pareto_frontier_and_knee_point_detection() {
+    use avenc::ast::*;
+    use avenc::evaluator::{NativeEvaluator, Orchestrator, VarMap};
+    use std::sync::Arc;
+
+    // Little's Law capacity relation:
+    // raw_workers = (reqs_per_second * avg_latency_ms) / 1000.0
+    let eq = Equation {
+        lhs: "raw_workers".to_string(),
+        op: ConstraintOp::Equal,
+        rhs: Expr::Bin(
+            BinaryOp::Div,
+            Box::new(Expr::Bin(
+                BinaryOp::Mul,
+                Box::new(Expr::Var("reqs_per_second".to_string())),
+                Box::new(Expr::Var("avg_latency_ms".to_string())),
+            )),
+            Box::new(Expr::Num(1000.0)),
+        ),
+        original_text: "raw_workers = (reqs_per_second * avg_latency_ms) / 1000.0".to_string(),
+        line: 1,
+        col: 1,
+    };
+
+    let evaluator = Arc::new(NativeEvaluator::new(vec![eq]));
+    let orchestrator = Orchestrator::new(evaluator);
+
+    let mut base_inputs = VarMap::new();
+    base_inputs.set("avg_latency_ms", 20.0);
+
+    // ε-Constraint Pareto sweep: sweep reqs_per_second from 10k to 50k in 4 steps
+    let frontier = orchestrator
+        .solve_pareto(
+            &base_inputs,
+            "reqs_per_second",
+            (10000.0, 50000.0),
+            4,
+            &["reqs_per_second".to_string(), "raw_workers".to_string()],
+        )
+        .expect("Pareto sweep failed");
+
+    assert_eq!(frontier.len(), 5);
+    // At 10k: raw_workers = (10000 * 20)/1000 = 200
+    assert_eq!(frontier[0].vars.get("raw_workers"), Some(200.0));
+    // At 50k: raw_workers = (50000 * 20)/1000 = 1000
+    assert_eq!(frontier[4].vars.get("raw_workers"), Some(1000.0));
+
+    // Knee point detection
+    let knee = Orchestrator::find_knee_point(&frontier);
+    assert!(knee.is_some());
+}
+
+#[test]
+fn test_external_evaluator_subprocess() {
+    use avenc::evaluator::{Evaluator, ExternalEvaluator, VarMap};
+
+    // Use python to mock an external simulator
+    let py_cmd = if cfg!(windows) { "python" } else { "python3" };
+    let py_script = "import sys, json; data = json.load(sys.stdin); print(json.dumps({'value': data.get('x', 0.0) * 3.0, 'backend_id': 'mock_external_sim'}))";
+
+    let ext = ExternalEvaluator::new(py_cmd, &["-c", py_script]);
+    assert_eq!(ext.name(), py_cmd);
+
+    let mut inputs = VarMap::new();
+    inputs.set("x", 14.0);
+
+    let res = ext.evaluate(&inputs).expect("External evaluation failed");
+    assert_eq!(res.values.get("value").copied(), Some(42.0));
+    assert_eq!(res.backend_id, "mock_external_sim");
+    assert!(res.solve_time_us > 0.0);
 }

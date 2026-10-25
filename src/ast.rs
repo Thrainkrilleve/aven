@@ -113,9 +113,65 @@ impl fmt::Display for Expr {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConstraintOp {
+    Equal,
+    LessEqual,
+    GreaterEqual,
+    Less,
+    Greater,
+}
+
+impl fmt::Display for ConstraintOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            ConstraintOp::Equal => "=",
+            ConstraintOp::LessEqual => "<=",
+            ConstraintOp::GreaterEqual => ">=",
+            ConstraintOp::Less => "<",
+            ConstraintOp::Greater => ">",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjectiveKind {
+    Minimize,
+    Maximize,
+}
+
+impl fmt::Display for ObjectiveKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ObjectiveKind::Minimize => write!(f, "minimize"),
+            ObjectiveKind::Maximize => write!(f, "maximize"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Objective {
+    pub kind: ObjectiveKind,
+    pub target: String,
+    pub line: usize,
+    pub col: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct Constraint {
+    pub lhs: String,
+    pub op: ConstraintOp,
+    pub rhs: Expr,
+    pub original_text: String,
+    pub line: usize,
+    pub col: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct Equation {
     pub lhs: String,
+    pub op: ConstraintOp,
     pub rhs: Expr,
     pub original_text: String,
     pub line: usize,
@@ -150,6 +206,8 @@ pub struct Binding {
 pub struct SolveDirective {
     pub target: String,
     pub bindings: Vec<Binding>,
+    pub constraints: Vec<Constraint>,
+    pub objectives: Vec<Objective>,
     pub line: usize,
     pub col: usize,
 }

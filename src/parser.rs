@@ -151,12 +151,44 @@ impl Parser {
 
     fn parse_equation(&mut self) -> Result<Equation, ParseError> {
         let (lhs, line, col) = self.expect_ident()?;
-        self.expect(&TokenKind::Equal, "'='")?;
+        let op = match self.peek().kind {
+            TokenKind::Equal => {
+                self.take();
+                ConstraintOp::Equal
+            }
+            TokenKind::LessEqual => {
+                self.take();
+                ConstraintOp::LessEqual
+            }
+            TokenKind::GreaterEqual => {
+                self.take();
+                ConstraintOp::GreaterEqual
+            }
+            TokenKind::Less => {
+                self.take();
+                ConstraintOp::Less
+            }
+            TokenKind::Greater => {
+                self.take();
+                ConstraintOp::Greater
+            }
+            _ => {
+                return Err(ParseError {
+                    message: format!(
+                        "expected '=', '<=', '>=', '<', or '>', found '{}'",
+                        self.peek().text
+                    ),
+                    line: self.peek().line,
+                    col: self.peek().col,
+                });
+            }
+        };
         let rhs = self.parse_expr()?;
-        let original_text = format!("{} = {}", lhs, rhs);
+        let original_text = format!("{} {} {}", lhs, op, rhs);
 
         Ok(Equation {
             lhs,
+            op,
             rhs,
             original_text,
             line,
@@ -171,8 +203,61 @@ impl Parser {
         self.expect(&TokenKind::LeftBrace, "'{'")?;
 
         let mut bindings = Vec::new();
+        let mut constraints = Vec::new();
+        let mut objectives = Vec::new();
+
         while self.peek().kind != TokenKind::RightBrace && self.peek().kind != TokenKind::Eof {
+            // Check for objectives: minimize(x) or maximize(x)
+            if self.peek().kind == TokenKind::KwMinimize
+                || self.peek().kind == TokenKind::KwMaximize
+            {
+                let kind = match self.take().kind {
+                    TokenKind::KwMinimize => ObjectiveKind::Minimize,
+                    TokenKind::KwMaximize => ObjectiveKind::Maximize,
+                    _ => unreachable!(),
+                };
+                self.expect(&TokenKind::LeftParen, "'('")?;
+                let (target_var, o_line, o_col) = self.expect_ident()?;
+                self.expect(&TokenKind::RightParen, "')'")?;
+                objectives.push(Objective {
+                    kind,
+                    target: target_var,
+                    line: o_line,
+                    col: o_col,
+                });
+                continue;
+            }
+
             let (name, b_line, b_col) = self.expect_ident()?;
+
+            // Check for inequality constraints: e.g. latency <= 20 ms
+            if matches!(
+                self.peek().kind,
+                TokenKind::LessEqual
+                    | TokenKind::GreaterEqual
+                    | TokenKind::Less
+                    | TokenKind::Greater
+            ) {
+                let op = match self.take().kind {
+                    TokenKind::LessEqual => ConstraintOp::LessEqual,
+                    TokenKind::GreaterEqual => ConstraintOp::GreaterEqual,
+                    TokenKind::Less => ConstraintOp::Less,
+                    TokenKind::Greater => ConstraintOp::Greater,
+                    _ => unreachable!(),
+                };
+                let rhs = self.parse_expr()?;
+                let original_text = format!("{} {} {}", name, op, rhs);
+                constraints.push(Constraint {
+                    lhs: name,
+                    op,
+                    rhs,
+                    original_text,
+                    line: b_line,
+                    col: b_col,
+                });
+                continue;
+            }
+
             self.expect(&TokenKind::Equal, "'='")?;
 
             let val_tok = self.peek().clone();
@@ -220,6 +305,8 @@ impl Parser {
         Ok(SolveDirective {
             target,
             bindings,
+            constraints,
+            objectives,
             line: start_tok.line,
             col: start_tok.col,
         })

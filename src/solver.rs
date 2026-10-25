@@ -159,6 +159,7 @@ impl SolverEngine {
                 // Invert wrapper: for ceil(u) = k, solve inner = k
                 let unwrap_eq = Equation {
                     lhs: eq.lhs.clone(),
+                    op: eq.op,
                     rhs: (**inner).clone(),
                     original_text: format!("{} = {}", eq.lhs, inner),
                     line: eq.line,
