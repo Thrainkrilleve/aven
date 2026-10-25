@@ -2334,7 +2334,11 @@ fn test_real_production_traffic_trace_replay_and_capacity_tracking() {
         let workers = *solved.get("allocated_workers").unwrap();
 
         assert_eq!(pods, expected_pods, "Step {} pod sizing mismatch", step);
-        assert_eq!(workers, expected_workers, "Step {} worker sizing mismatch", step);
+        assert_eq!(
+            workers, expected_workers,
+            "Step {} worker sizing mismatch",
+            step
+        );
 
         // Freshness verification
         let is_stale = ttl == 0;
@@ -2351,7 +2355,11 @@ fn test_real_production_traffic_trace_replay_and_capacity_tracking() {
                 timestamp_ms: Some(1792900000000),
                 ttl_ms: Some(ttl),
                 is_stale,
-                warnings: if is_stale { vec!["stale-telemetry".to_string()] } else { Vec::new() },
+                warnings: if is_stale {
+                    vec!["stale-telemetry".to_string()]
+                } else {
+                    Vec::new()
+                },
             }),
         });
 
@@ -2370,4 +2378,3 @@ fn test_real_production_traffic_trace_replay_and_capacity_tracking() {
         avg_solve_us
     );
 }
-

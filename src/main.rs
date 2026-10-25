@@ -499,8 +499,8 @@ fn execute_module(
                 (ext_eval.evaluate(&varmap), "external")
             }
             BackendDecl::Ipc { endpoint } => {
-                let ipc_eval = evaluator::IpcEvaluator::new(endpoint)
-                    .with_required_keys(&required_keys);
+                let ipc_eval =
+                    evaluator::IpcEvaluator::new(endpoint).with_required_keys(&required_keys);
                 if verbose {
                     println!(
                         "Connecting to persistent IPC evaluator at '{}' for relation '{}'...",
@@ -573,7 +573,10 @@ fn execute_module(
                 }
             }
             Err(e) => {
-                eprintln!("{} evaluation failed for block '{}': {}", backend_type, blk.name, e);
+                eprintln!(
+                    "{} evaluation failed for block '{}': {}",
+                    backend_type, blk.name, e
+                );
                 process::exit(1);
             }
         }

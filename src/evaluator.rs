@@ -682,9 +682,9 @@ impl Evaluator for IpcEvaluator {
         writer.write_all(json_str.as_bytes()).map_err(|e| {
             EvalError::DomainError(format!("Failed to send query to IPC daemon: {}", e))
         })?;
-        writer.flush().map_err(|e| {
-            EvalError::DomainError(format!("Failed to flush IPC socket: {}", e))
-        })?;
+        writer
+            .flush()
+            .map_err(|e| EvalError::DomainError(format!("Failed to flush IPC socket: {}", e)))?;
 
         // Read response line
         let mut response_line = String::new();
@@ -709,8 +709,8 @@ impl Evaluator for IpcEvaluator {
             )));
         }
 
-        let backend_id = parse_json_string(trimmed, "backend_id")
-            .unwrap_or_else(|| self.backend_id.clone());
+        let backend_id =
+            parse_json_string(trimmed, "backend_id").unwrap_or_else(|| self.backend_id.clone());
 
         if let Some(err_msg) = parse_json_string(trimmed, "error") {
             return Err(EvalError::BlackBoxFailure(format!(

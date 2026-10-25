@@ -255,7 +255,10 @@ impl Parser {
                 Ok(BackendDecl::Ipc { endpoint })
             }
             _ => Err(ParseError {
-                message: format!("expected 'external(...)' or 'ipc(...)', found '{}'", tok_text),
+                message: format!(
+                    "expected 'external(...)' or 'ipc(...)', found '{}'",
+                    tok_text
+                ),
                 line: tok_line,
                 col: tok_col,
             }),
