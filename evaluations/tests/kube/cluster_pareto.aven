@@ -1,0 +1,16 @@
+// cluster_pareto.aven
+// Kubernetes Multi-Objective Capacity Planning Model
+// Optimizes target_pods to maximize cpu_utilization while keeping mem_headroom_pct >= 30.0%
+
+relation ClusterPareto {
+    active_cpu = target_pods * 0.5
+    active_mem = target_pods * 1.0
+    cpu_utilization = (active_cpu / 32.0) * 100.0
+    mem_headroom_pct = ((60.803 - active_mem) / 60.803) * 100.0
+}
+
+solve ClusterPareto with {
+    target_pods = 20.0
+    cpu_utilization >= 10.0
+    mem_headroom_pct >= 30.0
+}

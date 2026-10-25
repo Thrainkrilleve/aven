@@ -643,10 +643,13 @@ impl SolverEngine {
                     return Some(x);
                 }
                 let der = match dg(x) {
-                    Some(d) => d,
-                    None => break,
+                    Some(d) if d.is_finite() && d.abs() >= 1e-14 => d,
+                    _ => break,
                 };
                 let step = fx / der;
+                if !step.is_finite() {
+                    break;
+                }
                 x -= step;
                 if !x.is_finite() {
                     break;
@@ -853,17 +856,23 @@ fn solve_linear(mat: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
             }
         }
 
-        if max_val < 1e-12 {
-            return None; // Singular or rank-deficient
+        if max_val < 1e-12 || !max_val.is_finite() {
+            return None; // Singular, rank-deficient, or non-finite
         }
 
         a.swap(col, max_row);
 
         for r in (col + 1)..n {
             let factor = a[r][col] / a[col][col];
+            if !factor.is_finite() {
+                return None;
+            }
             for c in col..=n {
                 let sub = factor * a[col][c];
                 a[r][c] -= sub;
+                if !a[r][c].is_finite() {
+                    return None;
+                }
             }
         }
     }
@@ -874,7 +883,14 @@ fn solve_linear(mat: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
         for c in (r + 1)..n {
             sum -= a[r][c] * x[c];
         }
-        x[r] = sum / a[r][r];
+        if a[r][r].abs() < 1e-14 || !a[r][r].is_finite() {
+            return None;
+        }
+        let val = sum / a[r][r];
+        if !val.is_finite() {
+            return None;
+        }
+        x[r] = val;
     }
 
     Some(x)

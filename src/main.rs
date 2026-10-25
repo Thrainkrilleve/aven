@@ -48,7 +48,10 @@ fn print_usage() {
     println!(
         "                                   Ingest live JSON stream from stdin & supervise relations"
     );
-    println!("  avenc why <file.aven> <var>      Show causal provenance derivation tree for <var>");
+    println!("  avenc why <file.aven> <var> [--depth N]");
+    println!(
+        "                                   Show causal derivation tree with optional topological depth limit"
+    );
     println!("  avenc build <file.aven> [--emit-c] [-o out.c] [--traceable] [--checked-c]");
     println!("                                   Transpile pinned relations to standalone C");
     println!(
@@ -117,11 +120,15 @@ fn main() {
         "why" => {
             if args.len() < 4 {
                 eprintln!(
-                    "Error: 'why' requires a file and variable name: avenc why <file.aven> <variable>"
+                    "Error: 'why' requires a file and variable name: avenc why <file.aven> <variable> [--depth N]"
                 );
                 process::exit(1);
             }
-            cmd_why(&args[2], &args[3]);
+            let depth = args
+                .windows(2)
+                .find(|w| w[0] == "--depth")
+                .and_then(|w| w[1].parse::<usize>().ok());
+            cmd_why(&args[2], &args[3], depth);
         }
         "build" => {
             if args.len() < 3 {
@@ -277,12 +284,12 @@ fn cmd_run(path: &str) {
     }
 }
 
-fn cmd_why(path: &str, var: &str) {
+fn cmd_why(path: &str, var: &str, depth: Option<usize>) {
     let module = parse_file(path);
     let work_dir = std::path::Path::new(path).parent();
     let (_, ledger, _) = execute_module(&module, false, work_dir);
     println!("Causal Derivation Tree for '{}':", var);
-    println!("{}", ledger.why(var));
+    println!("{}", ledger.why_with_depth(var, depth));
 }
 
 fn cmd_build(
@@ -367,6 +374,7 @@ fn execute_module(
                 value: b.value,
                 causes: Vec::new(),
                 origin: "user binding".to_string(),
+                metadata: None,
             });
         }
     }
@@ -397,10 +405,36 @@ fn execute_module(
                             blk.name, res.solve_time_us, res.backend_id
                         );
                     }
+                    let now_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0);
+
+                    let mut has_stale = false;
                     for (k, v) in res.values {
                         if !env.contains_key(&k) {
                             seq += 1;
                             env.insert(k.clone(), v);
+
+                            let is_stale =
+                                if let (Some(ts), Some(ttl)) = (res.timestamp_ms, res.ttl_ms) {
+                                    if now_ms > ts + ttl {
+                                        has_stale = true;
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                };
+
+                            let metadata = ledger::FactMetadata {
+                                timestamp_ms: res.timestamp_ms,
+                                ttl_ms: res.ttl_ms,
+                                is_stale,
+                                warnings: res.warnings.clone(),
+                            };
+
                             ledger.append(Fact {
                                 seq,
                                 tick: 0,
@@ -409,8 +443,16 @@ fn execute_module(
                                 value: v,
                                 causes: Vec::new(),
                                 origin: format!("external: {}", res.backend_id),
+                                metadata: Some(metadata),
                             });
                         }
+                    }
+
+                    if has_stale {
+                        eprintln!(
+                            "  ⚠ Freshness Alert: Facts from '{}' are STALE (TTL exceeded). Decisions should not rely on unrefreshed metrics.",
+                            res.backend_id
+                        );
                     }
                 }
                 Err(e) => {
@@ -487,6 +529,7 @@ fn execute_module(
                         value: *v,
                         causes,
                         origin,
+                        metadata: None,
                     });
                 }
             }
@@ -833,6 +876,7 @@ fn cmd_stream(path: &str, limit: usize) {
                 value: *v,
                 causes: Vec::new(),
                 origin: "stdin".to_string(),
+                metadata: None,
             });
         }
 

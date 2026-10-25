@@ -137,6 +137,9 @@ pub struct EvalResult {
     pub values: HashMap<String, f64>,
     pub backend_id: String,
     pub solve_time_us: f64,
+    pub timestamp_ms: Option<u64>,
+    pub ttl_ms: Option<u64>,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -257,6 +260,9 @@ impl Evaluator for NativeEvaluator {
             values: solved,
             backend_id: "native_analytic".to_string(),
             solve_time_us: elapsed_us,
+            timestamp_ms: None,
+            ttl_ms: None,
+            warnings: Vec::new(),
         })
     }
 
@@ -324,14 +330,22 @@ impl Evaluator for ExternalEvaluator {
 
         // Spawn child process with piped stdin/stdout/stderr
         let mut cmd = std::process::Command::new(&self.command);
-        cmd.args(&self.args)
+        let mut resolved_args: Vec<String> = self.args.clone();
+        if let Some(dir) = &self.working_dir {
+            for arg in &mut resolved_args {
+                let p = std::path::Path::new(arg);
+                if !dir.join(p).exists() && p.exists() {
+                    if let Ok(abs) = std::fs::canonicalize(p) {
+                        *arg = abs.to_string_lossy().to_string();
+                    }
+                }
+            }
+            cmd.current_dir(dir);
+        }
+        cmd.args(&resolved_args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
-
-        if let Some(dir) = &self.working_dir {
-            cmd.current_dir(dir);
-        }
 
         let mut child = cmd.spawn().map_err(|e| {
             EvalError::DomainError(format!("Failed to spawn '{}': {}", self.command, e))
@@ -377,6 +391,12 @@ impl Evaluator for ExternalEvaluator {
         let backend_id =
             parse_json_string(&stdout, "backend_id").unwrap_or_else(|| self.backend_id.clone());
 
+        let timestamp_ms = parse_json_u64(&stdout, "timestamp_ms")
+            .or_else(|| parse_json_u64(&stdout, "timestamp"));
+        let ttl_ms = parse_json_u64(&stdout, "ttl_ms")
+            .or_else(|| parse_json_float(&stdout, "ttl").map(|s| (s * 1000.0) as u64));
+        let warnings = parse_json_string_array(&stdout, "warnings");
+
         let mut out_values = inputs.values.clone();
         out_values.extend(parsed_numbers);
         if !out_values.contains_key("value") {
@@ -388,6 +408,9 @@ impl Evaluator for ExternalEvaluator {
             values: out_values,
             backend_id,
             solve_time_us: elapsed_us,
+            timestamp_ms,
+            ttl_ms,
+            warnings,
         })
     }
 
@@ -498,6 +521,33 @@ pub fn parse_json_string(json: &str, key: &str) -> Option<String> {
         search_idx = abs_pos + needle.len();
     }
     None
+}
+
+pub fn parse_json_u64(json: &str, key: &str) -> Option<u64> {
+    parse_json_float(json, key).map(|v| v as u64)
+}
+
+pub fn parse_json_string_array(json: &str, key: &str) -> Vec<String> {
+    let needle = format!("\"{}\"", key);
+    if let Some(pos) = json.find(&needle) {
+        let after_key = &json[pos + needle.len()..];
+        if let Some(bracket_start) = after_key.find('[') {
+            if let Some(bracket_end) = after_key[bracket_start..].find(']') {
+                let inside = &after_key[bracket_start + 1..bracket_start + bracket_end];
+                let mut list = Vec::new();
+                for part in inside.split(',') {
+                    let trimmed = part
+                        .trim()
+                        .trim_matches(|c| c == '"' || c == '\'' || c == ' ');
+                    if !trimmed.is_empty() {
+                        list.push(trimmed.to_string());
+                    }
+                }
+                return list;
+            }
+        }
+    }
+    Vec::new()
 }
 
 /// Backend configuration enum. Native Newton path is the zero-dependency default.

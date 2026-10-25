@@ -1045,6 +1045,7 @@ fn test_mixed_integer_provenance_and_ledger() {
                 value: b.value,
                 causes: Vec::new(),
                 origin: "user binding".to_string(),
+                metadata: None,
             });
         }
     }
@@ -1099,6 +1100,7 @@ fn test_mixed_integer_provenance_and_ledger() {
                 value: *v,
                 causes,
                 origin,
+                metadata: None,
             });
         }
     }
@@ -1538,4 +1540,212 @@ fn test_derived_expressions_inside_external_relation_body() {
         .expect("derived equations must evaluate on external outputs");
     assert_eq!(solved["total_findings"], 5.0);
     assert_eq!(solved["risk_ratio"], 0.5);
+}
+
+#[test]
+fn test_freshness_metadata_ttl_decay_and_stale_detection() {
+    use avenc::evaluator::{parse_json_string_array, parse_json_u64};
+    use avenc::ledger::{Fact, FactMetadata, Ledger};
+
+    let raw_json = r#"{
+        "total_cpu_cores": 32.0,
+        "timestamp_ms": 1700000000000,
+        "ttl_ms": 60000,
+        "warnings": ["live-cluster", "allocatable"]
+    }"#;
+
+    let ts = parse_json_u64(raw_json, "timestamp_ms").unwrap();
+    let ttl = parse_json_u64(raw_json, "ttl_ms").unwrap();
+    let warnings = parse_json_string_array(raw_json, "warnings");
+
+    assert_eq!(ts, 1700000000000);
+    assert_eq!(ttl, 60000);
+    assert_eq!(warnings, vec!["live-cluster", "allocatable"]);
+
+    let mut ledger = Ledger::new();
+    let is_stale = true; // simulated expired TTL
+    let meta = FactMetadata {
+        timestamp_ms: Some(ts),
+        ttl_ms: Some(ttl),
+        is_stale,
+        warnings,
+    };
+
+    ledger.append(Fact {
+        seq: 1,
+        tick: 0,
+        kind: "derived".to_string(),
+        name: "total_cpu_cores".to_string(),
+        value: 32.0,
+        causes: Vec::new(),
+        origin: "external: kubectl".to_string(),
+        metadata: Some(meta),
+    });
+
+    let why_text = ledger.why("total_cpu_cores");
+    assert!(why_text.contains("[STALE: expired TTL]"));
+    assert!(why_text.contains("[ttl: 60000ms]"));
+    assert!(why_text.contains("[warnings: live-cluster,allocatable]"));
+}
+
+#[test]
+fn test_causal_tree_topological_depth_limit_and_cycle_suppression() {
+    use avenc::ledger::{Fact, Ledger};
+
+    let mut ledger = Ledger::new();
+    // Build a 4-hop chain: D -> C -> B -> A
+    ledger.append(Fact {
+        seq: 1,
+        tick: 0,
+        kind: "input".to_string(),
+        name: "A".to_string(),
+        value: 10.0,
+        causes: vec![],
+        origin: "seed".to_string(),
+        metadata: None,
+    });
+    ledger.append(Fact {
+        seq: 2,
+        tick: 0,
+        kind: "derived".to_string(),
+        name: "B".to_string(),
+        value: 20.0,
+        causes: vec![1],
+        origin: "= A * 2".to_string(),
+        metadata: None,
+    });
+    ledger.append(Fact {
+        seq: 3,
+        tick: 0,
+        kind: "derived".to_string(),
+        name: "C".to_string(),
+        value: 30.0,
+        causes: vec![2],
+        origin: "= B + 10".to_string(),
+        metadata: None,
+    });
+    ledger.append(Fact {
+        seq: 4,
+        tick: 0,
+        kind: "derived".to_string(),
+        name: "D".to_string(),
+        value: 40.0,
+        causes: vec![3],
+        origin: "= C + 10".to_string(),
+        metadata: None,
+    });
+
+    // Unlimited why query shows all 4 hops
+    let full_why = ledger.why("D");
+    assert!(full_why.contains("#4 D = 40.0000"));
+    assert!(full_why.contains("#1 A = 10.0000"));
+
+    // Depth-pruned query with limit 2 stops at hop 2
+    let pruned_why = ledger.why_with_depth("D", Some(2));
+    assert!(pruned_why.contains("#4 D = 40.0000"));
+    assert!(pruned_why.contains("#3 C = 30.0000"));
+    assert!(pruned_why.contains("pruned: 1 ancestor(s) beyond hop limit 2"));
+    assert!(!pruned_why.contains("#1 A = 10.0000"));
+}
+
+#[test]
+fn test_nan_and_inf_robustness_in_derivatives_and_solver() {
+    use avenc::ast::*;
+    use avenc::diff::eval_expr;
+    use avenc::solver::SolverEngine;
+    use std::collections::HashMap;
+
+    // Division by zero domain error in eval_expr
+    let div_zero = Expr::Bin(
+        BinaryOp::Div,
+        Box::new(Expr::Num(1.0)),
+        Box::new(Expr::Num(0.0)),
+    );
+    let env = HashMap::new();
+    assert!(eval_expr(&div_zero, &env).is_err());
+
+    // Solver handles degenerate equation without panic or NaN leakage
+    let mut solver = SolverEngine::new();
+    solver.add_relation(Equation {
+        lhs: "x".to_string(),
+        op: ConstraintOp::Equal,
+        rhs: Expr::Bin(
+            BinaryOp::Div,
+            Box::new(Expr::Num(1.0)),
+            Box::new(Expr::Var("y".to_string())),
+        ),
+        original_text: "x = 1.0 / y".to_string(),
+        line: 1,
+        col: 1,
+    });
+
+    let mut solve_env = HashMap::new();
+    solve_env.insert("y".to_string(), 0.0);
+    let result = solver.solve(&solve_env);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_kubernetes_multi_objective_pareto_convergence_and_knee_point() {
+    use avenc::evaluator::{Orchestrator, OrchestratorConfig, VarMap};
+    use avenc::lexer::Lexer;
+    use avenc::parser::Parser;
+
+    let src = r#"
+        relation ClusterPareto {
+            active_cpu = target_pods * 0.5
+            active_mem = target_pods * 1.0
+            cpu_utilization = (active_cpu / 32.0) * 100.0
+            mem_headroom_pct = ((60.803 - active_mem) / 60.803) * 100.0
+        }
+        solve ClusterPareto with {
+            target_pods = 20.0
+            mem_headroom_pct >= 30.0
+            cpu_utilization >= 10.0
+        }
+    "#;
+
+    let mut lex = Lexer::new(src);
+    let mut parser = Parser::new(lex.tokenize().unwrap());
+    let module = parser.parse_module("ClusterPareto").unwrap();
+
+    let orchestrator = Orchestrator::from_config(
+        &OrchestratorConfig::default(),
+        module.blocks[0].equations.clone(),
+    );
+
+    let mut initial_inputs = VarMap::new();
+    initial_inputs.set("target_pods", 20.0);
+
+    let obj_list = vec![
+        "cpu_utilization".to_string(),
+        "mem_headroom_pct".to_string(),
+    ];
+
+    let t_start = std::time::Instant::now();
+    let frontier = orchestrator
+        .solve_pareto(&initial_inputs, "target_pods", (10.0, 45.0), 5, &obj_list)
+        .expect("Pareto solve must succeed");
+
+    let solve_duration_ms = t_start.elapsed().as_secs_f64() * 1000.0;
+
+    // Must converge well under the 50ms requirement (typically < 0.2ms)
+    assert!(
+        solve_duration_ms < 50.0,
+        "Pareto solve took {:.3} ms (exceeded 50ms limit)",
+        solve_duration_ms
+    );
+    assert_eq!(frontier.len(), 6);
+
+    // Verify trade-off monotonicity: as target_pods increase, CPU utilization increases and mem headroom decreases
+    let first = &frontier[0];
+    let last = &frontier[5];
+    assert!(first.vars.get("cpu_utilization").unwrap() < last.vars.get("cpu_utilization").unwrap());
+    assert!(
+        first.vars.get("mem_headroom_pct").unwrap() > last.vars.get("mem_headroom_pct").unwrap()
+    );
+
+    // Verify Knee Point detection
+    let knee_idx = Orchestrator::find_knee_point(&frontier);
+    assert!(knee_idx.is_some());
 }
