@@ -77,15 +77,18 @@ A relation describes mathematical invariants that must hold true. Any unknown ca
 ```aven
 // flight_mesh.aven — Atmospheric lapse & flight dynamics
 relation FlightAtmosphericDynamics {
-    // 1. ISA Tropospheric Barometric Lapse
+    // 1. ISA atmosphere: troposphere lapse capped at the 11 km tropopause, isothermal above
     surface_temp_k = surface_temp_c + 273.15
     lapse_rate = 0.0065
-    ambient_temp_k = surface_temp_k - (lapse_rate * baro_altitude_m)
+    tropopause_m = 11000.0
+    troposphere_m = (baro_altitude_m + tropopause_m - abs(baro_altitude_m - tropopause_m)) / 2.0
+    above_tropopause_m = baro_altitude_m - troposphere_m
+    ambient_temp_k = surface_temp_k - (lapse_rate * troposphere_m)
     ambient_temp_c = ambient_temp_k - 273.15
 
     // 2. Barometric Pressure & Air Density
-    pressure_ratio = 1.0 - ((lapse_rate * baro_altitude_m) / surface_temp_k)
-    ambient_pressure_pa = (surface_altim_hpa * 100.0) * (pressure_ratio ^ 5.2561)
+    pressure_ratio = 1.0 - ((lapse_rate * troposphere_m) / surface_temp_k)
+    ambient_pressure_pa = (surface_altim_hpa * 100.0) * (pressure_ratio ^ 5.2561) * exp(-(9.80665 / 287.058) * above_tropopause_m / ambient_temp_k)
     air_density_kg_m3 = ambient_pressure_pa / (287.058 * ambient_temp_k)
 
     // 3. High-Speed Aerodynamics & Compressibility
