@@ -13,6 +13,7 @@ pub enum TokenKind {
     KwMaximize,
     KwUsing,
     KwExternal,
+    KwInt,
 
     // Literals & Identifiers
     Ident(String),
@@ -316,6 +317,7 @@ impl<'a> Lexer<'a> {
             "signal" => TokenKind::KwSignal,
             "minimize" => TokenKind::KwMinimize,
             "maximize" => TokenKind::KwMaximize,
+            "int" | "integer" => TokenKind::KwInt,
             _ => TokenKind::Ident(s.clone()),
         };
 

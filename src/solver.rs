@@ -13,6 +13,13 @@ pub enum SolverError {
         expected: f64,
         given: f64,
     },
+    ConstraintViolation {
+        constraint: String,
+        lhs: String,
+        actual: f64,
+        bound: f64,
+    },
+    Infeasible(String),
     MathError(String),
 }
 
@@ -29,6 +36,17 @@ impl fmt::Display for SolverError {
                 "Inconsistency in '{}': implies {} = {:.4}, but {} is bound to {:.4}",
                 relation, lhs, expected, lhs, given
             ),
+            SolverError::ConstraintViolation {
+                constraint,
+                lhs,
+                actual,
+                bound,
+            } => write!(
+                f,
+                "Constraint violation in '{}': {} = {:.4} violates bound {:.4}",
+                constraint, lhs, actual, bound
+            ),
+            SolverError::Infeasible(msg) => write!(f, "No feasible solution found: {}", msg),
             SolverError::MathError(msg) => write!(f, "Solver math error: {}", msg),
         }
     }
@@ -42,6 +60,9 @@ const SEEDS_COUPLED: &[f64] = &[1.0, 0.5, 2.0, 10.0, 0.1, -1.0];
 #[derive(Debug, Clone)]
 pub struct SolverEngine {
     pub relations: Vec<Equation>,
+    pub constraints: Vec<Constraint>,
+    pub objectives: Vec<Objective>,
+    pub integer_vars: BTreeSet<String>,
     pub trace: Vec<String>,
 }
 
@@ -55,18 +76,73 @@ impl SolverEngine {
     pub fn new() -> Self {
         Self {
             relations: Vec::new(),
+            constraints: Vec::new(),
+            objectives: Vec::new(),
+            integer_vars: BTreeSet::new(),
             trace: Vec::new(),
         }
     }
 
     pub fn add_relation(&mut self, eq: Equation) {
-        if !self
-            .relations
-            .iter()
-            .any(|e| e.lhs == eq.lhs && format!("{}", e.rhs) == format!("{}", eq.rhs))
-        {
-            self.relations.push(eq);
+        if eq.op == ConstraintOp::Equal {
+            if !self
+                .relations
+                .iter()
+                .any(|e| e.lhs == eq.lhs && format!("{}", e.rhs) == format!("{}", eq.rhs))
+            {
+                self.relations.push(eq);
+            }
+        } else {
+            self.add_constraint(Constraint {
+                lhs: eq.lhs,
+                op: eq.op,
+                rhs: eq.rhs,
+                original_text: eq.original_text,
+                line: eq.line,
+                col: eq.col,
+            });
         }
+    }
+
+    pub fn add_constraint(&mut self, c: Constraint) {
+        if !self.constraints.iter().any(|existing| {
+            existing.lhs == c.lhs
+                && existing.op == c.op
+                && format!("{}", existing.rhs) == format!("{}", c.rhs)
+        }) {
+            self.constraints.push(c);
+        }
+    }
+
+    pub fn add_objective(&mut self, obj: Objective) {
+        self.objectives.push(obj);
+    }
+
+    pub fn add_integer_var(&mut self, var: String) {
+        self.integer_vars.insert(var);
+    }
+
+    pub fn check_constraint(
+        c: &Constraint,
+        env: &HashMap<String, f64>,
+    ) -> Result<bool, SolverError> {
+        let lhs_val = match env.get(&c.lhs) {
+            Some(&v) => v,
+            None => return Ok(true),
+        };
+        let rhs_val = match eval_expr(&c.rhs, env) {
+            Ok(v) => v,
+            Err(_) => return Ok(true),
+        };
+        let tol = 1e-6 * (1.0 + rhs_val.abs());
+        let satisfied = match c.op {
+            ConstraintOp::Equal => (lhs_val - rhs_val).abs() <= tol,
+            ConstraintOp::LessEqual => lhs_val <= rhs_val + tol,
+            ConstraintOp::GreaterEqual => lhs_val >= rhs_val - tol,
+            ConstraintOp::Less => lhs_val < rhs_val - 1e-9,
+            ConstraintOp::Greater => lhs_val > rhs_val + 1e-9,
+        };
+        Ok(satisfied)
     }
 
     pub fn solve(
@@ -76,11 +152,59 @@ impl SolverEngine {
         let mut env = initial_bindings.clone();
         self.trace.clear();
 
+        // 1. Solve pure equality relations
+        let pure_eqs: Vec<Equation> = self
+            .relations
+            .iter()
+            .filter(|e| e.op == ConstraintOp::Equal)
+            .cloned()
+            .collect();
+
+        self.solve_pure_equalities(&pure_eqs, &mut env)?;
+
+        // 2. If constraints or objectives exist, run optimization
+        if !self.constraints.is_empty() || !self.objectives.is_empty() {
+            self.solve_with_optimization(&mut env)?;
+        }
+
+        // 3. Verify feasibility of all constraints against settled env
+        for c in &self.constraints {
+            if !Self::check_constraint(c, &env)? {
+                let lhs_val = env.get(&c.lhs).copied().unwrap_or(0.0);
+                let rhs_val = eval_expr(&c.rhs, &env).unwrap_or(0.0);
+                return Err(SolverError::ConstraintViolation {
+                    constraint: c.original_text.clone(),
+                    lhs: c.lhs.clone(),
+                    actual: lhs_val,
+                    bound: rhs_val,
+                });
+            }
+        }
+
+        // 4. Clean integer variable values
+        for iv in &self.integer_vars {
+            if let Some(val) = env.get_mut(iv) {
+                let rounded = val.round();
+                if (*val - rounded).abs() < 1e-4 {
+                    *val = rounded;
+                }
+            }
+        }
+
+        Ok(env)
+    }
+
+    fn solve_pure_equalities(
+        &mut self,
+        relations: &[Equation],
+        env: &mut HashMap<String, f64>,
+    ) -> Result<bool, SolverError> {
+        let mut overall_progressed = false;
         for _round in 0..300 {
             let mut progressed = false;
             let mut blocked = Vec::new();
 
-            for eq in &self.relations {
+            for eq in relations {
                 let mut vars = eq.rhs.vars();
                 vars.insert(eq.lhs.clone());
 
@@ -89,7 +213,7 @@ impl SolverEngine {
 
                 if unknowns.is_empty() {
                     // All variables known: verify mathematical consistency
-                    let expected = eval_expr(&eq.rhs, &env)
+                    let expected = eval_expr(&eq.rhs, env)
                         .map_err(|e| SolverError::MathError(e.to_string()))?;
                     let given = *env.get(&eq.lhs).unwrap();
                     let tol = 1e-6 * 1.0f64.max(given.abs());
@@ -105,19 +229,21 @@ impl SolverEngine {
                     let u = &unknowns[0];
                     if u == &eq.lhs {
                         // Forward evaluation: lhs is unknown, rhs is completely known
-                        let val = eval_expr(&eq.rhs, &env)
+                        let val = eval_expr(&eq.rhs, env)
                             .map_err(|e| SolverError::MathError(e.to_string()))?;
                         env.insert(u.clone(), val);
                         self.trace
                             .push(format!("[{}] {} <- forward eval", eq.original_text, u));
                         progressed = true;
+                        overall_progressed = true;
                     } else if env.contains_key(&eq.lhs) {
                         // 1D Backward solving: solve rhs(..., u=x, ...) = lhs
-                        if let Some(x) = self.solve_one_unknown(eq, u, &env) {
+                        if let Some(x) = self.solve_one_unknown(eq, u, env) {
                             env.insert(u.clone(), x);
                             self.trace
                                 .push(format!("[{}] {} <- backward Newton", eq.original_text, u));
                             progressed = true;
+                            overall_progressed = true;
                         } else {
                             blocked.push(eq.clone());
                         }
@@ -131,9 +257,10 @@ impl SolverEngine {
 
             // Coupled multi-unknown simultaneous solving attempt
             if !progressed && !blocked.is_empty() {
-                if let Some(solved_env) = self.try_coupled(&blocked, &env) {
-                    env = solved_env;
+                if let Some(solved_env) = self.try_coupled(&blocked, env) {
+                    *env = solved_env;
                     progressed = true;
+                    overall_progressed = true;
                 }
             }
 
@@ -142,7 +269,263 @@ impl SolverEngine {
             }
         }
 
-        Ok(env)
+        Ok(overall_progressed)
+    }
+
+    fn solve_with_optimization(
+        &mut self,
+        env: &mut HashMap<String, f64>,
+    ) -> Result<bool, SolverError> {
+        let mut all_vars = BTreeSet::new();
+        for eq in &self.relations {
+            all_vars.insert(eq.lhs.clone());
+            for v in eq.rhs.vars() {
+                all_vars.insert(v);
+            }
+        }
+        for c in &self.constraints {
+            all_vars.insert(c.lhs.clone());
+            for v in c.rhs.vars() {
+                all_vars.insert(v);
+            }
+        }
+        for obj in &self.objectives {
+            all_vars.insert(obj.target.clone());
+        }
+
+        let remaining_unknowns: Vec<String> = all_vars
+            .into_iter()
+            .filter(|v| !env.contains_key(v))
+            .collect();
+
+        if remaining_unknowns.is_empty() {
+            return Ok(false);
+        }
+
+        let primary_obj = self.objectives.first().cloned();
+        let base_relations = self.relations.clone();
+        let constraints_list = self.constraints.clone();
+
+        let compute_objective = |cand_env: &HashMap<String, f64>| -> Option<f64> {
+            if let Some(ref obj) = primary_obj {
+                cand_env.get(&obj.target).copied()
+            } else {
+                Some(0.0)
+            }
+        };
+
+        let is_better = |new_score: f64, current_best: f64| -> bool {
+            if let Some(ref obj) = primary_obj {
+                match obj.kind {
+                    ObjectiveKind::Minimize => new_score < current_best - 1e-9,
+                    ObjectiveKind::Maximize => new_score > current_best + 1e-9,
+                }
+            } else {
+                false
+            }
+        };
+
+        struct CandidateSolution {
+            env: HashMap<String, f64>,
+            objective_val: f64,
+        }
+        let mut best_solution: Option<CandidateSolution> = None;
+
+        // Form active boundary candidate sets from inequality constraints
+        let mut boundary_sets: Vec<Vec<Equation>> = Vec::new();
+
+        // 1-boundary sets
+        for c in &constraints_list {
+            boundary_sets.push(vec![Equation {
+                lhs: c.lhs.clone(),
+                op: ConstraintOp::Equal,
+                rhs: c.rhs.clone(),
+                original_text: format!("{} = {}", c.lhs, c.rhs),
+                line: c.line,
+                col: c.col,
+            }]);
+        }
+
+        // 2-boundary sets if multiple constraints exist
+        if constraints_list.len() > 1 {
+            for i in 0..constraints_list.len() {
+                for j in (i + 1)..constraints_list.len() {
+                    let c1 = &constraints_list[i];
+                    let c2 = &constraints_list[j];
+                    boundary_sets.push(vec![
+                        Equation {
+                            lhs: c1.lhs.clone(),
+                            op: ConstraintOp::Equal,
+                            rhs: c1.rhs.clone(),
+                            original_text: format!("{} = {}", c1.lhs, c1.rhs),
+                            line: c1.line,
+                            col: c1.col,
+                        },
+                        Equation {
+                            lhs: c2.lhs.clone(),
+                            op: ConstraintOp::Equal,
+                            rhs: c2.rhs.clone(),
+                            original_text: format!("{} = {}", c2.lhs, c2.rhs),
+                            line: c2.line,
+                            col: c2.col,
+                        },
+                    ]);
+                }
+            }
+        }
+
+        for boundary_eqs in boundary_sets {
+            let mut test_relations = base_relations.clone();
+            for b in &boundary_eqs {
+                test_relations.push(b.clone());
+            }
+
+            let mut relaxed_env = env.clone();
+            if self
+                .solve_pure_equalities(&test_relations, &mut relaxed_env)
+                .is_ok()
+            {
+                let still_unknown: Vec<&String> = remaining_unknowns
+                    .iter()
+                    .filter(|u| !relaxed_env.contains_key(*u))
+                    .collect();
+
+                if !still_unknown.is_empty() {
+                    continue;
+                }
+
+                let free_int_vars: Vec<String> = self
+                    .integer_vars
+                    .iter()
+                    .filter(|iv| remaining_unknowns.contains(iv))
+                    .cloned()
+                    .collect();
+
+                if free_int_vars.is_empty() {
+                    let mut feasible = true;
+                    for c in &constraints_list {
+                        if !Self::check_constraint(c, &relaxed_env)? {
+                            feasible = false;
+                            break;
+                        }
+                    }
+                    if feasible {
+                        if let Some(score) = compute_objective(&relaxed_env) {
+                            let update = match &best_solution {
+                                None => true,
+                                Some(best) => is_better(score, best.objective_val),
+                            };
+                            if update {
+                                best_solution = Some(CandidateSolution {
+                                    env: relaxed_env.clone(),
+                                    objective_val: score,
+                                });
+                            }
+                        }
+                    }
+                } else {
+                    self.trace.push(format!(
+                        "[boundary] relaxed boundary {} => continuous values: {}",
+                        boundary_eqs
+                            .iter()
+                            .map(|b| b.original_text.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        free_int_vars
+                            .iter()
+                            .map(|v| format!("{} = {:.4}", v, relaxed_env[v]))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+
+                    let mut int_combinations: Vec<Vec<(String, f64)>> = vec![vec![]];
+                    for var in &free_int_vars {
+                        let x = relaxed_env[var];
+                        let center = x.round() as i64;
+                        let mut cands = vec![x.floor() as i64, x.ceil() as i64];
+                        for delta in -2..=2 {
+                            cands.push(center + delta);
+                        }
+                        cands.sort();
+                        cands.dedup();
+
+                        let mut next_combinations = Vec::new();
+                        for combo in &int_combinations {
+                            for &cand in &cands {
+                                let mut new_combo = combo.clone();
+                                new_combo.push((var.clone(), cand as f64));
+                                next_combinations.push(new_combo);
+                            }
+                        }
+                        int_combinations = next_combinations;
+                    }
+
+                    for combo in int_combinations {
+                        let mut cand_env = env.clone();
+                        for (v, val) in &combo {
+                            cand_env.insert(v.clone(), *val);
+                        }
+
+                        if self
+                            .solve_pure_equalities(&base_relations, &mut cand_env)
+                            .is_ok()
+                        {
+                            let unresolved: Vec<&String> = remaining_unknowns
+                                .iter()
+                                .filter(|u| !cand_env.contains_key(*u))
+                                .collect();
+
+                            if unresolved.is_empty() {
+                                let mut feasible = true;
+                                for c in &constraints_list {
+                                    if !Self::check_constraint(c, &cand_env)? {
+                                        feasible = false;
+                                        break;
+                                    }
+                                }
+                                if feasible {
+                                    if let Some(score) = compute_objective(&cand_env) {
+                                        let update = match &best_solution {
+                                            None => true,
+                                            Some(best) => is_better(score, best.objective_val),
+                                        };
+                                        if update {
+                                            let combo_str = combo
+                                                .iter()
+                                                .map(|(v, val)| format!("{} = {:.0}", v, val))
+                                                .collect::<Vec<_>>()
+                                                .join(", ");
+                                            self.trace.push(format!(
+                                                "[branch-and-bound] candidate {} is feasible (objective = {:.4})",
+                                                combo_str, score
+                                            ));
+                                            best_solution = Some(CandidateSolution {
+                                                env: cand_env.clone(),
+                                                objective_val: score,
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(best) = best_solution {
+            *env = best.env;
+            self.trace.push(format!(
+                "[optimize] settled optimal solution with objective = {:.4}",
+                best.objective_val
+            ));
+            Ok(true)
+        } else {
+            Err(SolverError::Infeasible(
+                "constraints could not be satisfied by any candidate integer or boundary values"
+                    .to_string(),
+            ))
+        }
     }
 
     fn solve_one_unknown(&self, eq: &Equation, u: &str, env: &HashMap<String, f64>) -> Option<f64> {

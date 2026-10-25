@@ -1,0 +1,14 @@
+// cluster_capacity.aven
+// Minimal model that consumes live kind/Kubernetes node data
+// via the kubectl_adapter.py external evaluator.
+
+relation ClusterCapacity using external("python", "evaluations/tests/kube/kubectl_adapter.py") {
+}
+
+solve ClusterCapacity with {
+    cpu_headroom >= 10.0
+    mem_headroom >= 20.0
+}
+
+// Optional: ask Aven to explain a value
+// avenc why cluster_capacity.aven total_cpu_cores

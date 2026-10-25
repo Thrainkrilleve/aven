@@ -205,6 +205,7 @@ fn test_c_code_generation() {
                 col: 1,
             },
         ],
+        integer_vars: Vec::new(),
         line: 1,
         col: 1,
     };
@@ -829,4 +830,279 @@ fn test_parser_inequality_constraints_with_numeric_bindings() {
     assert_eq!(solve.constraints[0].op, ConstraintOp::LessEqual);
     assert_eq!(solve.constraints[1].lhs, "alarm_count");
     assert_eq!(solve.constraints[1].op, ConstraintOp::LessEqual);
+}
+
+#[test]
+fn test_mixed_integer_capacity_sizing_branch_and_bound() {
+    use avenc::lexer::Lexer;
+    use avenc::parser::Parser;
+    use avenc::solver::SolverEngine;
+    use std::collections::HashMap;
+
+    let src = r#"
+    relation Storage {
+        int drives
+        raw_tb = drives * drive_tb
+        usable_tb = raw_tb * ec_efficiency
+        usable_tb >= target_capacity
+    }
+
+    solve Storage with {
+        target_capacity = 100.0
+        drive_tb = 18.0
+        ec_efficiency = 0.75
+        minimize(drives)
+    }
+    "#;
+
+    let mut lexer = Lexer::new(src);
+    let tokens = lexer.tokenize().expect("tokenize failed");
+    let mut parser = Parser::new(tokens);
+    let module = parser.parse_module("StorageModule").expect("parse failed");
+
+    let blk = &module.blocks[0];
+    assert_eq!(blk.integer_vars, vec!["drives"]);
+
+    let solve = &module.solves[0];
+    assert_eq!(solve.objectives.len(), 1);
+    assert_eq!(solve.objectives[0].target, "drives");
+
+    let mut solver = SolverEngine::new();
+    for eq in &blk.equations {
+        solver.add_relation(eq.clone());
+    }
+    for iv in &blk.integer_vars {
+        solver.add_integer_var(iv.clone());
+    }
+    for c in &solve.constraints {
+        solver.add_constraint(c.clone());
+    }
+    for obj in &solve.objectives {
+        solver.add_objective(obj.clone());
+    }
+
+    let mut inputs = HashMap::new();
+    for b in &solve.bindings {
+        inputs.insert(b.name.clone(), b.value);
+    }
+
+    let solved = solver.solve(&inputs).expect("Solver failed on MILP model");
+
+    // Continuous relaxation was: drives = 100 / (18 * 0.75) = 7.4074
+    // Candidate 7 gives usable_tb = 94.5 < 100 (infeasible)
+    // Candidate 8 gives usable_tb = 108.0 >= 100 (feasible, minimal integer)
+    assert_eq!(solved.get("drives").copied(), Some(8.0));
+    assert_eq!(solved.get("raw_tb").copied(), Some(144.0));
+    assert_eq!(solved.get("usable_tb").copied(), Some(108.0));
+    assert_eq!(solved.get("target_capacity").copied(), Some(100.0));
+}
+
+#[test]
+fn test_mixed_integer_worker_ceiling_inequality() {
+    use avenc::lexer::Lexer;
+    use avenc::parser::Parser;
+    use avenc::solver::SolverEngine;
+    use std::collections::HashMap;
+
+    let src = r#"
+    relation WorkerNode {
+        int workers
+        power_w = 25.0 + workers * 2.25
+        power_w <= 245.0
+    }
+
+    solve WorkerNode with {
+        maximize(workers)
+    }
+    "#;
+
+    let mut lexer = Lexer::new(src);
+    let tokens = lexer.tokenize().expect("tokenize failed");
+    let mut parser = Parser::new(tokens);
+    let module = parser.parse_module("WorkerModule").expect("parse failed");
+
+    let blk = &module.blocks[0];
+    let solve = &module.solves[0];
+
+    let mut solver = SolverEngine::new();
+    for eq in &blk.equations {
+        solver.add_relation(eq.clone());
+    }
+    for iv in &blk.integer_vars {
+        solver.add_integer_var(iv.clone());
+    }
+    for c in &solve.constraints {
+        solver.add_constraint(c.clone());
+    }
+    for obj in &solve.objectives {
+        solver.add_objective(obj.clone());
+    }
+
+    let inputs = HashMap::new();
+    let solved = solver
+        .solve(&inputs)
+        .expect("Solver failed on worker ceiling");
+
+    // Boundary relaxation: 25 + workers * 2.25 = 245 => workers = 97.7778
+    // Candidate 98 => power = 245.5 > 245 (infeasible)
+    // Candidate 97 => power = 243.25 <= 245 (feasible, maximal integer)
+    assert_eq!(solved.get("workers").copied(), Some(97.0));
+    assert_eq!(solved.get("power_w").copied(), Some(243.25));
+}
+
+#[test]
+fn test_mixed_integer_infeasible_constraints() {
+    use avenc::lexer::Lexer;
+    use avenc::parser::Parser;
+    use avenc::solver::SolverEngine;
+    use std::collections::HashMap;
+
+    let src = r#"
+    relation Conflicting {
+        int workers
+        power_w = workers * 10.0
+        power_w <= 50.0
+        power_w >= 100.0
+    }
+
+    solve Conflicting with {
+        minimize(workers)
+    }
+    "#;
+
+    let mut lexer = Lexer::new(src);
+    let tokens = lexer.tokenize().expect("tokenize failed");
+    let mut parser = Parser::new(tokens);
+    let module = parser.parse_module("ConflictModule").expect("parse failed");
+
+    let blk = &module.blocks[0];
+    let solve = &module.solves[0];
+
+    let mut solver = SolverEngine::new();
+    for eq in &blk.equations {
+        solver.add_relation(eq.clone());
+    }
+    for iv in &blk.integer_vars {
+        solver.add_integer_var(iv.clone());
+    }
+    for c in &solve.constraints {
+        solver.add_constraint(c.clone());
+    }
+    for obj in &solve.objectives {
+        solver.add_objective(obj.clone());
+    }
+
+    let inputs = HashMap::new();
+    let res = solver.solve(&inputs);
+    assert!(
+        res.is_err(),
+        "Expected solver to fail on conflicting constraints"
+    );
+}
+
+#[test]
+fn test_mixed_integer_provenance_and_ledger() {
+    use avenc::ledger::{Fact, Ledger};
+    use avenc::lexer::Lexer;
+    use avenc::parser::Parser;
+    use avenc::solver::SolverEngine;
+    use std::collections::HashMap;
+
+    let src = r#"
+    relation Storage {
+        int drives
+        raw_tb = drives * drive_tb
+        usable_tb = raw_tb * ec_efficiency
+    }
+
+    solve Storage with {
+        target_capacity = 100.0
+        drive_tb = 18.0
+        ec_efficiency = 0.75
+        usable_tb >= target_capacity
+        minimize(drives)
+    }
+    "#;
+
+    let mut lexer = Lexer::new(src);
+    let tokens = lexer.tokenize().expect("tokenize failed");
+    let mut parser = Parser::new(tokens);
+    let module = parser.parse_module("StorageModule").expect("parse failed");
+
+    let mut env = HashMap::new();
+    let mut ledger = Ledger::new();
+    let mut seq = 0;
+
+    for solve in &module.solves {
+        for b in &solve.bindings {
+            seq += 1;
+            env.insert(b.name.clone(), b.value);
+            ledger.append(Fact {
+                seq,
+                tick: 0,
+                kind: "input".to_string(),
+                name: b.name.clone(),
+                value: b.value,
+                causes: Vec::new(),
+                origin: "user binding".to_string(),
+            });
+        }
+    }
+
+    let mut solver = SolverEngine::new();
+    for blk in &module.blocks {
+        for eq in &blk.equations {
+            solver.add_relation(eq.clone());
+        }
+        for iv in &blk.integer_vars {
+            solver.add_integer_var(iv.clone());
+        }
+    }
+    for solve in &module.solves {
+        for c in &solve.constraints {
+            solver.add_constraint(c.clone());
+        }
+        for obj in &solve.objectives {
+            solver.add_objective(obj.clone());
+        }
+        for iv in &solve.integer_vars {
+            solver.add_integer_var(iv.clone());
+        }
+    }
+
+    let solved_env = solver.solve(&env).expect("Solve failed");
+    assert_eq!(solved_env["drives"], 8.0);
+    assert_eq!(solved_env["raw_tb"], 144.0);
+    assert_eq!(solved_env["usable_tb"], 108.0);
+
+    for (k, v) in &solved_env {
+        if !env.contains_key(k) {
+            seq += 1;
+            let mut causes = Vec::new();
+            let mut origin = "derived".to_string();
+            if let Some(eq) = solver.relations.iter().find(|e| &e.lhs == k) {
+                origin = format!("= {}", eq.rhs);
+                for input_var in eq.rhs.vars() {
+                    if let Some(fact) = ledger.latest(&input_var) {
+                        causes.push(fact.seq);
+                    }
+                }
+            } else if solver.integer_vars.contains(k) {
+                origin = "integer optimization".to_string();
+            }
+
+            ledger.append(Fact {
+                seq,
+                tick: 0,
+                kind: "derived".to_string(),
+                name: k.clone(),
+                value: *v,
+                causes,
+                origin,
+            });
+        }
+    }
+
+    let why_drives = ledger.why("drives");
+    assert!(why_drives.contains("drives = 8.0000"));
 }

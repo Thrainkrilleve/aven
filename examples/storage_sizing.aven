@@ -1,0 +1,25 @@
+// examples/storage_sizing.aven — Distributed Storage Capacity Sizing with Mixed-Integer Optimization
+//
+// Solves discrete drive provisioning natively via branch-and-bound relaxation
+// without flat-gradient ceil traps:
+//   usable_tb >= target_capacity
+//   minimize(drives)
+//   int drives
+
+relation StorageCluster {
+    int drives
+    raw_tb = drives * drive_tb
+    usable_tb = raw_tb * ec_efficiency
+    power_draw_w = idle_power_w + drives * drive_power_w
+    usable_tb >= target_capacity
+}
+
+// Sizing for 100 TB usable capacity using 18 TB enterprise drives and 4+2 Erasure Coding (75% efficiency)
+solve StorageCluster with {
+    target_capacity  = 100.0
+    drive_tb         = 18.0
+    ec_efficiency    = 0.75
+    idle_power_w     = 85.0
+    drive_power_w    = 9.5
+    minimize(drives)
+}

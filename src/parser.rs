@@ -140,7 +140,14 @@ impl Parser {
         self.expect(&TokenKind::LeftBrace, "'{'")?;
 
         let mut equations = Vec::new();
+        let mut integer_vars = Vec::new();
         while self.peek().kind != TokenKind::RightBrace && self.peek().kind != TokenKind::Eof {
+            if self.peek().kind == TokenKind::KwInt {
+                self.take();
+                let (ident, _, _) = self.expect_ident()?;
+                integer_vars.push(ident);
+                continue;
+            }
             let eq = self.parse_equation()?;
             equations.push(eq);
         }
@@ -152,6 +159,7 @@ impl Parser {
             name,
             backend,
             equations,
+            integer_vars,
             line: start_tok.line,
             col: start_tok.col,
         })
@@ -284,8 +292,17 @@ impl Parser {
         let mut bindings = Vec::new();
         let mut constraints = Vec::new();
         let mut objectives = Vec::new();
+        let mut integer_vars = Vec::new();
 
         while self.peek().kind != TokenKind::RightBrace && self.peek().kind != TokenKind::Eof {
+            // Check for integer variable declarations: int drives or integer drives
+            if self.peek().kind == TokenKind::KwInt {
+                self.take();
+                let (target_var, _, _) = self.expect_ident()?;
+                integer_vars.push(target_var);
+                continue;
+            }
+
             // Check for objectives: minimize(x) or maximize(x)
             if self.peek().kind == TokenKind::KwMinimize
                 || self.peek().kind == TokenKind::KwMaximize
@@ -386,6 +403,7 @@ impl Parser {
             bindings,
             constraints,
             objectives,
+            integer_vars,
             line: start_tok.line,
             col: start_tok.col,
         })

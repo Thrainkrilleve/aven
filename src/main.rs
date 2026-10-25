@@ -205,11 +205,27 @@ fn cmd_run(path: &str) {
     let module = parse_file(path);
     let (env, ledger, _) = execute_module(&module, true);
 
+    let mut integer_vars = std::collections::BTreeSet::new();
+    for blk in &module.blocks {
+        for iv in &blk.integer_vars {
+            integer_vars.insert(iv.clone());
+        }
+    }
+    for s in &module.solves {
+        for iv in &s.integer_vars {
+            integer_vars.insert(iv.clone());
+        }
+    }
+
     println!("\nSettled Environment:");
     let mut sorted_keys: Vec<&String> = env.keys().collect();
     sorted_keys.sort();
     for k in sorted_keys {
-        println!("  {:<16} = {:.4}", k, env[k]);
+        if integer_vars.contains(k) {
+            println!("  {:<16} = {:.0} (int)", k, env[k]);
+        } else {
+            println!("  {:<16} = {:.4}", k, env[k]);
+        }
     }
 
     if !ledger.facts.is_empty() {
@@ -241,17 +257,10 @@ fn cmd_build(
         process::exit(1);
     };
 
+    let (env, _, _) = execute_module(&module, false);
     let mut bindings = HashMap::new();
-    if let Some(solve) = module.solves.iter().find(|s| s.target == blk.name) {
-        for b in &solve.bindings {
-            bindings.insert(b.name.clone(), b.value);
-        }
-    } else {
-        // Fall back to running solver on the module to auto-fill inputs from settled relations
-        let (env, _, _) = execute_module(&module, false);
-        for (k, v) in env {
-            bindings.insert(k, v);
-        }
+    for (k, v) in env {
+        bindings.insert(k, v);
     }
 
     let c_code = match CTranspiler::transpile_block_with_options(blk, &bindings, options) {
@@ -361,6 +370,20 @@ fn execute_module(
             for eq in &blk.equations {
                 solver.add_relation(eq.clone());
             }
+            for iv in &blk.integer_vars {
+                solver.add_integer_var(iv.clone());
+            }
+        }
+    }
+    for solve in &module.solves {
+        for c in &solve.constraints {
+            solver.add_constraint(c.clone());
+        }
+        for obj in &solve.objectives {
+            solver.add_objective(obj.clone());
+        }
+        for iv in &solve.integer_vars {
+            solver.add_integer_var(iv.clone());
         }
     }
 
@@ -388,6 +411,15 @@ fn execute_module(
                                 causes.push(fact.seq);
                             }
                         }
+                    } else if let Some(c) = solver.constraints.iter().find(|c| &c.lhs == k) {
+                        origin = format!("{} {}", c.op, c.rhs);
+                        for input_var in c.rhs.vars() {
+                            if let Some(fact) = ledger.latest(&input_var) {
+                                causes.push(fact.seq);
+                            }
+                        }
+                    } else if solver.integer_vars.contains(k) {
+                        origin = "integer optimization".to_string();
                     }
 
                     ledger.append(Fact {
@@ -780,6 +812,20 @@ fn cmd_stream(path: &str, limit: usize) {
                 for eq in &blk.equations {
                     solver.add_relation(eq.clone());
                 }
+                for iv in &blk.integer_vars {
+                    solver.add_integer_var(iv.clone());
+                }
+            }
+        }
+        for solve in &module.solves {
+            for c in &solve.constraints {
+                solver.add_constraint(c.clone());
+            }
+            for obj in &solve.objectives {
+                solver.add_objective(obj.clone());
+            }
+            for iv in &solve.integer_vars {
+                solver.add_integer_var(iv.clone());
             }
         }
 

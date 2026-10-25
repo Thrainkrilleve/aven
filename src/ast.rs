@@ -200,6 +200,7 @@ pub struct BlockDecl {
     pub name: String,
     pub backend: BackendDecl,
     pub equations: Vec<Equation>,
+    pub integer_vars: Vec<String>,
     pub line: usize,
     pub col: usize,
 }
@@ -219,6 +220,7 @@ pub struct SolveDirective {
     pub bindings: Vec<Binding>,
     pub constraints: Vec<Constraint>,
     pub objectives: Vec<Objective>,
+    pub integer_vars: Vec<String>,
     pub line: usize,
     pub col: usize,
 }

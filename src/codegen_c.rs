@@ -26,10 +26,22 @@ impl CTranspiler {
     /// Topologically sort equations in a pinned block.
     /// Returns the firing order as equation indices, or an error if unresolvable.
     pub fn topo_sort(block: &BlockDecl) -> Result<Vec<usize>, CodegenError> {
-        let derived: HashSet<String> = block.equations.iter().map(|e| e.lhs.clone()).collect();
+        let equal_indices: Vec<usize> = block
+            .equations
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.op == ConstraintOp::Equal)
+            .map(|(idx, _)| idx)
+            .collect();
+
+        let derived: HashSet<String> = equal_indices
+            .iter()
+            .map(|&i| block.equations[i].lhs.clone())
+            .collect();
         let mut known: HashSet<String> = HashSet::new();
 
-        for eq in &block.equations {
+        for &i in &equal_indices {
+            let eq = &block.equations[i];
             for v in eq.rhs.vars() {
                 if !derived.contains(&v) {
                     known.insert(v); // Pure external input
@@ -40,12 +52,13 @@ impl CTranspiler {
         let mut order = Vec::new();
         let mut placed = HashSet::new();
 
-        while order.len() < block.equations.len() {
+        while order.len() < equal_indices.len() {
             let mut progressed = false;
-            for (idx, eq) in block.equations.iter().enumerate() {
+            for &idx in &equal_indices {
                 if placed.contains(&idx) {
                     continue;
                 }
+                let eq = &block.equations[idx];
                 let needed = eq.rhs.vars();
                 if needed.iter().all(|v| known.contains(v)) {
                     order.push(idx);
@@ -56,12 +69,10 @@ impl CTranspiler {
             }
 
             if !progressed {
-                let stuck: Vec<String> = block
-                    .equations
+                let stuck: Vec<String> = equal_indices
                     .iter()
-                    .enumerate()
-                    .filter(|(idx, _)| !placed.contains(idx))
-                    .map(|(_, eq)| eq.lhs.clone())
+                    .filter(|idx| !placed.contains(idx))
+                    .map(|&idx| block.equations[idx].lhs.clone())
                     .collect();
 
                 return Err(CodegenError(format!(
@@ -92,10 +103,14 @@ impl CTranspiler {
     ) -> Result<String, CodegenError> {
         let order = Self::topo_sort(block)?;
 
-        let derived: HashSet<String> = block.equations.iter().map(|e| e.lhs.clone()).collect();
+        let equal_indices: Vec<usize> = order.clone();
+        let derived: HashSet<String> = equal_indices
+            .iter()
+            .map(|&i| block.equations[i].lhs.clone())
+            .collect();
         let mut inputs_set = BTreeSet::new();
-        for eq in &block.equations {
-            for v in eq.rhs.vars() {
+        for &idx in &equal_indices {
+            for v in block.equations[idx].rhs.vars() {
                 if !derived.contains(&v) {
                     inputs_set.insert(v);
                 }
@@ -139,7 +154,8 @@ impl CTranspiler {
 
         // Function signature
         let mut param_parts: Vec<String> = inputs.iter().map(|p| format!("double {}", p)).collect();
-        for eq in &block.equations {
+        for &idx in &equal_indices {
+            let eq = &block.equations[idx];
             param_parts.push(format!("double* out_{}", eq.lhs));
         }
 
@@ -162,8 +178,8 @@ impl CTranspiler {
         if options.checked_c {
             needs_math = true;
             let mut denoms = HashSet::new();
-            for eq in &block.equations {
-                collect_denominators(&eq.rhs, &mut denoms);
+            for &idx in &equal_indices {
+                collect_denominators(&block.equations[idx].rhs, &mut denoms);
             }
             let mut checked_vars: Vec<String> =
                 denoms.into_iter().filter(|v| inputs.contains(v)).collect();
@@ -187,7 +203,8 @@ impl CTranspiler {
                         var, var
                     ));
                 }
-                for eq in &block.equations {
+                for &idx in &equal_indices {
+                    let eq = &block.equations[idx];
                     lines.push(format!(
                         "        if (out_{}) *out_{} = 0.0;",
                         eq.lhs, eq.lhs
@@ -195,6 +212,16 @@ impl CTranspiler {
                 }
                 lines.push("        exit(EXIT_FAILURE);".to_string());
                 lines.push("    }".to_string());
+            }
+        }
+
+        // Emit invariant constraints as documentation guards
+        for eq in &block.equations {
+            if eq.op != ConstraintOp::Equal {
+                lines.push(format!(
+                    "    /* Invariant constraint: {} */",
+                    eq.original_text
+                ));
             }
         }
 
@@ -206,7 +233,8 @@ impl CTranspiler {
         }
 
         // Store outputs
-        for eq in &block.equations {
+        for &idx in &equal_indices {
+            let eq = &block.equations[idx];
             lines.push(format!("    *out_{} = {};", eq.lhs, eq.lhs));
         }
         lines.push("}".to_string());
@@ -214,7 +242,8 @@ impl CTranspiler {
 
         // Standalone main()
         lines.push("int main(void) {".to_string());
-        for eq in &block.equations {
+        for &idx in &equal_indices {
+            let eq = &block.equations[idx];
             lines.push(format!("    double {} = 0.0;", eq.lhs));
         }
 
@@ -229,7 +258,8 @@ impl CTranspiler {
                 }
             })
             .collect();
-        for eq in &block.equations {
+        for &idx in &equal_indices {
+            let eq = &block.equations[idx];
             call_args.push(format!("&{}", eq.lhs));
         }
 
@@ -239,7 +269,8 @@ impl CTranspiler {
             call_args.join(", ")
         ));
 
-        for eq in &block.equations {
+        for &idx in &equal_indices {
+            let eq = &block.equations[idx];
             lines.push(format!("    printf(\"{} = %.6g\\n\", {});", eq.lhs, eq.lhs));
         }
         lines.push("    return 0;".to_string());
