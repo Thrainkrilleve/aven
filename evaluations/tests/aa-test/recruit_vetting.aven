@@ -1,0 +1,13 @@
+// recruit_vetting.aven
+// Minimal vetting model that consumes aa-reporter data.
+
+relation RecruitVetting using external("python", "reporter_adapter.py") {
+    total_flags = report_high_count + report_medium_count
+    audit_coverage = audited_characters / characters
+}
+
+solve RecruitVetting with {
+    report_high_count == 0.0
+    is_applicant == 1.0
+    total_flags <= 5.0
+}

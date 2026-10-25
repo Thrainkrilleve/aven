@@ -116,6 +116,7 @@ impl fmt::Display for Expr {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConstraintOp {
     Equal,
+    NotEqual,
     LessEqual,
     GreaterEqual,
     Less,
@@ -126,6 +127,7 @@ impl fmt::Display for ConstraintOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
             ConstraintOp::Equal => "=",
+            ConstraintOp::NotEqual => "!=",
             ConstraintOp::LessEqual => "<=",
             ConstraintOp::GreaterEqual => ">=",
             ConstraintOp::Less => "<",
@@ -217,6 +219,7 @@ pub struct Binding {
 #[derive(Debug, Clone)]
 pub struct SolveDirective {
     pub target: String,
+    pub targets: Vec<String>,
     pub bindings: Vec<Binding>,
     pub constraints: Vec<Constraint>,
     pub objectives: Vec<Objective>,

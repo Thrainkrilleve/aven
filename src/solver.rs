@@ -148,6 +148,7 @@ impl SolverEngine {
         let tol = 1e-6 * (1.0 + rhs_val.abs());
         let satisfied = match c.op {
             ConstraintOp::Equal => (lhs_val - rhs_val).abs() <= tol,
+            ConstraintOp::NotEqual => (lhs_val - rhs_val).abs() > tol,
             ConstraintOp::LessEqual => lhs_val <= rhs_val + tol,
             ConstraintOp::GreaterEqual => lhs_val >= rhs_val - tol,
             ConstraintOp::Less => lhs_val < rhs_val - 1e-9,

@@ -246,7 +246,8 @@ fn cmd_check(path: &str) {
 
 fn cmd_run(path: &str) {
     let module = parse_file(path);
-    let (env, ledger, _) = execute_module(&module, true);
+    let work_dir = std::path::Path::new(path).parent();
+    let (env, ledger, _) = execute_module(&module, true, work_dir);
 
     let mut integer_vars = std::collections::BTreeSet::new();
     for blk in &module.blocks {
@@ -278,7 +279,8 @@ fn cmd_run(path: &str) {
 
 fn cmd_why(path: &str, var: &str) {
     let module = parse_file(path);
-    let (_, ledger, _) = execute_module(&module, false);
+    let work_dir = std::path::Path::new(path).parent();
+    let (_, ledger, _) = execute_module(&module, false, work_dir);
     println!("Causal Derivation Tree for '{}':", var);
     println!("{}", ledger.why(var));
 }
@@ -300,7 +302,8 @@ fn cmd_build(
         process::exit(1);
     };
 
-    let (env, _, _) = execute_module(&module, false);
+    let work_dir = std::path::Path::new(path).parent();
+    let (env, _, _) = execute_module(&module, false, work_dir);
     let mut bindings = HashMap::new();
     for (k, v) in env {
         bindings.insert(k, v);
@@ -338,6 +341,7 @@ fn cmd_build(
 fn execute_module(
     module: &AvenModule,
     verbose: bool,
+    working_dir: Option<&std::path::Path>,
 ) -> (HashMap<String, f64>, Ledger, Option<diagnostics::Diagnosis>) {
     // 0. Verify compile-time dimensional homogeneity across all relation blocks
     let mut type_checker = units::DimensionalChecker::new();
@@ -371,7 +375,10 @@ fn execute_module(
     for blk in &module.blocks {
         if let BackendDecl::External { command, args } = &blk.backend {
             let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-            let ext_eval = evaluator::ExternalEvaluator::new(command, &arg_refs);
+            let mut ext_eval = evaluator::ExternalEvaluator::new(command, &arg_refs);
+            if let Some(dir) = working_dir {
+                ext_eval = ext_eval.with_working_dir(dir);
+            }
             let mut varmap = evaluator::VarMap::new();
             for (k, v) in &env {
                 varmap.set(k, *v);
@@ -413,10 +420,10 @@ fn execute_module(
         }
     }
 
-    // Set up solver engine (only load native Relation blocks, never duplicate with Forward or external blocks)
+    // Set up solver engine: load equations and constraints across all Relation blocks
     let mut solver = SolverEngine::new();
     for blk in &module.blocks {
-        if blk.kind == BlockKind::Relation && blk.backend == BackendDecl::Native {
+        if blk.kind == BlockKind::Relation {
             for eq in &blk.equations {
                 solver.add_relation(eq.clone());
             }
@@ -519,7 +526,7 @@ fn cmd_demo() {
     let mut lex = Lexer::new(src1);
     let mut parser = Parser::new(lex.tokenize().unwrap());
     let mod1 = parser.parse_module("fall").unwrap();
-    let (env1, _, _) = execute_module(&mod1, true);
+    let (env1, _, _) = execute_module(&mod1, true, None);
     println!(
         "  depth=45, g=9.81 => time = {:.4} s (analytic {:.4})\n",
         env1["time"],
@@ -542,7 +549,7 @@ fn cmd_demo() {
     let mut lex = Lexer::new(src2);
     let mut parser = Parser::new(lex.tokenize().unwrap());
     let mod2 = parser.parse_module("market").unwrap();
-    let (env2, _, _) = execute_module(&mod2, true);
+    let (env2, _, _) = execute_module(&mod2, true, None);
     println!(
         "  clearing = 0 => equilibrium price = {:.2}, supply = demand = {:.2}\n",
         env2["price"], env2["supply"]
@@ -578,7 +585,7 @@ fn cmd_demo() {
     // 4. Provenance & Fact Ledger
     println!("Pillar 4: Causal Provenance Ledger ('why' query)");
     println!("------------------------------------------------------------");
-    let (_, ledger3, _) = execute_module(&mod3, false);
+    let (_, ledger3, _) = execute_module(&mod3, false, None);
     println!("why cost:\n{}\n", ledger3.why("cost"));
 
     // 5. Multi-Objective Pareto Frontier & Knee-Point Optimization
@@ -829,10 +836,10 @@ fn cmd_stream(path: &str, limit: usize) {
             });
         }
 
-        // Solve any native relations declared in the module
+        // Solve relations declared in the module
         let mut solver = SolverEngine::new();
         for blk in &module.blocks {
-            if blk.kind == BlockKind::Relation && blk.backend == BackendDecl::Native {
+            if blk.kind == BlockKind::Relation {
                 for eq in &blk.equations {
                     solver.add_relation(eq.clone());
                 }
@@ -871,6 +878,7 @@ fn cmd_stream(path: &str, limit: usize) {
                     if let Ok(rhs_val) = diff::eval_expr(&c.rhs, &env) {
                         let satisfied = match c.op {
                             ConstraintOp::Equal => (lhs_val - rhs_val).abs() < 1e-4,
+                            ConstraintOp::NotEqual => (lhs_val - rhs_val).abs() >= 1e-4,
                             ConstraintOp::LessEqual => lhs_val <= rhs_val + 1e-6,
                             ConstraintOp::GreaterEqual => lhs_val >= rhs_val - 1e-6,
                             ConstraintOp::Less => lhs_val < rhs_val,

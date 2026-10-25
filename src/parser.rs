@@ -239,9 +239,13 @@ impl Parser {
     fn parse_equation(&mut self) -> Result<Equation, ParseError> {
         let (lhs, line, col) = self.expect_ident()?;
         let op = match self.peek().kind {
-            TokenKind::Equal => {
+            TokenKind::Equal | TokenKind::DoubleEqual => {
                 self.take();
                 ConstraintOp::Equal
+            }
+            TokenKind::NotEqual => {
+                self.take();
+                ConstraintOp::NotEqual
             }
             TokenKind::LessEqual => {
                 self.take();
@@ -262,7 +266,7 @@ impl Parser {
             _ => {
                 return Err(ParseError {
                     message: format!(
-                        "expected '=', '<=', '>=', '<', or '>', found '{}'",
+                        "expected '=', '==', '!=', '<=', '>=', '<', or '>', found '{}'",
                         self.peek().text
                     ),
                     line: self.peek().line,
@@ -285,7 +289,13 @@ impl Parser {
 
     fn parse_solve(&mut self) -> Result<SolveDirective, ParseError> {
         let start_tok = self.take(); // KwSolve
-        let (target, _, _) = self.expect_ident()?;
+        let (first_target, _, _) = self.expect_ident()?;
+        let mut targets = vec![first_target.clone()];
+        while self.peek().kind == TokenKind::Comma {
+            self.take(); // consume comma
+            let (next_target, _, _) = self.expect_ident()?;
+            targets.push(next_target);
+        }
         self.expect(&TokenKind::KwWith, "'with'")?;
         self.expect(&TokenKind::LeftBrace, "'{'")?;
 
@@ -326,15 +336,19 @@ impl Parser {
 
             let (name, b_line, b_col) = self.expect_ident()?;
 
-            // Check for inequality constraints: e.g. latency <= 20 ms
+            // Check for equality and inequality constraints: e.g. latency <= 20 ms, report_high_count == 0
             if matches!(
                 self.peek().kind,
-                TokenKind::LessEqual
+                TokenKind::DoubleEqual
+                    | TokenKind::NotEqual
+                    | TokenKind::LessEqual
                     | TokenKind::GreaterEqual
                     | TokenKind::Less
                     | TokenKind::Greater
             ) {
                 let op = match self.take().kind {
+                    TokenKind::DoubleEqual => ConstraintOp::Equal,
+                    TokenKind::NotEqual => ConstraintOp::NotEqual,
                     TokenKind::LessEqual => ConstraintOp::LessEqual,
                     TokenKind::GreaterEqual => ConstraintOp::GreaterEqual,
                     TokenKind::Less => ConstraintOp::Less,
@@ -399,7 +413,8 @@ impl Parser {
         self.expect(&TokenKind::RightBrace, "'}'")?;
 
         Ok(SolveDirective {
-            target,
+            target: first_target,
+            targets,
             bindings,
             constraints,
             objectives,
@@ -426,6 +441,8 @@ impl Parser {
                 && matches!(
                     self.peek_at(1).kind,
                     TokenKind::Equal
+                        | TokenKind::DoubleEqual
+                        | TokenKind::NotEqual
                         | TokenKind::LessEqual
                         | TokenKind::GreaterEqual
                         | TokenKind::Less

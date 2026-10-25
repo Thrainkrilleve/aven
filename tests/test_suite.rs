@@ -1399,3 +1399,143 @@ fn test_solver_underdetermined_error_handling() {
         other => panic!("expected SolverError::UnderDetermined, got {:?}", other),
     }
 }
+
+#[test]
+fn test_equality_and_not_equal_operators_in_equations_and_solve_constraints() {
+    use avenc::ast::ConstraintOp;
+    use avenc::lexer::Lexer;
+    use avenc::parser::Parser;
+    use avenc::solver::{SolverEngine, SolverError};
+    use std::collections::HashMap;
+
+    let src = r#"
+        relation VettingCheck {
+            score == raw_score * 1.5
+            penalty != 999.0
+        }
+        solve VettingCheck with {
+            raw_score = 10.0
+            status == 0.0
+            error_code != 500.0
+        }
+    "#;
+    let mut lex = Lexer::new(src);
+    let mut parser = Parser::new(lex.tokenize().unwrap());
+    let module = parser.parse_module("vetting").unwrap();
+
+    let blk = &module.blocks[0];
+    assert_eq!(blk.equations[0].op, ConstraintOp::Equal);
+    assert_eq!(blk.equations[1].op, ConstraintOp::NotEqual);
+
+    let solve = &module.solves[0];
+    assert_eq!(solve.bindings.len(), 1);
+    assert_eq!(solve.constraints.len(), 2);
+    assert_eq!(solve.constraints[0].op, ConstraintOp::Equal);
+    assert_eq!(solve.constraints[1].op, ConstraintOp::NotEqual);
+
+    let mut solver = SolverEngine::new();
+    for eq in &blk.equations {
+        solver.add_relation(eq.clone());
+    }
+    for c in &solve.constraints {
+        solver.add_constraint(c.clone());
+    }
+
+    let mut env = HashMap::new();
+    env.insert("raw_score".to_string(), 10.0);
+    env.insert("status".to_string(), 0.0);
+    env.insert("error_code".to_string(), 200.0);
+    env.insert("penalty".to_string(), 0.0);
+
+    let solved = solver
+        .solve(&env)
+        .expect("solving with == and != constraints must succeed");
+    assert_eq!(solved["score"], 15.0);
+
+    // Violation of == constraint
+    let mut bad_env = env.clone();
+    bad_env.insert("status".to_string(), 1.0); // status == 0.0 fails!
+    let res = solver.solve(&bad_env);
+    assert!(matches!(res, Err(SolverError::ConstraintViolation { .. })));
+}
+
+#[test]
+fn test_comma_separated_relation_targets_in_solve() {
+    use avenc::lexer::Lexer;
+    use avenc::parser::Parser;
+
+    let src = r#"
+        relation FirstRelation {
+            a = x * 2
+        }
+        relation SecondRelation {
+            b = y + 10
+        }
+        solve FirstRelation, SecondRelation with {
+            x = 5
+            y = 20
+        }
+    "#;
+    let mut lex = Lexer::new(src);
+    let mut parser = Parser::new(lex.tokenize().unwrap());
+    let module = parser.parse_module("multi").unwrap();
+
+    assert_eq!(module.blocks.len(), 2);
+    assert_eq!(module.solves.len(), 1);
+    let solve = &module.solves[0];
+    assert_eq!(solve.target, "FirstRelation");
+    assert_eq!(solve.targets, vec!["FirstRelation", "SecondRelation"]);
+}
+
+#[test]
+fn test_derived_expressions_inside_external_relation_body() {
+    use avenc::evaluator::parse_json_object_numbers;
+    use avenc::lexer::Lexer;
+    use avenc::parser::Parser;
+    use avenc::solver::SolverEngine;
+    use std::collections::HashMap;
+
+    let src = r#"
+        relation RecruitMetrics using external("python", "dummy.py") {
+            total_findings = report_high_count + report_medium_count
+            risk_ratio = total_findings / characters
+        }
+        solve RecruitMetrics with {
+            risk_ratio <= 0.5
+        }
+    "#;
+    let mut lex = Lexer::new(src);
+    let mut parser = Parser::new(lex.tokenize().unwrap());
+    let module = parser.parse_module("vetting").unwrap();
+
+    // Verify external relation block holds the derived equations
+    assert_eq!(module.blocks[0].equations.len(), 2);
+
+    // Simulate JSON output from external adapter with numbers and booleans
+    let raw_json = r#"{"report_high_count": 2, "report_medium_count": 3, "characters": 10, "is_applicant": true, "flagged": false}"#;
+    let parsed = parse_json_object_numbers(raw_json);
+    assert_eq!(parsed["report_high_count"], 2.0);
+    assert_eq!(parsed["report_medium_count"], 3.0);
+    assert_eq!(parsed["characters"], 10.0);
+    assert_eq!(parsed["is_applicant"], 1.0);
+    assert_eq!(parsed["flagged"], 0.0);
+
+    let mut solver = SolverEngine::new();
+    for eq in &module.blocks[0].equations {
+        solver.add_relation(eq.clone());
+    }
+    for c in &module.solves[0].constraints {
+        solver.add_constraint(c.clone());
+    }
+
+    let mut env = HashMap::new();
+    for (k, v) in parsed {
+        env.insert(k, v);
+    }
+
+    let solved = solver
+        .solve(&env)
+        .expect("derived equations must evaluate on external outputs");
+    assert_eq!(solved["total_findings"], 5.0);
+    assert_eq!(solved["risk_ratio"], 0.5);
+}

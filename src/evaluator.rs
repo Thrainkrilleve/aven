@@ -447,6 +447,12 @@ pub fn parse_json_object_numbers(json: &str) -> HashMap<String, f64> {
                     if let Ok(num) = num_str.trim().parse::<f64>() {
                         map.insert(key, num);
                     }
+                } else if idx + 4 <= len && &bytes[idx..idx + 4] == b"true" {
+                    map.insert(key, 1.0);
+                    idx += 4;
+                } else if idx + 5 <= len && &bytes[idx..idx + 5] == b"false" {
+                    map.insert(key, 0.0);
+                    idx += 5;
                 }
             }
         } else {

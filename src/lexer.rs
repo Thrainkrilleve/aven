@@ -27,6 +27,8 @@ pub enum TokenKind {
     Slash,
     Caret,
     Equal,
+    DoubleEqual,
+    NotEqual,
     LessEqual,
     GreaterEqual,
     Less,
@@ -211,6 +213,42 @@ impl<'a> Lexer<'a> {
                 continue;
             }
 
+            if c == '=' {
+                if self.peek_next() == Some('=') {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token {
+                        kind: TokenKind::DoubleEqual,
+                        text: "==".to_string(),
+                        line: start_line,
+                        col: start_col,
+                    });
+                } else {
+                    self.advance();
+                    tokens.push(Token {
+                        kind: TokenKind::Equal,
+                        text: "=".to_string(),
+                        line: start_line,
+                        col: start_col,
+                    });
+                }
+                continue;
+            }
+
+            if c == '!' {
+                if self.peek_next() == Some('=') {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token {
+                        kind: TokenKind::NotEqual,
+                        text: "!=".to_string(),
+                        line: start_line,
+                        col: start_col,
+                    });
+                    continue;
+                }
+            }
+
             // Punctuation & Operators
             self.advance();
             let kind = match c {
@@ -219,7 +257,6 @@ impl<'a> Lexer<'a> {
                 '*' => TokenKind::Star,
                 '/' => TokenKind::Slash,
                 '^' => TokenKind::Caret,
-                '=' => TokenKind::Equal,
                 ':' => TokenKind::Colon,
                 ',' => TokenKind::Comma,
                 '{' => TokenKind::LeftBrace,

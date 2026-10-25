@@ -156,9 +156,13 @@ impl Diagnostician {
     pub fn diagnose_module(&self, module: &AvenModule) -> Vec<Diagnosis> {
         let mut diagnoses = Vec::new();
         for blk in &module.blocks {
-            if blk.kind == BlockKind::Relation && blk.backend == BackendDecl::Native {
+            if blk.kind == BlockKind::Relation {
                 let mut known = BTreeSet::new();
-                if let Some(solve) = module.solves.iter().find(|s| s.target == blk.name) {
+                if let Some(solve) = module
+                    .solves
+                    .iter()
+                    .find(|s| s.target == blk.name || s.targets.contains(&blk.name))
+                {
                     for b in &solve.bindings {
                         known.insert(b.name.clone());
                     }
