@@ -330,6 +330,12 @@ fn expr_to_c(expr: &Expr, needs_math: &mut bool) -> String {
                 "floor" => format!("floor({})", expr_to_c(arg, needs_math)),
                 "round" => format!("round({})", expr_to_c(arg, needs_math)),
                 "abs" => format!("fabs({})", expr_to_c(arg, needs_math)),
+                // C's log() is the natural logarithm
+                "ln" | "log" => format!("log({})", expr_to_c(arg, needs_math)),
+                "sign" => {
+                    let a = expr_to_c(arg, needs_math);
+                    format!("(double)(({} > 0.0) - ({} < 0.0))", a, a)
+                }
                 other => format!("{}({})", other, expr_to_c(arg, needs_math)),
             }
         }

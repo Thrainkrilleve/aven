@@ -147,6 +147,29 @@ impl Dim {
             custom,
         }
     }
+
+    /// Square root of a dimension: halves every exponent. Returns None when any exponent is
+    /// odd (e.g. sqrt of a plain length has no physical dimension).
+    pub fn sqrt(&self) -> Option<Dim> {
+        let half = |e: i32| if e % 2 == 0 { Some(e / 2) } else { None };
+        let mut custom = BTreeMap::new();
+        for (k, v) in &self.custom {
+            custom.insert(k.clone(), half(*v)?);
+        }
+        Some(Dim {
+            length: half(self.length)?,
+            time: half(self.time)?,
+            mass: half(self.mass)?,
+            current: half(self.current)?,
+            money: half(self.money)?,
+            temperature: half(self.temperature)?,
+            amount: half(self.amount)?,
+            angle: half(self.angle)?,
+            data: half(self.data)?,
+            transaction: half(self.transaction)?,
+            custom,
+        })
+    }
 }
 
 impl std::ops::Mul for Dim {
@@ -765,7 +788,22 @@ impl DimensionalChecker {
                         }
                     }
                     Ok(Some(Dim::SCALAR))
-                } else if matches!(fn_name.as_str(), "exp" | "ln" | "log10") {
+                } else if fn_name == "sqrt" {
+                    match d_inner {
+                        Some(ref d) => match d.sqrt() {
+                            Some(root) => Ok(Some(root)),
+                            None => Err(TypeError::InvalidFunctionArgument {
+                                func: fn_name.clone(),
+                                expected_dim: "a dimension with even exponents (e.g. m^2)"
+                                    .to_string(),
+                                actual_dim: d.clone(),
+                                line,
+                                col,
+                            }),
+                        },
+                        None => Ok(None),
+                    }
+                } else if matches!(fn_name.as_str(), "exp" | "ln" | "log" | "log10") {
                     if let Some(ref d) = d_inner {
                         if !d.is_dimensionless() {
                             return Err(TypeError::InvalidFunctionArgument {

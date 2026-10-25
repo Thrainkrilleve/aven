@@ -107,11 +107,11 @@ pub fn eval_expr(expr: &Expr, env: &HashMap<String, f64>) -> Result<f64, DiffErr
                         0.0
                     }
                 }
-                "log" => {
+                "log" | "ln" => {
                     if val <= 0.0 {
                         return Err(DiffError::EvaluationError(format!(
-                            "log of non-positive value {}",
-                            val
+                            "{} of non-positive value {}",
+                            fn_name, val
                         )));
                     }
                     val.ln()
@@ -119,6 +119,15 @@ pub fn eval_expr(expr: &Expr, env: &HashMap<String, f64>) -> Result<f64, DiffErr
                 "exp" => val.exp(),
                 "sin" => val.sin(),
                 "cos" => val.cos(),
+                "tan" => {
+                    if val.cos().abs() < 1e-12 {
+                        return Err(DiffError::EvaluationError(format!(
+                            "tan undefined at {}",
+                            val
+                        )));
+                    }
+                    val.tan()
+                }
                 other => {
                     return Err(DiffError::EvaluationError(format!(
                         "unknown function '{}'",
@@ -153,10 +162,11 @@ pub fn simplify(expr: &Expr) -> Expr {
                     "floor" => Some(n.floor()),
                     "round" => Some(n.round()),
                     "abs" => Some(n.abs()),
-                    "log" if n > 0.0 => Some(n.ln()),
+                    "log" | "ln" if n > 0.0 => Some(n.ln()),
                     "exp" => Some(n.exp()),
                     "sin" => Some(n.sin()),
                     "cos" => Some(n.cos()),
+                    "tan" if n.cos().abs() >= 1e-12 => Some(n.tan()),
                     _ => None,
                 };
                 if let Some(v) = folded {
@@ -290,9 +300,18 @@ pub fn diff(expr: &Expr, target_var: &str) -> Result<Expr, DiffError> {
                     );
                     Expr::Bin(BinaryOp::Div, Box::new(du), Box::new(two_sqrt_u))
                 }
-                "log" => {
+                "log" | "ln" => {
                     // d(ln(u))/dx = du / u
                     Expr::Bin(BinaryOp::Div, Box::new(du), arg.clone())
+                }
+                "tan" => {
+                    // d(tan(u))/dx = du / cos(u)^2
+                    let cos_sq = Expr::Bin(
+                        BinaryOp::Pow,
+                        Box::new(Expr::Call("cos".to_string(), arg.clone())),
+                        Box::new(Expr::Num(2.0)),
+                    );
+                    Expr::Bin(BinaryOp::Div, Box::new(du), Box::new(cos_sq))
                 }
                 "exp" => {
                     // d(exp(u))/dx = exp(u) * du

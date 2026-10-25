@@ -342,7 +342,7 @@ impl Parser {
                 continue;
             }
 
-            // Check for objectives: minimize(x) or maximize(x)
+            // Check for objectives: minimize(x) / maximize(x), or minimize x / maximize x
             if self.peek().kind == TokenKind::KwMinimize
                 || self.peek().kind == TokenKind::KwMaximize
             {
@@ -351,9 +351,14 @@ impl Parser {
                     TokenKind::KwMaximize => ObjectiveKind::Maximize,
                     _ => unreachable!(),
                 };
-                self.expect(&TokenKind::LeftParen, "'('")?;
+                let parenthesized = self.peek().kind == TokenKind::LeftParen;
+                if parenthesized {
+                    self.take();
+                }
                 let (target_var, o_line, o_col) = self.expect_ident()?;
-                self.expect(&TokenKind::RightParen, "')'")?;
+                if parenthesized {
+                    self.expect(&TokenKind::RightParen, "')'")?;
+                }
                 objectives.push(Objective {
                     kind,
                     target: target_var,
