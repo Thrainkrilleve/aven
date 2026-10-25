@@ -663,6 +663,358 @@ fn dive(lf: &LinearForm, lo0: &[f64], hi0: &[f64], int_idx: &[usize]) -> Option<
     search(lf, lo0, hi0, lo0, hi0, int_idx, &mut budget)
 }
 
+// ---------------------------------------------------------------------------
+// Gomory mixed-integer (GMI) cutting planes
+// ---------------------------------------------------------------------------
+
+/// Optimal simplex state needed to generate cuts. `col_affine[j]` expresses simplex column j
+/// (structural or slack/surplus) as an affine function of the original variables x, together
+/// with whether that column is integer-valued; `None` marks a column that cannot be expressed
+/// in x (a split free variable), which disables any cut using it.
+struct LpState {
+    t: Vec<Vec<f64>>,
+    basis: Vec<usize>,
+    col_affine: Vec<Option<ColAffine>>,
+    ncol: usize,
+    art_start: usize,
+    total: usize,
+}
+
+#[derive(Clone)]
+struct ColAffine {
+    coeffs: Vec<f64>, // over original x
+    constant: f64,
+    integer: bool,
+}
+
+/// Like `solve_lp`, but on an optimal solution also returns the tableau state for cut
+/// generation. `integer_mask[j]` says whether original variable j is integer-constrained.
+fn solve_lp_capture(
+    lf: &LinearForm,
+    lo: &[f64],
+    hi: &[f64],
+    integer_mask: &[bool],
+) -> (LpResult, Option<LpState>) {
+    let n = lf.c.len();
+    for j in 0..n {
+        if lo[j] > hi[j] + LP_EPS {
+            return (LpResult::Infeasible, None);
+        }
+    }
+
+    let mut maps = Vec::with_capacity(n);
+    let mut ncol = 0;
+    let mut extra_rows: Vec<(usize, f64, usize)> = Vec::new(); // (column, limit, original var)
+    for j in 0..n {
+        if lo[j].is_finite() {
+            maps.push(ColMap::Shift { col: ncol, offset: lo[j] });
+            if hi[j].is_finite() {
+                extra_rows.push((ncol, hi[j] - lo[j], j));
+            }
+            ncol += 1;
+        } else if hi[j].is_finite() {
+            maps.push(ColMap::Reflect { col: ncol, offset: hi[j] });
+            ncol += 1;
+        } else {
+            maps.push(ColMap::Free { pos: ncol, neg: ncol + 1 });
+            ncol += 2;
+        }
+    }
+
+    // Per structural column: the x-affine form and integrality.
+    let mut col_affine: Vec<Option<ColAffine>> = vec![None; ncol];
+    for j in 0..n {
+        match maps[j] {
+            ColMap::Shift { col, offset } => {
+                let mut coeffs = vec![0.0; n];
+                coeffs[j] = 1.0;
+                col_affine[col] = Some(ColAffine { coeffs, constant: -offset, integer: integer_mask[j] });
+            }
+            ColMap::Reflect { col, offset } => {
+                let mut coeffs = vec![0.0; n];
+                coeffs[j] = -1.0;
+                col_affine[col] = Some(ColAffine { coeffs, constant: offset, integer: integer_mask[j] });
+            }
+            ColMap::Free { .. } => {}
+        }
+    }
+
+    // x-space slack affine for each logical row, recorded in build order (lf.rows then extra).
+    let int_coeffs = |a: &[f64], b: f64| {
+        a.iter().all(|v| (v - v.round()).abs() < 1e-9)
+            && (b - b.round()).abs() < 1e-9
+            && (0..n).all(|j| a[j] == 0.0 || integer_mask[j])
+    };
+    let mut row_slack: Vec<ColAffine> = Vec::new();
+    let mut rows: Vec<(Vec<f64>, Sense, f64)> = Vec::new();
+    for r in &lf.rows {
+        // Le row slack = b - a.x ; Ge row surplus = a.x - b ; Eq has none (placeholder).
+        let (coeffs, constant) = match r.sense {
+            Sense::Le => (r.a.iter().map(|v| -v).collect::<Vec<_>>(), r.b),
+            Sense::Ge => (r.a.clone(), -r.b),
+            Sense::Eq => (vec![0.0; n], 0.0),
+        };
+        row_slack.push(ColAffine { coeffs, constant, integer: int_coeffs(&r.a, r.b) });
+        // Build the y-space row (same as solve_lp)
+        let mut a = vec![0.0; ncol];
+        let mut b = r.b;
+        for j in 0..n {
+            let aj = r.a[j];
+            if aj == 0.0 {
+                continue;
+            }
+            match maps[j] {
+                ColMap::Shift { col, offset } => {
+                    a[col] += aj;
+                    b -= aj * offset;
+                }
+                ColMap::Reflect { col, offset } => {
+                    a[col] -= aj;
+                    b -= aj * offset;
+                }
+                ColMap::Free { pos, neg } => {
+                    a[pos] += aj;
+                    a[neg] -= aj;
+                }
+            }
+        }
+        rows.push((a, r.sense, b));
+    }
+    for (col, limit, j) in &extra_rows {
+        // x_j <= hi_j : slack = hi_j - x_j
+        let mut coeffs = vec![0.0; n];
+        coeffs[*j] = -1.0;
+        row_slack.push(ColAffine { coeffs, constant: hi[*j], integer: integer_mask[*j] });
+        let mut a = vec![0.0; ncol];
+        a[*col] = 1.0;
+        rows.push((a, Sense::Le, *limit));
+    }
+
+    let mut cost = vec![0.0; ncol];
+    let mut cost0 = lf.c0;
+    for j in 0..n {
+        let cj = lf.c[j];
+        match maps[j] {
+            ColMap::Shift { col, offset } => {
+                cost[col] += cj;
+                cost0 += cj * offset;
+            }
+            ColMap::Reflect { col, offset } => {
+                cost[col] -= cj;
+                cost0 += cj * offset;
+            }
+            ColMap::Free { pos, neg } => {
+                cost[pos] += cj;
+                cost[neg] -= cj;
+            }
+        }
+    }
+    let _ = cost0;
+
+    // Normalize to b >= 0, tracking slack affine per row by index.
+    for (i, row) in rows.iter_mut().enumerate() {
+        if row.2 < 0.0 {
+            for v in row.0.iter_mut() {
+                *v = -*v;
+            }
+            row.2 = -row.2;
+            row.1 = match row.1 {
+                Sense::Le => Sense::Ge,
+                Sense::Ge => Sense::Le,
+                Sense::Eq => Sense::Eq,
+            };
+            let _ = i; // slack affine is orientation-independent (equals the original slack)
+        }
+    }
+
+    let m = rows.len();
+    let n_slack = rows.iter().filter(|r| r.1 != Sense::Eq).count();
+    let n_art = rows.iter().filter(|r| r.1 != Sense::Le).count();
+    let total = ncol + n_slack + n_art;
+    let rhs = total;
+    let mut t = vec![vec![0.0; total + 1]; m + 1];
+    let mut basis = vec![0usize; m];
+    let art_start = ncol + n_slack;
+    // Map each slack/surplus column back to its row's slack affine.
+    let mut col_slack: Vec<Option<ColAffine>> = vec![None; art_start];
+    let (mut s, mut a_idx) = (ncol, art_start);
+    for (i, (a, sense, b)) in rows.iter().enumerate() {
+        t[i][..ncol].copy_from_slice(a);
+        t[i][rhs] = *b;
+        match sense {
+            Sense::Le => {
+                t[i][s] = 1.0;
+                basis[i] = s;
+                col_slack[s] = Some(row_slack[i].clone());
+                s += 1;
+            }
+            Sense::Ge => {
+                t[i][s] = -1.0;
+                col_slack[s] = Some(row_slack[i].clone());
+                s += 1;
+                t[i][a_idx] = 1.0;
+                basis[i] = a_idx;
+                a_idx += 1;
+            }
+            Sense::Eq => {
+                t[i][a_idx] = 1.0;
+                basis[i] = a_idx;
+                a_idx += 1;
+            }
+        }
+    }
+
+    if n_art > 0 {
+        let mut c1 = vec![0.0; total];
+        for c in c1.iter_mut().skip(art_start) {
+            *c = 1.0;
+        }
+        set_objective_row(&mut t, &basis, &c1, m, total);
+        if !simplex_iterate(&mut t, &mut basis, m, total, total) {
+            return (LpResult::Infeasible, None);
+        }
+        let scale = 1.0 + rows.iter().map(|r| r.2.abs()).fold(0.0, f64::max);
+        if -t[m][rhs] > 1e-7 * scale {
+            return (LpResult::Infeasible, None);
+        }
+        for i in 0..m {
+            if basis[i] >= art_start {
+                if let Some(j) = (0..art_start).find(|&j| t[i][j].abs() > LP_EPS) {
+                    pivot(&mut t, i, j, m, total);
+                    basis[i] = j;
+                }
+            }
+        }
+    }
+
+    let mut c2 = vec![0.0; total];
+    c2[..ncol].copy_from_slice(&cost);
+    set_objective_row(&mut t, &basis, &c2, m, total);
+    if !simplex_iterate(&mut t, &mut basis, m, total, art_start) {
+        return (LpResult::Unbounded, None);
+    }
+
+    let mut y = vec![0.0; total];
+    for i in 0..m {
+        y[basis[i]] = t[i][rhs];
+    }
+    let mut x = vec![0.0; n];
+    for j in 0..n {
+        x[j] = match maps[j] {
+            ColMap::Shift { col, offset } => offset + y[col],
+            ColMap::Reflect { col, offset } => offset - y[col],
+            ColMap::Free { pos, neg } => y[pos] - y[neg],
+        };
+    }
+    let obj = lf.c.iter().zip(&x).map(|(c, xi)| c * xi).sum::<f64>() + lf.c0;
+
+    // Full column affine map (artificial columns are excluded from cuts): structural columns
+    // 0..ncol, then slack/surplus columns ncol..art_start.
+    let mut col_affine_full: Vec<Option<ColAffine>> = vec![None; art_start];
+    for (j, ca) in col_affine.into_iter().enumerate() {
+        col_affine_full[j] = ca;
+    }
+    for s in ncol..art_start {
+        col_affine_full[s] = col_slack[s].take();
+    }
+
+    let state = LpState {
+        t,
+        basis,
+        col_affine: col_affine_full,
+        ncol,
+        art_start,
+        total,
+    };
+    (LpResult::Optimal(x, obj), Some(state))
+}
+
+/// Generates Gomory mixed-integer cuts from fractional integer-basic rows of an optimal
+/// tableau, translated into x-space inequalities (`a·x >= b`). Each cut is valid for every
+/// integer-feasible point. Returns at most `max_cuts` of the most-violated cuts.
+fn gmi_cuts(state: &LpState, x: &[f64], max_cuts: usize) -> Vec<LinRow> {
+    let n = x.len();
+    let frac = |v: f64| v - v.floor();
+    // Which structural/slack columns are integer (for GMI's integer-column rule)?
+    let mut col_is_int = vec![false; state.art_start];
+    for (j, aff) in state.col_affine.iter().enumerate() {
+        if let Some(a) = aff {
+            col_is_int[j] = a.integer;
+        }
+    }
+    let nonbasic: Vec<usize> = {
+        let mut inb = vec![false; state.total];
+        for &bcol in &state.basis {
+            if bcol < state.total {
+                inb[bcol] = true;
+            }
+        }
+        (0..state.art_start).filter(|&j| !inb[j]).collect()
+    };
+
+    let mut cuts: Vec<(f64, LinRow)> = Vec::new();
+    for (i, &bcol) in state.basis.iter().enumerate() {
+        // Source row: a structural integer column that is fractional.
+        if bcol >= state.ncol || !col_is_int[bcol] {
+            continue;
+        }
+        let beta = state.t[i][state.total];
+        let f0 = frac(beta);
+        if f0 < 1e-6 || f0 > 1.0 - 1e-6 {
+            continue;
+        }
+        let mut coeffs = vec![0.0; n];
+        let mut constant = 0.0;
+        let mut ok = true;
+        for &j in &nonbasic {
+            let a = state.t[i][j];
+            if a.abs() < 1e-11 {
+                continue;
+            }
+            let Some(aff) = &state.col_affine[j] else {
+                ok = false;
+                break;
+            };
+            let g = if col_is_int[j] {
+                let f = frac(a);
+                if f <= f0 {
+                    f
+                } else {
+                    f0 * (1.0 - f) / (1.0 - f0)
+                }
+            } else if a >= 0.0 {
+                a
+            } else {
+                f0 * (-a) / (1.0 - f0)
+            };
+            if g.abs() < 1e-12 {
+                continue;
+            }
+            for k in 0..n {
+                coeffs[k] += g * aff.coeffs[k];
+            }
+            constant += g * aff.constant;
+        }
+        if !ok {
+            continue;
+        }
+        // Cut: sum g_j * affine_j(x) >= f0  ->  coeffs·x >= f0 - constant
+        let b = f0 - constant;
+        let max_c = coeffs.iter().map(|v| v.abs()).fold(0.0, f64::max);
+        if max_c > 1e7 || !b.is_finite() {
+            continue; // ill-conditioned cut; skip to protect the simplex
+        }
+        let lhs_at_x: f64 = coeffs.iter().zip(x).map(|(c, xi)| c * xi).sum();
+        let violation = b - lhs_at_x; // > 0 means the cut removes x*
+        let scale = 1.0 + max_c;
+        if violation > 1e-5 * scale && max_c > 1e-9 {
+            cuts.push((violation, LinRow { a: coeffs, sense: Sense::Ge, b }));
+        }
+    }
+    cuts.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+    cuts.into_iter().take(max_cuts).map(|(_, r)| r).collect()
+}
+
 /// Branch-and-bound over LP relaxations.
 ///
 /// Correctness: a completed search proves optimality or infeasibility. For models with
@@ -685,10 +1037,48 @@ fn solve_milp(p: &Problem, lf: &LinearForm) -> Outcome {
         );
     }
 
+    // Root cutting-plane loop (cut-and-branch): tighten the relaxation with Gomory
+    // mixed-integer cuts so the branch-and-bound below converges and can prove optimality,
+    // including over unbounded integer domains where plain branching cannot. GMI cuts are valid
+    // for every integer-feasible point, so this never removes a real solution.
+    let integer_mask: Vec<bool> = (0..n).map(|j| p.vars[j].integer).collect();
+    let mut lf_cut = lf.clone();
+    if !int_idx.is_empty() {
+        let mut lo: Vec<f64> = p.vars.iter().map(|v| v.lo).collect();
+        let mut hi: Vec<f64> = p.vars.iter().map(|v| v.hi).collect();
+        for &j in &int_idx {
+            lo[j] = (lo[j] - 1e-9).ceil();
+            hi[j] = (hi[j] + 1e-9).floor();
+        }
+        let base_rows = lf_cut.rows.len();
+        let mut prev_obj = f64::INFINITY;
+        for _round in 0..12 {
+            let (res, state) = solve_lp_capture(&lf_cut, &lo, &hi, &integer_mask);
+            let (x, obj) = match res {
+                LpResult::Optimal(x, o) => (x, o),
+                _ => break,
+            };
+            if int_idx.iter().all(|&j| (x[j] - x[j].round()).abs() < 1e-6) {
+                break; // relaxation already integral
+            }
+            // Stop once cuts stop tightening the bound: adding more only risks numerical harm.
+            if prev_obj.is_finite() && (obj - prev_obj).abs() <= 1e-7 * (1.0 + obj.abs()) {
+                break;
+            }
+            prev_obj = obj;
+            let Some(state) = state else { break };
+            let cuts = gmi_cuts(&state, &x, 6);
+            if cuts.is_empty() || lf_cut.rows.len() - base_rows > 60 {
+                break;
+            }
+            lf_cut.rows.extend(cuts);
+        }
+    }
+
     // Zero-objective form: the dive seeks any feasible integer point, so it should follow the
     // feasible polytope rather than chase the (possibly unbounded) objective.
     let lf_feas = LinearForm {
-        rows: lf.rows.clone(),
+        rows: lf_cut.rows.clone(),
         c: vec![0.0; n],
         c0: 0.0,
     };
@@ -726,7 +1116,7 @@ fn solve_milp(p: &Problem, lf: &LinearForm) -> Outcome {
             break;
         }
         tighten(&mut lo, &mut hi);
-        match solve_lp(lf, &lo, &hi) {
+        match solve_lp(&lf_cut, &lo, &hi) {
             LpResult::Infeasible => continue,
             LpResult::Unbounded => {
                 // Cannot bound this subtree; a feasible witness decides unbounded vs not.

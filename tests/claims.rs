@@ -671,10 +671,11 @@ fn milp_feasible_and_unbounded_is_unbounded() {
     assert!(run.stderr.contains("unbounded"), "stderr: {}", run.stderr);
 }
 
-// Hard MILP over an unbounded integer domain (needs cutting planes): avenc must not assert a
-// false verdict. It reports an honest "Undetermined", never "settled" or a wrong "infeasible".
+// Hard MILP over an unbounded integer domain: Gomory cuts close the gap so avenc now solves
+// it and proves optimality (maximize obj = -8 at x=[6,12,3,0,0,1], matching HiGHS). It must
+// never assert a false verdict.
 #[test]
-fn milp_unsolvable_reports_undetermined_not_a_false_verdict() {
+fn milp_unbounded_domain_solved_and_proven_by_cuts() {
     let src = "relation S {
     int x0
     int x1
@@ -684,6 +685,16 @@ fn milp_unsolvable_reports_undetermined_not_a_false_verdict() {
     int x5
     r0 = -4*x0 + 1*x1 + -3*x2 + 6*x3 + 5*x4 + 5*x5
     r0 <= -12
+    r1 = 4*x0 + -5*x1 + 3*x2 + -6*x3 + -2*x4 + 3*x5
+    r1 <= 26
+    r2 = 4*x0 + -3*x1 + -4*x2 + -5*x3 + -3*x4 + 4*x5
+    r2 <= -14
+    r3 = -2*x0 + 5*x1 + -5*x2 + -2*x3 + -4*x4 + -6*x5
+    r3 >= 9
+    r4 = 2*x0 + -5*x1 + 4*x2 + 3*x3 + -6*x4 + -6*x5
+    r4 <= 17
+    r5 = -4*x0 + 6*x1 + 2*x2 + 3*x3 + 6*x4 + 3*x5
+    r5 >= 29
     r6 = 2*x0 + 2*x1 + -2*x2 + 0*x3 + -6*x4 + -3*x5
     r6 == 27
     obj = 6*x0 + -2*x1 + -5*x2 + -8*x3 + -7*x4 + -5*x5
@@ -694,12 +705,8 @@ solve S with {
 }
 ";
     let run = run_model(src, &["--json"]);
-    // If it settles, the point must be genuinely optimal/feasible (a proven answer is fine);
-    // if it cannot, it must say so honestly rather than claim infeasible or unbounded.
-    if run.code == 0 {
-        assert!(run.stdout.contains("\"status\": \"settled\""), "{}", run.stdout);
-    } else {
-        assert!(run.stderr.contains("Undetermined"), "must be honest, got: {}", run.stderr);
-        assert!(!run.stderr.contains("unbounded"), "no false unbounded: {}", run.stderr);
-    }
+    assert_eq!(run.code, 0, "cuts should solve it: {}", run.stderr);
+    let line = run.stdout.lines().last().unwrap();
+    assert!(line.contains("\"optimality\": \"proven\""), "must be proven optimal: {}", line);
+    assert!(line.contains("\"obj\": -8"), "optimum is -8: {}", line);
 }
