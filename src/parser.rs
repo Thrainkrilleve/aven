@@ -24,11 +24,21 @@ impl std::error::Error for ParseError {}
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    /// Current expression nesting (parentheses, unary minus, exponents)
+    nesting: usize,
 }
+
+/// Deepest expression accepted. Deeper input is rejected with a parse error instead of
+/// exhausting the stack in later recursive passes (evaluation, differentiation, units).
+pub const MAX_EXPR_DEPTH: usize = 1000;
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Self { tokens, pos: 0 }
+        Self {
+            tokens,
+            pos: 0,
+            nesting: 0,
+        }
     }
 
     fn peek(&self) -> &Token {
@@ -535,7 +545,21 @@ impl Parser {
     // Expression parsing with operator precedence:
     // additive (+ -) < multiplicative (* /) < unary (-) < power (^) < atoms
     pub fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-        self.parse_additive()
+        let top_level = self.nesting == 0;
+        let start = self.peek().clone();
+        let expr = self.parse_additive()?;
+        // Long operator chains are built iteratively, so check the finished tree's depth too
+        if top_level && expr.depth() > MAX_EXPR_DEPTH {
+            return Err(ParseError {
+                message: format!(
+                    "expression is nested more than {} levels deep",
+                    MAX_EXPR_DEPTH
+                ),
+                line: start.line,
+                col: start.col,
+            });
+        }
+        Ok(expr)
     }
 
     fn parse_additive(&mut self) -> Result<Expr, ParseError> {
@@ -567,13 +591,27 @@ impl Parser {
     }
 
     fn parse_unary(&mut self) -> Result<Expr, ParseError> {
-        if self.peek().kind == TokenKind::Minus {
+        // Every recursive path (unary minus, exponents, parentheses) passes through here
+        self.nesting += 1;
+        if self.nesting > MAX_EXPR_DEPTH {
+            let tok = self.peek().clone();
+            return Err(ParseError {
+                message: format!(
+                    "expression is nested more than {} levels deep",
+                    MAX_EXPR_DEPTH
+                ),
+                line: tok.line,
+                col: tok.col,
+            });
+        }
+        let result = if self.peek().kind == TokenKind::Minus {
             self.take();
-            let operand = self.parse_unary()?;
-            Ok(Expr::UnaryMinus(Box::new(operand)))
+            self.parse_unary().map(|operand| Expr::UnaryMinus(Box::new(operand)))
         } else {
             self.parse_power()
-        }
+        };
+        self.nesting -= 1;
+        result
     }
 
     fn parse_power(&mut self) -> Result<Expr, ParseError> {

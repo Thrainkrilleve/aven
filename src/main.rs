@@ -67,6 +67,18 @@ fn print_usage() {
 }
 
 fn main() {
+    // Expression passes (evaluation, differentiation, unit inference) recurse once per nesting
+    // level; a 64 MiB stack keeps every pass safe up to the parser's MAX_EXPR_DEPTH.
+    let worker = std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(real_main)
+        .expect("failed to start main thread");
+    if worker.join().is_err() {
+        process::exit(101);
+    }
+}
+
+fn real_main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
