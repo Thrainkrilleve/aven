@@ -1749,3 +1749,225 @@ fn test_kubernetes_multi_objective_pareto_convergence_and_knee_point() {
     let knee_idx = Orchestrator::find_knee_point(&frontier);
     assert!(knee_idx.is_some());
 }
+
+#[test]
+fn test_freshness_zero_ttl_and_stale_enforcement() {
+    use avenc::evaluator::{Evaluator, ExternalEvaluator, VarMap};
+
+    let py_cmd = if cfg!(windows) { "python" } else { "python3" };
+    // Adapter returns ttl_ms = 0
+    let script =
+        "import json; print(json.dumps({'total_cpu_cores': 32.0, 'ttl_ms': 0, 'timestamp_ms': 0}))";
+    let ext = ExternalEvaluator::new(py_cmd, &["-c", script]);
+    let inputs = VarMap::new();
+    let res = ext.evaluate(&inputs).expect("Evaluation should parse");
+    assert_eq!(res.ttl_ms, Some(0));
+    assert_eq!(res.values.get("total_cpu_cores"), Some(&32.0));
+
+    // Ledger staleness verification
+    use avenc::ledger::{Fact, FactMetadata, Ledger};
+    let mut ledger = Ledger::new();
+    let is_stale = res.ttl_ms == Some(0);
+    assert!(is_stale, "ttl_ms=0 must be classified as stale");
+
+    ledger.append(Fact {
+        seq: 1,
+        tick: 0,
+        kind: "input".to_string(),
+        name: "total_cpu_cores".to_string(),
+        value: 32.0,
+        causes: vec![],
+        origin: "external: python".to_string(),
+        metadata: Some(FactMetadata {
+            timestamp_ms: res.timestamp_ms,
+            ttl_ms: res.ttl_ms,
+            is_stale,
+            warnings: vec!["zero-ttl-expired".to_string()],
+        }),
+    });
+
+    let why = ledger.why("total_cpu_cores");
+    assert!(why.contains("[STALE: expired TTL]"));
+    assert!(why.contains("[ttl: 0ms]"));
+    assert!(why.contains("[warnings: zero-ttl-expired]"));
+}
+
+#[test]
+fn test_external_adapter_schema_validation_and_malformed_handling() {
+    use avenc::evaluator::{EvalError, Evaluator, ExternalEvaluator, VarMap};
+
+    let py_cmd = if cfg!(windows) { "python" } else { "python3" };
+    let inputs = VarMap::new();
+
+    // 1. Missing required key
+    let script_missing = "import json; print(json.dumps({'total_cpu_cores': 32.0}))";
+    let ext_missing = ExternalEvaluator::new(py_cmd, &["-c", script_missing])
+        .with_required_keys(&["total_cpu_cores".to_string(), "mem_headroom".to_string()]);
+    let err = ext_missing.evaluate(&inputs).unwrap_err();
+    match err {
+        EvalError::MalformedOutput(msg) => {
+            assert!(msg.contains("Schema validation failed"));
+            assert!(msg.contains("omitted required numeric field 'mem_headroom'"));
+        }
+        other => panic!("Expected MalformedOutput, got {:?}", other),
+    }
+
+    // 2. Non-JSON output
+    let script_raw = "print('FATAL: connection refused')";
+    let ext_raw = ExternalEvaluator::new(py_cmd, &["-c", script_raw]);
+    let err = ext_raw.evaluate(&inputs).unwrap_err();
+    match err {
+        EvalError::MalformedOutput(msg) => {
+            assert!(msg.contains("must be a JSON object"));
+        }
+        other => panic!("Expected MalformedOutput, got {:?}", other),
+    }
+
+    // 3. Adapter error field
+    let script_err = "import json; print(json.dumps({'error': 'kubelet certificate expired'}))";
+    let ext_err = ExternalEvaluator::new(py_cmd, &["-c", script_err]);
+    let err = ext_err.evaluate(&inputs).unwrap_err();
+    match err {
+        EvalError::BlackBoxFailure(msg) => {
+            assert!(msg.contains("reported error: kubelet certificate expired"));
+        }
+        other => panic!("Expected BlackBoxFailure, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_causal_why_default_depth_limit_and_unlimited_override() {
+    use avenc::ledger::{DEFAULT_MAX_DEPTH, Fact, Ledger};
+
+    let mut ledger = Ledger::new();
+    // Build a 25-hop causal chain: hop 1 -> hop 2 -> ... -> hop 25
+    ledger.append(Fact {
+        seq: 1,
+        tick: 0,
+        kind: "input".to_string(),
+        name: "hop_1".to_string(),
+        value: 1.0,
+        causes: vec![],
+        origin: "seed".to_string(),
+        metadata: None,
+    });
+
+    for i in 2..=25 {
+        ledger.append(Fact {
+            seq: i,
+            tick: 0,
+            kind: "derived".to_string(),
+            name: format!("hop_{}", i),
+            value: i as f64,
+            causes: vec![i - 1],
+            origin: format!("= hop_{} + 1", i - 1),
+            metadata: None,
+        });
+    }
+
+    // Default why query must prune at DEFAULT_MAX_DEPTH (20)
+    assert_eq!(DEFAULT_MAX_DEPTH, 20);
+    let default_why = ledger.why("hop_25");
+    assert!(default_why.contains("#25 hop_25 = 25.0000"));
+    assert!(default_why.contains(
+        "pruned: 1 ancestor(s) beyond hop limit 20. Use --depth <N> or --depth 0 for unlimited"
+    ));
+    assert!(!default_why.contains("#1 hop_1 = 1.0000"));
+
+    // Explicit depth 5
+    let shallow_why = ledger.why_with_depth("hop_25", Some(5));
+    assert!(shallow_why.contains("pruned: 1 ancestor(s) beyond hop limit 5"));
+
+    // Unlimited query with None shows all 25 hops
+    let unlimited_why = ledger.why_with_depth("hop_25", None);
+    assert!(unlimited_why.contains("#25 hop_25 = 25.0000"));
+    assert!(unlimited_why.contains("#1 hop_1 = 1.0000"));
+    assert!(!unlimited_why.contains("pruned:"));
+}
+
+#[test]
+fn test_frontier_cache_and_epsilon_box_dominance() {
+    use avenc::ast::*;
+    use avenc::evaluator::{
+        FrontierPoint, NativeEvaluator, Orchestrator, SolveDiagnostics, SolveStatus, VarMap,
+    };
+    use std::sync::Arc;
+
+    let eq = Equation {
+        lhs: "active_cpu".to_string(),
+        op: ConstraintOp::Equal,
+        rhs: Expr::Bin(
+            BinaryOp::Mul,
+            Box::new(Expr::Var("target_pods".to_string())),
+            Box::new(Expr::Num(0.5)),
+        ),
+        original_text: "active_cpu = target_pods * 0.5".to_string(),
+        line: 1,
+        col: 1,
+    };
+
+    let evaluator = Arc::new(NativeEvaluator::new(vec![eq]));
+    let orchestrator = Orchestrator::new(evaluator);
+
+    let mut base_inputs = VarMap::new();
+    base_inputs.set("target_pods", 10.0);
+
+    let objectives = vec!["target_pods".to_string(), "active_cpu".to_string()];
+
+    // Run 1: populates cache
+    let frontier_1 = orchestrator
+        .solve_pareto(&base_inputs, "target_pods", (10.0, 30.0), 4, &objectives)
+        .expect("First solve should succeed");
+    assert_eq!(frontier_1.len(), 5);
+
+    // Verify cache has 1 entry
+    assert_eq!(orchestrator.frontier_cache.lock().unwrap().len(), 1);
+
+    // Run 2: served from cache
+    let frontier_2 = orchestrator
+        .solve_pareto(&base_inputs, "target_pods", (10.0, 30.0), 4, &objectives)
+        .expect("Second solve should succeed from cache");
+    assert_eq!(frontier_2.len(), 5);
+    assert_eq!(
+        frontier_1[2].vars.get("active_cpu"),
+        frontier_2[2].vars.get("active_cpu")
+    );
+
+    // Verify epsilon-box dominance filtering
+    let dummy_diag = SolveDiagnostics {
+        spec_hash: "hash".to_string(),
+        free_vars: vec![],
+        residual: 0.0,
+        rank: 1,
+        binding_constraints: vec![],
+        backend_trace: vec![],
+        solve_time_us: 10.0,
+        status: SolveStatus::Converged,
+    };
+
+    let p1 = FrontierPoint {
+        vars: VarMap::new(),
+        objectives: vec![("cpu".to_string(), 10.000001), ("mem".to_string(), 20.0)],
+        diagnostics: dummy_diag.clone(),
+        is_feasible: true,
+    };
+    let p2 = FrontierPoint {
+        vars: VarMap::new(),
+        objectives: vec![("cpu".to_string(), 10.000002), ("mem".to_string(), 20.0)], // within 1e-4 of p1
+        diagnostics: dummy_diag.clone(),
+        is_feasible: true,
+    };
+    let p3 = FrontierPoint {
+        vars: VarMap::new(),
+        objectives: vec![("cpu".to_string(), 15.0), ("mem".to_string(), 30.0)], // distinct
+        diagnostics: dummy_diag,
+        is_feasible: true,
+    };
+
+    let filtered = Orchestrator::filter_epsilon_dominance(&[p1, p2, p3], 1e-4);
+    assert_eq!(
+        filtered.len(),
+        2,
+        "Near-identical point within eps box must be pruned"
+    );
+}

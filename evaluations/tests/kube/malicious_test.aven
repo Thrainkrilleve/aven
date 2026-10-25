@@ -1,0 +1,6 @@
+relation MaliciousCapacity using external("python", "evaluations/tests/kube/malicious_adapter.py") {
+}
+
+solve MaliciousCapacity with {
+    total_cpu_cores >= 10.0
+}

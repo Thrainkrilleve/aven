@@ -37,27 +37,32 @@ const VERSION: &str = "0.6.0";
 fn print_usage() {
     println!("avenc v{} — The Aven Language Toolchain", VERSION);
     println!("Usage:");
-    println!("  avenc run <file.aven>            Execute .aven file and print settled relations");
+    println!(
+        "  avenc run <file.aven> [--allow-stale] Execute .aven file and print settled relations"
+    );
+    println!(
+        "                                        (enforces fact freshness; blocks decision on stale/zero-TTL data)"
+    );
     println!(
         "  avenc pareto <file.aven> [var] [min] [max] [--backend native|external] [--cmd <command>]"
     );
     println!(
-        "                                   Generate Pareto trade-off frontier & detect knee point"
+        "                                        Generate Pareto trade-off frontier & detect knee point"
     );
     println!("  avenc stream <file.aven> [--limit N]");
     println!(
-        "                                   Ingest live JSON stream from stdin & supervise relations"
+        "                                        Ingest live JSON stream from stdin & supervise relations"
     );
     println!("  avenc why <file.aven> <var> [--depth N]");
     println!(
-        "                                   Show causal derivation tree with optional topological depth limit"
+        "                                        Show causal derivation tree (default depth: 20; 0 for unlimited)"
     );
     println!("  avenc build <file.aven> [--emit-c] [-o out.c] [--traceable] [--checked-c]");
-    println!("                                   Transpile pinned relations to standalone C");
+    println!("                                        Transpile pinned relations to standalone C");
     println!(
-        "  avenc check <file.aven>          Validate syntax, relations, and unit declarations"
+        "  avenc check <file.aven>               Validate syntax, relations, and unit declarations"
     );
-    println!("  avenc demo                       Run built-in multi-pillar verification test");
+    println!("  avenc demo                            Run built-in multi-pillar verification test");
 }
 
 fn main() {
@@ -70,11 +75,13 @@ fn main() {
 
     match args[1].as_str() {
         "run" => {
-            if args.len() < 3 {
+            let allow_stale = args.iter().any(|a| a == "--allow-stale");
+            let file_arg = args.iter().skip(2).find(|a| !a.starts_with("--"));
+            if file_arg.is_none() {
                 eprintln!("Error: missing file argument for 'run'");
                 process::exit(1);
             }
-            cmd_run(&args[2]);
+            cmd_run(file_arg.unwrap(), allow_stale);
         }
         "stream" => {
             if args.len() < 3 {
@@ -118,7 +125,22 @@ fn main() {
             cmd_pareto(&args[2], sweep_var, min_val, max_val, backend_arg, cmd_arg);
         }
         "why" => {
-            if args.len() < 4 {
+            let mut non_flags = Vec::new();
+            let mut skip_next = false;
+            for arg in args.iter().skip(2) {
+                if skip_next {
+                    skip_next = false;
+                    continue;
+                }
+                if arg == "--depth" {
+                    skip_next = true;
+                    continue;
+                }
+                if !arg.starts_with("--") {
+                    non_flags.push(arg.as_str());
+                }
+            }
+            if non_flags.len() < 2 {
                 eprintln!(
                     "Error: 'why' requires a file and variable name: avenc why <file.aven> <variable> [--depth N]"
                 );
@@ -127,8 +149,15 @@ fn main() {
             let depth = args
                 .windows(2)
                 .find(|w| w[0] == "--depth")
-                .and_then(|w| w[1].parse::<usize>().ok());
-            cmd_why(&args[2], &args[3], depth);
+                .and_then(|w| {
+                    if w[1] == "0" || w[1] == "all" || w[1] == "unlimited" {
+                        None
+                    } else {
+                        w[1].parse::<usize>().ok()
+                    }
+                })
+                .or(Some(ledger::DEFAULT_MAX_DEPTH));
+            cmd_why(non_flags[0], non_flags[1], depth);
         }
         "build" => {
             if args.len() < 3 {
@@ -251,10 +280,32 @@ fn cmd_check(path: &str) {
     }
 }
 
-fn cmd_run(path: &str) {
+#[derive(Debug, Clone)]
+pub struct ExecutionResult {
+    pub env: HashMap<String, f64>,
+    pub ledger: Ledger,
+    pub diagnosis: Option<diagnostics::Diagnosis>,
+    pub is_actionable: bool,
+    pub stale_facts: Vec<String>,
+}
+
+fn cmd_run(path: &str, allow_stale: bool) {
     let module = parse_file(path);
     let work_dir = std::path::Path::new(path).parent();
-    let (env, ledger, _) = execute_module(&module, true, work_dir);
+    let res = execute_module(&module, true, work_dir);
+
+    if !res.is_actionable && !allow_stale {
+        eprintln!("\n❌ DECISION BLOCKED: Freshness Enforcement Failure");
+        eprintln!("  The following external fact(s) are STALE (expired TTL or ttl_ms=0):");
+        for f in &res.stale_facts {
+            eprintln!("    • {}", f);
+        }
+        eprintln!(
+            "\n  Refusing to settle actionable decision on unrefreshed metrics to prevent automated scaling on bad data."
+        );
+        eprintln!("  Pass --allow-stale to explicitly override in non-production environments.");
+        process::exit(1);
+    }
 
     let mut integer_vars = std::collections::BTreeSet::new();
     for blk in &module.blocks {
@@ -269,27 +320,27 @@ fn cmd_run(path: &str) {
     }
 
     println!("\nSettled Environment:");
-    let mut sorted_keys: Vec<&String> = env.keys().collect();
+    let mut sorted_keys: Vec<&String> = res.env.keys().collect();
     sorted_keys.sort();
     for k in sorted_keys {
         if integer_vars.contains(k) {
-            println!("  {:<16} = {:.0} (int)", k, env[k]);
+            println!("  {:<16} = {:.0} (int)", k, res.env[k]);
         } else {
-            println!("  {:<16} = {:.4}", k, env[k]);
+            println!("  {:<16} = {:.4}", k, res.env[k]);
         }
     }
 
-    if !ledger.facts.is_empty() {
-        println!("\nFact Ledger: {} facts settled.", ledger.facts.len());
+    if !res.ledger.facts.is_empty() {
+        println!("\nFact Ledger: {} facts settled.", res.ledger.facts.len());
     }
 }
 
 fn cmd_why(path: &str, var: &str, depth: Option<usize>) {
     let module = parse_file(path);
     let work_dir = std::path::Path::new(path).parent();
-    let (_, ledger, _) = execute_module(&module, false, work_dir);
+    let res = execute_module(&module, false, work_dir);
     println!("Causal Derivation Tree for '{}':", var);
-    println!("{}", ledger.why_with_depth(var, depth));
+    println!("{}", res.ledger.why_with_depth(var, depth));
 }
 
 fn cmd_build(
@@ -310,9 +361,9 @@ fn cmd_build(
     };
 
     let work_dir = std::path::Path::new(path).parent();
-    let (env, _, _) = execute_module(&module, false, work_dir);
+    let res = execute_module(&module, false, work_dir);
     let mut bindings = HashMap::new();
-    for (k, v) in env {
+    for (k, v) in res.env {
         bindings.insert(k, v);
     }
 
@@ -349,7 +400,7 @@ fn execute_module(
     module: &AvenModule,
     verbose: bool,
     working_dir: Option<&std::path::Path>,
-) -> (HashMap<String, f64>, Ledger, Option<diagnostics::Diagnosis>) {
+) -> ExecutionResult {
     // 0. Verify compile-time dimensional homogeneity across all relation blocks
     let mut type_checker = units::DimensionalChecker::new();
     if let Err(e) = type_checker.check_module(module) {
@@ -360,6 +411,7 @@ fn execute_module(
     let mut env = HashMap::new();
     let mut ledger = Ledger::new();
     let mut seq = 0;
+    let mut stale_facts = Vec::new();
 
     // Collect initial bindings from solve blocks
     for solve in &module.solves {
@@ -387,6 +439,32 @@ fn execute_module(
             if let Some(dir) = working_dir {
                 ext_eval = ext_eval.with_working_dir(dir);
             }
+
+            // Collect expected required keys for this block from equations and solve constraints
+            let mut required_keys = Vec::new();
+            for eq in &blk.equations {
+                for v in eq.rhs.vars() {
+                    if !env.contains_key(&v) && !required_keys.contains(&v) {
+                        required_keys.push(v);
+                    }
+                }
+            }
+            for solve in &module.solves {
+                if solve.target == blk.name || solve.targets.contains(&blk.name) {
+                    for c in &solve.constraints {
+                        if !env.contains_key(&c.lhs) && !required_keys.contains(&c.lhs) {
+                            required_keys.push(c.lhs.clone());
+                        }
+                        for v in c.rhs.vars() {
+                            if !env.contains_key(&v) && !required_keys.contains(&v) {
+                                required_keys.push(v);
+                            }
+                        }
+                    }
+                }
+            }
+            ext_eval = ext_eval.with_required_keys(&required_keys);
+
             let mut varmap = evaluator::VarMap::new();
             for (k, v) in &env {
                 varmap.set(k, *v);
@@ -410,23 +488,32 @@ fn execute_module(
                         .map(|d| d.as_millis() as u64)
                         .unwrap_or(0);
 
-                    let mut has_stale = false;
                     for (k, v) in res.values {
                         if !env.contains_key(&k) {
                             seq += 1;
                             env.insert(k.clone(), v);
 
-                            let is_stale =
-                                if let (Some(ts), Some(ttl)) = (res.timestamp_ms, res.ttl_ms) {
+                            let is_stale = if let Some(ttl) = res.ttl_ms {
+                                if ttl == 0 {
+                                    if !stale_facts.contains(&k) {
+                                        stale_facts.push(k.clone());
+                                    }
+                                    true
+                                } else if let Some(ts) = res.timestamp_ms {
                                     if now_ms > ts + ttl {
-                                        has_stale = true;
+                                        if !stale_facts.contains(&k) {
+                                            stale_facts.push(k.clone());
+                                        }
                                         true
                                     } else {
                                         false
                                     }
                                 } else {
                                     false
-                                };
+                                }
+                            } else {
+                                false
+                            };
 
                             let metadata = ledger::FactMetadata {
                                 timestamp_ms: res.timestamp_ms,
@@ -447,16 +534,10 @@ fn execute_module(
                             });
                         }
                     }
-
-                    if has_stale {
-                        eprintln!(
-                            "  ⚠ Freshness Alert: Facts from '{}' are STALE (TTL exceeded). Decisions should not rely on unrefreshed metrics.",
-                            res.backend_id
-                        );
-                    }
                 }
                 Err(e) => {
                     eprintln!("External evaluation failed for block '{}': {}", blk.name, e);
+                    process::exit(1);
                 }
             }
         }
@@ -496,18 +577,21 @@ fn execute_module(
                 }
             }
 
-            // Record derived facts into the ledger
+            // Record derived facts into the ledger with causal stale taint propagation
             for (k, v) in &solved_env {
                 if !env.contains_key(k) {
                     seq += 1;
-                    // Find causes: which equations defined this?
                     let mut causes = Vec::new();
+                    let mut is_tainted_stale = false;
                     let mut origin = "derived".to_string();
                     if let Some(eq) = solver.relations.iter().find(|e| &e.lhs == k) {
                         origin = format!("= {}", eq.rhs);
                         for input_var in eq.rhs.vars() {
                             if let Some(fact) = ledger.latest(&input_var) {
                                 causes.push(fact.seq);
+                                if fact.metadata.as_ref().map_or(false, |m| m.is_stale) {
+                                    is_tainted_stale = true;
+                                }
                             }
                         }
                     } else if let Some(c) = solver.constraints.iter().find(|c| &c.lhs == k) {
@@ -515,11 +599,29 @@ fn execute_module(
                         for input_var in c.rhs.vars() {
                             if let Some(fact) = ledger.latest(&input_var) {
                                 causes.push(fact.seq);
+                                if fact.metadata.as_ref().map_or(false, |m| m.is_stale) {
+                                    is_tainted_stale = true;
+                                }
                             }
                         }
                     } else if solver.integer_vars.contains(k) {
                         origin = "integer optimization".to_string();
                     }
+
+                    if is_tainted_stale && !stale_facts.contains(k) {
+                        stale_facts.push(k.clone());
+                    }
+
+                    let metadata = if is_tainted_stale {
+                        Some(ledger::FactMetadata {
+                            timestamp_ms: None,
+                            ttl_ms: None,
+                            is_stale: true,
+                            warnings: vec!["causal-stale-taint".to_string()],
+                        })
+                    } else {
+                        None
+                    };
 
                     ledger.append(Fact {
                         seq,
@@ -529,18 +631,32 @@ fn execute_module(
                         value: *v,
                         causes,
                         origin,
-                        metadata: None,
+                        metadata,
                     });
                 }
             }
 
-            (solved_env, ledger, None)
+            let is_actionable = stale_facts.is_empty();
+            ExecutionResult {
+                env: solved_env,
+                ledger,
+                diagnosis: None,
+                is_actionable,
+                stale_facts,
+            }
         }
         Err(solver::SolverError::UnderDetermined(diag)) => {
             if verbose {
                 println!("\n{}", diag.report());
             }
-            (env, ledger, Some(diag))
+            let is_actionable = stale_facts.is_empty();
+            ExecutionResult {
+                env,
+                ledger,
+                diagnosis: Some(diag),
+                is_actionable,
+                stale_facts,
+            }
         }
         Err(e) => {
             eprintln!("\nSolver Error: {}", e);
@@ -569,7 +685,8 @@ fn cmd_demo() {
     let mut lex = Lexer::new(src1);
     let mut parser = Parser::new(lex.tokenize().unwrap());
     let mod1 = parser.parse_module("fall").unwrap();
-    let (env1, _, _) = execute_module(&mod1, true, None);
+    let res1 = execute_module(&mod1, true, None);
+    let env1 = res1.env;
     println!(
         "  depth=45, g=9.81 => time = {:.4} s (analytic {:.4})\n",
         env1["time"],
@@ -592,7 +709,8 @@ fn cmd_demo() {
     let mut lex = Lexer::new(src2);
     let mut parser = Parser::new(lex.tokenize().unwrap());
     let mod2 = parser.parse_module("market").unwrap();
-    let (env2, _, _) = execute_module(&mod2, true, None);
+    let res2 = execute_module(&mod2, true, None);
+    let env2 = res2.env;
     println!(
         "  clearing = 0 => equilibrium price = {:.2}, supply = demand = {:.2}\n",
         env2["price"], env2["supply"]
@@ -628,7 +746,8 @@ fn cmd_demo() {
     // 4. Provenance & Fact Ledger
     println!("Pillar 4: Causal Provenance Ledger ('why' query)");
     println!("------------------------------------------------------------");
-    let (_, ledger3, _) = execute_module(&mod3, false, None);
+    let res3 = execute_module(&mod3, false, None);
+    let ledger3 = res3.ledger;
     println!("why cost:\n{}\n", ledger3.why("cost"));
 
     // 5. Multi-Objective Pareto Frontier & Knee-Point Optimization

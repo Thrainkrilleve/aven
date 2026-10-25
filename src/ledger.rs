@@ -57,6 +57,8 @@ impl fmt::Display for IrreversibleRewindError {
 
 impl std::error::Error for IrreversibleRewindError {}
 
+pub const DEFAULT_MAX_DEPTH: usize = 20;
+
 #[derive(Debug, Clone, Default)]
 pub struct Ledger {
     pub facts: Vec<Fact>,
@@ -88,7 +90,7 @@ impl Ledger {
     }
 
     pub fn why(&self, name: &str) -> String {
-        self.why_with_depth(name, None)
+        self.why_with_depth(name, Some(DEFAULT_MAX_DEPTH))
     }
 
     pub fn why_with_depth(&self, name: &str, max_depth: Option<usize>) -> String {
@@ -135,13 +137,8 @@ impl Ledger {
         if let Some(limit) = max_depth {
             if depth >= limit && !fact.causes.is_empty() {
                 lines.push(format!(
-                    "{}#{} {} = {:.4}{}{}  ... [pruned: {} ancestor(s) beyond hop limit {}]",
+                    "{}└── ... [pruned: {} ancestor(s) beyond hop limit {}. Use --depth <N> or --depth 0 for unlimited]",
                     pad,
-                    fact.seq,
-                    fact.name,
-                    fact.value,
-                    note,
-                    meta_str,
                     fact.causes.len(),
                     limit
                 ));

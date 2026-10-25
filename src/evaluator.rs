@@ -278,6 +278,7 @@ pub struct ExternalEvaluator {
     pub backend_id: String,
     pub working_dir: Option<std::path::PathBuf>,
     pub timeout: Option<std::time::Duration>,
+    pub required_keys: Vec<String>,
 }
 
 impl ExternalEvaluator {
@@ -288,6 +289,7 @@ impl ExternalEvaluator {
             backend_id: command.to_string(),
             working_dir: None,
             timeout: None,
+            required_keys: Vec::new(),
         }
     }
 
@@ -303,6 +305,11 @@ impl ExternalEvaluator {
 
     pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.timeout = Some(timeout);
+        self
+    }
+
+    pub fn with_required_keys(mut self, keys: &[String]) -> Self {
+        self.required_keys = keys.to_vec();
         self
     }
 }
@@ -381,15 +388,42 @@ impl Evaluator for ExternalEvaluator {
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
+        let trimmed_stdout = stdout.trim();
+
+        if !trimmed_stdout.starts_with('{') || !trimmed_stdout.ends_with('}') {
+            return Err(EvalError::MalformedOutput(format!(
+                "Malformed output: adapter stdout must be a JSON object '{{...}}', found: '{}'",
+                trimmed_stdout
+            )));
+        }
+
+        let backend_id =
+            parse_json_string(&stdout, "backend_id").unwrap_or_else(|| self.backend_id.clone());
+
+        if let Some(err_msg) = parse_json_string(&stdout, "error") {
+            return Err(EvalError::BlackBoxFailure(format!(
+                "Adapter '{}' reported error: {}",
+                backend_id, err_msg
+            )));
+        }
+
         let parsed_numbers = parse_json_object_numbers(&stdout);
         if parsed_numbers.is_empty() {
             return Err(EvalError::MalformedOutput(format!(
-                "No numeric outputs found in stdout: {}",
+                "No numeric outputs found in adapter stdout: {}",
                 stdout
             )));
         }
-        let backend_id =
-            parse_json_string(&stdout, "backend_id").unwrap_or_else(|| self.backend_id.clone());
+
+        // Schema validation: verify all required keys are present
+        for req in &self.required_keys {
+            if !parsed_numbers.contains_key(req) {
+                return Err(EvalError::MalformedOutput(format!(
+                    "Schema validation failed: external adapter '{}' omitted required numeric field '{}'",
+                    backend_id, req
+                )));
+            }
+        }
 
         let timestamp_ms = parse_json_u64(&stdout, "timestamp_ms")
             .or_else(|| parse_json_u64(&stdout, "timestamp"));
@@ -585,6 +619,7 @@ impl Default for OrchestratorConfig {
 pub struct Orchestrator {
     pub evaluator: Arc<dyn Evaluator>,
     pub seed: u64,
+    pub frontier_cache: std::sync::Mutex<HashMap<String, Vec<FrontierPoint>>>,
 }
 
 impl Orchestrator {
@@ -592,6 +627,7 @@ impl Orchestrator {
         Self {
             evaluator,
             seed: 42,
+            frontier_cache: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -603,6 +639,7 @@ impl Orchestrator {
                 Self {
                     evaluator: eval,
                     seed: config.seed,
+                    frontier_cache: std::sync::Mutex::new(HashMap::new()),
                 }
             }
             EvaluatorBackend::External {
@@ -622,6 +659,7 @@ impl Orchestrator {
                 Self {
                     evaluator: Arc::new(ext),
                     seed: config.seed,
+                    frontier_cache: std::sync::Mutex::new(HashMap::new()),
                 }
             }
         }
@@ -700,7 +738,8 @@ impl Orchestrator {
         }
     }
 
-    /// Generates a Pareto frontier by sweeping an ε-constraint over a parameter range.
+    /// Generates a Pareto frontier by sweeping an ε-constraint over a parameter range,
+    /// backed by an in-memory cache keyed on input spec hash and sweep parameters.
     pub fn solve_pareto(
         &self,
         base_inputs: &VarMap,
@@ -709,9 +748,24 @@ impl Orchestrator {
         steps: usize,
         objectives: &[String],
     ) -> Result<Vec<FrontierPoint>, SolveFailure> {
+        let (min_val, max_val) = sweep_range;
+        let cache_key = format!(
+            "{}:{}:{:.4}:{:.4}:{}",
+            base_inputs.compute_hash(),
+            sweep_var,
+            min_val,
+            max_val,
+            steps
+        );
+
+        if let Ok(guard) = self.frontier_cache.lock() {
+            if let Some(cached) = guard.get(&cache_key) {
+                return Ok(cached.clone());
+            }
+        }
+
         let mut frontier = Vec::new();
         let step_count = steps.max(2);
-        let (min_val, max_val) = sweep_range;
 
         for i in 0..=step_count {
             let val = min_val + (i as f64 / step_count as f64) * (max_val - min_val);
@@ -734,36 +788,133 @@ impl Orchestrator {
             }
         }
 
-        Ok(frontier)
+        let filtered = Self::filter_epsilon_dominance(&frontier, 1e-5);
+        if let Ok(mut guard) = self.frontier_cache.lock() {
+            guard.insert(cache_key, filtered.clone());
+        }
+
+        Ok(filtered)
     }
 
-    /// Finds the Knee Point on a 2-objective Pareto frontier via maximum perpendicular distance.
+    /// Filters candidate frontier points using ε-box dominance to remove redundant or near-duplicate solutions.
+    pub fn filter_epsilon_dominance(candidates: &[FrontierPoint], eps: f64) -> Vec<FrontierPoint> {
+        if candidates.len() <= 1 {
+            return candidates.to_vec();
+        }
+
+        let mut non_dominated: Vec<FrontierPoint> = Vec::new();
+        for p in candidates {
+            if !p.is_feasible || p.objectives.is_empty() {
+                continue;
+            }
+
+            // Check if p is epsilon-dominated by any point already accepted in non_dominated
+            let dominated = non_dominated.iter().any(|existing| {
+                if existing.objectives.len() != p.objectives.len() {
+                    return false;
+                }
+                // If all objectives are within eps, existing covers p
+                existing
+                    .objectives
+                    .iter()
+                    .zip(&p.objectives)
+                    .all(|((_, val_e), (_, val_p))| (val_e - val_p).abs() <= eps)
+            });
+
+            if !dominated {
+                non_dominated.push(p.clone());
+            }
+        }
+
+        if non_dominated.is_empty() {
+            candidates.to_vec()
+        } else {
+            non_dominated
+        }
+    }
+
+    /// Finds the Knee Point on a multi-objective Pareto frontier via normalized trade-off curvature.
     pub fn find_knee_point(frontier: &[FrontierPoint]) -> Option<usize> {
-        if frontier.len() < 3 {
+        if frontier.is_empty() {
             return None;
         }
-
-        let first = &frontier[0];
-        let last = &frontier[frontier.len() - 1];
-
-        if first.objectives.len() < 2 || last.objectives.len() < 2 {
-            return None;
+        if frontier.len() <= 2 {
+            return Some(0);
         }
 
-        let (x1, y1) = (first.objectives[0].1, first.objectives[1].1);
-        let (x2, y2) = (last.objectives[0].1, last.objectives[1].1);
+        let n_objs = frontier[0].objectives.len();
+        if n_objs < 2 {
+            return Some(0);
+        }
+
+        // Find the pair of objectives with the strongest trade-off (negative correlation)
+        let mut best_pair = (0, 1);
+        let mut best_tradeoff_score = f64::NEG_INFINITY;
+
+        for j1 in 0..n_objs {
+            for j2 in (j1 + 1)..n_objs {
+                let vals1: Vec<f64> = frontier.iter().map(|p| p.objectives[j1].1).collect();
+                let vals2: Vec<f64> = frontier.iter().map(|p| p.objectives[j2].1).collect();
+
+                let min1 = vals1.iter().cloned().fold(f64::INFINITY, f64::min);
+                let max1 = vals1.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                let min2 = vals2.iter().cloned().fold(f64::INFINITY, f64::min);
+                let max2 = vals2.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+
+                let span1 = max1 - min1;
+                let span2 = max2 - min2;
+
+                if span1 < 1e-9 || span2 < 1e-9 {
+                    continue;
+                }
+
+                let d1 = vals1.last().unwrap() - vals1.first().unwrap();
+                let d2 = vals2.last().unwrap() - vals2.first().unwrap();
+
+                let is_conflicting = (d1 * d2) < 0.0;
+                let score = if is_conflicting {
+                    1.0 + (span1.abs() * span2.abs())
+                } else {
+                    span1.abs() + span2.abs()
+                };
+
+                if score > best_tradeoff_score {
+                    best_tradeoff_score = score;
+                    best_pair = (j1, j2);
+                }
+            }
+        }
+
+        let (j1, j2) = best_pair;
+
+        let vals1: Vec<f64> = frontier.iter().map(|p| p.objectives[j1].1).collect();
+        let vals2: Vec<f64> = frontier.iter().map(|p| p.objectives[j2].1).collect();
+
+        let min1 = vals1.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max1 = vals1.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let min2 = vals2.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max2 = vals2.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+
+        let span1 = (max1 - min1).max(1e-12);
+        let span2 = (max2 - min2).max(1e-12);
+
+        let x1 = (vals1[0] - min1) / span1;
+        let y1 = (vals2[0] - min2) / span2;
+        let x2 = (vals1[vals1.len() - 1] - min1) / span1;
+        let y2 = (vals2[vals2.len() - 1] - min2) / span2;
 
         let denom = ((y2 - y1).powi(2) + (x2 - x1).powi(2)).sqrt();
         if denom < 1e-12 {
-            return None;
+            return Some(frontier.len() / 2);
         }
 
         let mut max_dist = -1.0;
-        let mut knee_idx = 0;
+        let mut knee_idx = frontier.len() / 2;
 
-        for (i, p) in frontier.iter().enumerate() {
-            let x0 = p.objectives[0].1;
-            let y0 = p.objectives[1].1;
+        // Scan interior points (indices 1 to n-2) to pick the true balanced trade-off
+        for i in 1..(frontier.len() - 1) {
+            let x0 = (frontier[i].objectives[j1].1 - min1) / span1;
+            let y0 = (frontier[i].objectives[j2].1 - min2) / span2;
             let dist = ((y2 - y1) * x0 - (x2 - x1) * y0 + x2 * y1 - y2 * x1).abs() / denom;
             if dist > max_dist {
                 max_dist = dist;
