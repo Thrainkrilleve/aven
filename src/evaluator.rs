@@ -1,5 +1,5 @@
 // src/evaluator.rs — Pluggable Evaluation Engine & Pareto Orchestrator for Aven
-// Milestone v0.6.0: Evaluator Trait, NativeEvaluator, SHA-256 Spec Hashing, and ε-Constraint MOO.
+// Milestone v0.6.0: Evaluator Trait, NativeEvaluator, ExternalEvaluator, SHA-256 Spec Hashing, and ε-Constraint MOO.
 #![allow(dead_code, clippy::chunks_exact_to_as_chunks)]
 
 use crate::ast::Equation;
@@ -139,11 +139,13 @@ pub struct EvalResult {
     pub solve_time_us: f64,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum EvalError {
     DomainError(String),
     Timeout(String),
     SolverFailed(String),
+    BlackBoxFailure(String),
+    MalformedOutput(String),
 }
 
 impl std::fmt::Display for EvalError {
@@ -152,11 +154,76 @@ impl std::fmt::Display for EvalError {
             EvalError::DomainError(msg) => write!(f, "Domain error: {}", msg),
             EvalError::Timeout(msg) => write!(f, "Timeout: {}", msg),
             EvalError::SolverFailed(msg) => write!(f, "Solver failed: {}", msg),
+            EvalError::BlackBoxFailure(msg) => write!(f, "Black-box failure: {}", msg),
+            EvalError::MalformedOutput(msg) => write!(f, "Malformed output: {}", msg),
         }
     }
 }
 
 impl std::error::Error for EvalError {}
+
+/// Solve convergence status recorded in SolveDiagnostics.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SolveStatus {
+    Converged,
+    BlackBoxFailure(String),
+    DomainError(String),
+    Timeout(String),
+    SolverFailed(String),
+}
+
+impl std::fmt::Display for SolveStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SolveStatus::Converged => write!(f, "Converged"),
+            SolveStatus::BlackBoxFailure(msg) => write!(f, "Black-box failure: {}", msg),
+            SolveStatus::DomainError(msg) => write!(f, "Domain error: {}", msg),
+            SolveStatus::Timeout(msg) => write!(f, "Timeout: {}", msg),
+            SolveStatus::SolverFailed(msg) => write!(f, "Solver failed: {}", msg),
+        }
+    }
+}
+
+/// Diagnostic metadata accompanying every solved or failed state.
+#[derive(Clone, Debug)]
+pub struct SolveDiagnostics {
+    pub spec_hash: String,
+    pub free_vars: Vec<String>,
+    pub residual: f64,
+    pub rank: usize,
+    pub binding_constraints: Vec<String>,
+    pub backend_trace: Vec<String>,
+    pub solve_time_us: f64,
+    pub status: SolveStatus,
+}
+
+/// Failure outcome carrying complete diagnostics for auditing even on error paths.
+#[derive(Clone, Debug)]
+pub struct SolveFailure {
+    pub error: EvalError,
+    pub diagnostics: Box<SolveDiagnostics>,
+}
+
+impl std::fmt::Display for SolveFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}: status={}, spec_hash={}",
+            self.error, self.diagnostics.status, self.diagnostics.spec_hash
+        )
+    }
+}
+
+impl std::error::Error for SolveFailure {}
+
+/// A single feasible or non-dominated point on a Pareto frontier.
+#[derive(Clone, Debug)]
+pub struct FrontierPoint {
+    pub vars: VarMap,
+    pub objectives: Vec<(String, f64)>,
+    pub diagnostics: SolveDiagnostics,
+    pub is_feasible: bool,
+}
 
 /// The pluggable Evaluator trait.
 pub trait Evaluator: Send + Sync {
@@ -198,10 +265,13 @@ impl Evaluator for NativeEvaluator {
     }
 }
 
-/// External subprocess evaluator communicating via JSON over stdin/stdout.
+/// External subprocess evaluator communicating via JSON over stdin/stdout/stderr.
 pub struct ExternalEvaluator {
     pub command: String,
     pub args: Vec<String>,
+    pub backend_id: String,
+    pub working_dir: Option<std::path::PathBuf>,
+    pub timeout: Option<std::time::Duration>,
 }
 
 impl ExternalEvaluator {
@@ -209,7 +279,25 @@ impl ExternalEvaluator {
         Self {
             command: command.to_string(),
             args: args.iter().map(|s| s.to_string()).collect(),
+            backend_id: command.to_string(),
+            working_dir: None,
+            timeout: None,
         }
+    }
+
+    pub fn with_backend_id(mut self, id: &str) -> Self {
+        self.backend_id = id.to_string();
+        self
+    }
+
+    pub fn with_working_dir<P: Into<std::path::PathBuf>>(mut self, dir: P) -> Self {
+        self.working_dir = Some(dir.into());
+        self
+    }
+
+    pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
     }
 }
 
@@ -217,34 +305,50 @@ impl Evaluator for ExternalEvaluator {
     fn evaluate(&self, inputs: &VarMap) -> Result<EvalResult, EvalError> {
         let t_start = std::time::Instant::now();
 
-        // Serialize VarMap to simple JSON object: {"x": 1.23, "y": 4.56}
+        // Serialize VarMap to sorted JSON object: {"x": 0.5, "y": -0.2}
         let mut json_str = String::from("{");
         let mut first = true;
-        for (k, v) in &inputs.values {
-            if !first {
-                json_str.push_str(", ");
+        let mut keys: Vec<&String> = inputs.values.keys().collect();
+        keys.sort();
+        for k in keys {
+            if let Some(v) = inputs.values.get(k) {
+                if !first {
+                    json_str.push_str(", ");
+                }
+                use std::fmt::Write;
+                let _ = write!(json_str, "\"{}\": {}", k, v);
+                first = false;
             }
-            use std::fmt::Write;
-            let _ = write!(json_str, "\"{}\": {:.6}", k, v);
-            first = false;
         }
         json_str.push('}');
 
-        let mut child = std::process::Command::new(&self.command)
-            .args(&self.args)
+        // Spawn child process with piped stdin/stdout/stderr
+        let mut cmd = std::process::Command::new(&self.command);
+        cmd.args(&self.args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| {
-                EvalError::DomainError(format!("Failed to spawn '{}': {}", self.command, e))
-            })?;
+            .stderr(std::process::Stdio::piped());
 
-        if let Some(mut stdin) = child.stdin.take() {
-            use std::io::Write;
-            let _ = stdin.write_all(json_str.as_bytes());
+        if let Some(dir) = &self.working_dir {
+            cmd.current_dir(dir);
         }
 
+        let mut child = cmd.spawn().map_err(|e| {
+            EvalError::DomainError(format!("Failed to spawn '{}': {}", self.command, e))
+        })?;
+
+        // Write JSON payload to stdin
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            stdin.write_all(json_str.as_bytes()).map_err(|e| {
+                EvalError::DomainError(format!(
+                    "Failed to write to stdin of '{}': {}",
+                    self.command, e
+                ))
+            })?;
+        }
+
+        // Wait for output and check exit status
         let output = child
             .wait_with_output()
             .map_err(|e| EvalError::DomainError(format!("Subprocess execution error: {}", e)))?;
@@ -253,19 +357,21 @@ impl Evaluator for ExternalEvaluator {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(EvalError::SolverFailed(format!(
-                "Subprocess exited with code {:?}: {}",
-                output.status.code(),
-                stderr.trim()
-            )));
+            let trimmed = stderr.trim();
+            let msg = if trimmed.is_empty() {
+                format!("Subprocess exited with code {:?}", output.status.code())
+            } else {
+                trimmed.to_string()
+            };
+            return Err(EvalError::BlackBoxFailure(msg));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let val = parse_json_float(&stdout, "value").ok_or_else(|| {
-            EvalError::DomainError(format!("Missing 'value' in stdout: {}", stdout))
+            EvalError::MalformedOutput(format!("Missing 'value' in stdout: {}", stdout))
         })?;
         let backend_id =
-            parse_json_string(&stdout, "backend_id").unwrap_or_else(|| self.command.clone());
+            parse_json_string(&stdout, "backend_id").unwrap_or_else(|| self.backend_id.clone());
 
         let mut out_values = inputs.values.clone();
         out_values.insert("value".to_string(), val);
@@ -278,52 +384,77 @@ impl Evaluator for ExternalEvaluator {
     }
 
     fn name(&self) -> &str {
-        &self.command
+        &self.backend_id
     }
 }
 
-fn parse_json_float(json: &str, key: &str) -> Option<f64> {
+pub fn parse_json_float(json: &str, key: &str) -> Option<f64> {
     let needle = format!("\"{}\"", key);
-    let key_pos = json.find(&needle)?;
-    let after_key = &json[key_pos + needle.len()..];
-    let colon_pos = after_key.find(':')?;
-    let after_colon = after_key[colon_pos + 1..].trim_start();
-    let end_idx = after_colon
-        .find(|c: char| c == ',' || c == '}' || c.is_whitespace())
-        .unwrap_or(after_colon.len());
-    after_colon[..end_idx].trim().parse::<f64>().ok()
+    let mut search_idx = 0;
+    while let Some(pos) = json[search_idx..].find(&needle) {
+        let abs_pos = search_idx + pos;
+        let after_key = &json[abs_pos + needle.len()..];
+        let trimmed = after_key.trim_start();
+        if let Some(stripped) = trimmed.strip_prefix(':') {
+            let after_colon = stripped.trim_start();
+            let end_idx = after_colon
+                .find(|c: char| c == ',' || c == '}' || c.is_whitespace())
+                .unwrap_or(after_colon.len());
+            return after_colon[..end_idx].trim().parse::<f64>().ok();
+        }
+        search_idx = abs_pos + needle.len();
+    }
+    None
 }
 
-fn parse_json_string(json: &str, key: &str) -> Option<String> {
+pub fn parse_json_string(json: &str, key: &str) -> Option<String> {
     let needle = format!("\"{}\"", key);
-    let key_pos = json.find(&needle)?;
-    let after_key = &json[key_pos + needle.len()..];
-    let colon_pos = after_key.find(':')?;
-    let after_colon = after_key[colon_pos + 1..].trim_start();
-    let quote_start = after_colon.find('"')?;
-    let rest = &after_colon[quote_start + 1..];
-    let quote_end = rest.find('"')?;
-    Some(rest[..quote_end].to_string())
+    let mut search_idx = 0;
+    while let Some(pos) = json[search_idx..].find(&needle) {
+        let abs_pos = search_idx + pos;
+        let after_key = &json[abs_pos + needle.len()..];
+        let trimmed = after_key.trim_start();
+        if let Some(stripped) = trimmed.strip_prefix(':') {
+            let after_colon = stripped.trim_start();
+            let quote_start = after_colon.find('"')?;
+            let rest = &after_colon[quote_start + 1..];
+            let quote_end = rest.find('"')?;
+            return Some(rest[..quote_end].to_string());
+        }
+        search_idx = abs_pos + needle.len();
+    }
+    None
 }
 
-/// Diagnostic metadata accompanying every solved state.
-#[derive(Clone, Debug)]
-pub struct SolveDiagnostics {
-    pub spec_hash: String,
-    pub free_vars: Vec<String>,
-    pub residual: f64,
-    pub rank: usize,
-    pub binding_constraints: Vec<String>,
-    pub backend_trace: Vec<String>,
-    pub solve_time_us: f64,
+/// Backend configuration enum. Native Newton path is the zero-dependency default.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub enum EvaluatorBackend {
+    /// Pure Rust continuous analytical Newton-Raphson solver (default).
+    #[default]
+    Native,
+    /// External subprocess evaluator communicating via JSON over stdio.
+    External {
+        command: String,
+        args: Vec<String>,
+        backend_id: Option<String>,
+        working_dir: Option<std::path::PathBuf>,
+    },
 }
 
-/// A single feasible or non-dominated point on a Pareto frontier.
+/// Runtime configuration for the Orchestrator.
 #[derive(Clone, Debug)]
-pub struct FrontierPoint {
-    pub vars: VarMap,
-    pub objectives: Vec<(String, f64)>,
-    pub diagnostics: SolveDiagnostics,
+pub struct OrchestratorConfig {
+    pub backend: EvaluatorBackend,
+    pub seed: u64,
+}
+
+impl Default for OrchestratorConfig {
+    fn default() -> Self {
+        Self {
+            backend: EvaluatorBackend::Native,
+            seed: 42,
+        }
+    }
 }
 
 /// The Aven Relational Orchestrator.
@@ -340,28 +471,109 @@ impl Orchestrator {
         }
     }
 
+    /// Creates an Orchestrator from configuration, defaulting to Native Newton evaluation.
+    pub fn from_config(config: &OrchestratorConfig, equations: Vec<Equation>) -> Self {
+        match &config.backend {
+            EvaluatorBackend::Native => {
+                let eval = Arc::new(NativeEvaluator::new(equations));
+                Self {
+                    evaluator: eval,
+                    seed: config.seed,
+                }
+            }
+            EvaluatorBackend::External {
+                command,
+                args,
+                backend_id,
+                working_dir,
+            } => {
+                let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+                let mut ext = ExternalEvaluator::new(command, &arg_refs);
+                if let Some(id) = backend_id {
+                    ext = ext.with_backend_id(id);
+                }
+                if let Some(dir) = working_dir {
+                    ext = ext.with_working_dir(dir.clone());
+                }
+                Self {
+                    evaluator: Arc::new(ext),
+                    seed: config.seed,
+                }
+            }
+        }
+    }
+
     /// Solves a single state deterministically and packages complete diagnostics.
-    pub fn solve_single(&self, inputs: &VarMap) -> Result<FrontierPoint, EvalError> {
-        let res = self.evaluator.evaluate(inputs)?;
+    /// On success: returns Ok(FrontierPoint) with is_feasible = true.
+    /// On error: returns Err(SolveFailure) which carries full SolveDiagnostics:
+    ///   - spec_hash (deterministic SHA-256 of inputs)
+    ///   - free_vars (input decision variables)
+    ///   - backend_trace (backend identifier)
+    ///   - residual: f64::NAN ("black-box failure" residual marker)
+    ///   - status: SolveStatus::BlackBoxFailure(err)
+    pub fn solve_single(&self, inputs: &VarMap) -> Result<FrontierPoint, SolveFailure> {
         let spec_hash = inputs.compute_hash();
-        let mut out_vars = VarMap::new();
-        out_vars.values = res.values.clone();
+        let mut free_vars: Vec<String> = inputs.values.keys().cloned().collect();
+        free_vars.sort();
+        let t_start = std::time::Instant::now();
 
-        let diagnostics = SolveDiagnostics {
-            spec_hash,
-            free_vars: vec![],
-            residual: 0.0,
-            rank: res.values.len(),
-            binding_constraints: vec![],
-            backend_trace: vec![res.backend_id],
-            solve_time_us: res.solve_time_us,
-        };
+        match self.evaluator.evaluate(inputs) {
+            Ok(res) => {
+                let mut out_vars = VarMap::new();
+                out_vars.values = res.values.clone();
 
-        Ok(FrontierPoint {
-            vars: out_vars,
-            objectives: vec![],
-            diagnostics,
-        })
+                let diagnostics = SolveDiagnostics {
+                    spec_hash,
+                    free_vars,
+                    residual: 0.0,
+                    rank: res.values.len(),
+                    binding_constraints: vec![],
+                    backend_trace: vec![res.backend_id],
+                    solve_time_us: res.solve_time_us,
+                    status: SolveStatus::Converged,
+                };
+
+                Ok(FrontierPoint {
+                    vars: out_vars,
+                    objectives: vec![],
+                    diagnostics,
+                    is_feasible: true,
+                })
+            }
+            Err(e) => {
+                let elapsed_us = t_start.elapsed().as_secs_f64() * 1_000_000.0;
+                let backend_id = self.evaluator.name().to_string();
+
+                let diagnostics = SolveDiagnostics {
+                    spec_hash,
+                    free_vars,
+                    residual: f64::NAN, // "black-box failure" residual marker
+                    rank: 0,
+                    binding_constraints: vec![],
+                    backend_trace: vec![backend_id],
+                    solve_time_us: elapsed_us,
+                    status: SolveStatus::BlackBoxFailure(e.to_string()),
+                };
+
+                Err(SolveFailure {
+                    error: e,
+                    diagnostics: Box::new(diagnostics),
+                })
+            }
+        }
+    }
+
+    /// Solves a single point returning FrontierPoint directly with is_feasible flag and diagnostics intact.
+    pub fn solve_point(&self, inputs: &VarMap) -> FrontierPoint {
+        match self.solve_single(inputs) {
+            Ok(pt) => pt,
+            Err(failure) => FrontierPoint {
+                vars: inputs.clone(),
+                objectives: vec![],
+                diagnostics: *failure.diagnostics,
+                is_feasible: false,
+            },
+        }
     }
 
     /// Generates a Pareto frontier by sweeping an ε-constraint over a parameter range.
@@ -372,7 +584,7 @@ impl Orchestrator {
         sweep_range: (f64, f64),
         steps: usize,
         objectives: &[String],
-    ) -> Result<Vec<FrontierPoint>, EvalError> {
+    ) -> Result<Vec<FrontierPoint>, SolveFailure> {
         let mut frontier = Vec::new();
         let step_count = steps.max(2);
         let (min_val, max_val) = sweep_range;
@@ -393,6 +605,7 @@ impl Orchestrator {
                     vars: fp.vars,
                     objectives: obj_vals,
                     diagnostics: fp.diagnostics,
+                    is_feasible: true,
                 });
             }
         }

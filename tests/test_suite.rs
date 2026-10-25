@@ -532,3 +532,156 @@ fn test_external_evaluator_subprocess() {
     assert_eq!(res.backend_id, "mock_external_sim");
     assert!(res.solve_time_us > 0.0);
 }
+
+#[test]
+fn test_external_evaluator_flame_contract_and_diagnostic_integrity() {
+    use avenc::evaluator::{
+        EvaluatorBackend, Orchestrator, OrchestratorConfig, SolveStatus, VarMap,
+    };
+
+    let py_cmd = if cfg!(windows) { "python" } else { "python3" };
+    let script_path = "evaluations/tests/flame_eval.py";
+
+    // Configure ExternalEvaluator behind OrchestratorConfig
+    let config = OrchestratorConfig {
+        backend: EvaluatorBackend::External {
+            command: py_cmd.to_string(),
+            args: vec![script_path.to_string()],
+            backend_id: Some("flame_eval".to_string()),
+            working_dir: None,
+        },
+        seed: 42,
+    };
+
+    let orchestrator = Orchestrator::from_config(&config, vec![]);
+    assert_eq!(orchestrator.evaluator.name(), "flame_eval");
+
+    // Case 1: Normal point -> Ok(value + backend_id)
+    // Retry up to 3 times to absorb flame_eval.py's deliberate 5% random crash
+    let mut pt1 = None;
+    for _ in 0..3 {
+        let mut inputs = VarMap::new();
+        inputs.set("x", 0.5);
+        inputs.set("y", -0.2);
+        if let Ok(res) = orchestrator.solve_single(&inputs) {
+            pt1 = Some(res);
+            break;
+        }
+    }
+    let pt1 = pt1.expect("Normal point solve failed");
+    assert!(pt1.is_feasible);
+    assert_eq!(pt1.diagnostics.backend_trace, vec!["flame_eval"]);
+    assert_eq!(pt1.diagnostics.residual, 0.0);
+    assert_eq!(pt1.diagnostics.status, SolveStatus::Converged);
+    assert_eq!(pt1.diagnostics.free_vars, vec!["x", "y"]);
+    assert_eq!(pt1.diagnostics.spec_hash.len(), 16);
+    assert!(pt1.vars.get("value").is_some());
+
+    // Case 2: Missing variable {"x": 1.0} -> clean failure with complete diagnostics intact
+    let mut inputs_missing = VarMap::new();
+    inputs_missing.set("x", 1.0);
+    let expected_hash = inputs_missing.compute_hash();
+
+    let fail_res = orchestrator.solve_single(&inputs_missing);
+    assert!(fail_res.is_err());
+    let failure = fail_res.unwrap_err();
+
+    // Verify diagnostics on error path:
+    assert_eq!(failure.diagnostics.spec_hash, expected_hash);
+    assert_eq!(failure.diagnostics.free_vars, vec!["x"]);
+    assert_eq!(failure.diagnostics.backend_trace, vec!["flame_eval"]);
+    assert!(
+        failure.diagnostics.residual.is_nan(),
+        "Black-box failure residual must be NaN"
+    );
+    assert!(
+        matches!(
+            failure.diagnostics.status,
+            SolveStatus::BlackBoxFailure(ref msg) if msg.contains("missing vars")
+        ),
+        "Expected missing vars message in SolveStatus, got: {:?}",
+        failure.diagnostics.status
+    );
+    assert!(failure.diagnostics.solve_time_us > 0.0);
+
+    // Verify solve_point also preserves diagnostic ledger
+    let pt_missing = orchestrator.solve_point(&inputs_missing);
+    assert!(!pt_missing.is_feasible);
+    assert_eq!(pt_missing.diagnostics.spec_hash, expected_hash);
+    assert!(pt_missing.diagnostics.residual.is_nan());
+
+    // Case 3: Spike region {"x": 0.3, "y": -0.7} -> ~49.6
+    let mut pt3 = None;
+    for _ in 0..3 {
+        let mut inputs = VarMap::new();
+        inputs.set("x", 0.3);
+        inputs.set("y", -0.7);
+        if let Ok(res) = orchestrator.solve_single(&inputs) {
+            pt3 = Some(res);
+            break;
+        }
+    }
+    let pt3 = pt3.expect("Spike point solve failed");
+    let val3 = pt3.vars.get("value").unwrap();
+    assert!(
+        (48.0..51.5).contains(&val3),
+        "Expected spike value ~49.6, got {}",
+        val3
+    );
+    assert_eq!(pt3.diagnostics.backend_trace, vec!["flame_eval"]);
+
+    // Case 4: Discontinuity wall {"x": 2.0, "y": 0.0} -> ~9.8
+    let mut pt4 = None;
+    for _ in 0..3 {
+        let mut inputs = VarMap::new();
+        inputs.set("x", 2.0);
+        inputs.set("y", 0.0);
+        if let Ok(res) = orchestrator.solve_single(&inputs) {
+            pt4 = Some(res);
+            break;
+        }
+    }
+    let pt4 = pt4.expect("Discontinuity wall solve failed");
+    let val4 = pt4.vars.get("value").unwrap();
+    assert!(
+        (9.0..11.0).contains(&val4),
+        "Expected discontinuity wall value ~9.8, got {}",
+        val4
+    );
+    assert_eq!(pt4.diagnostics.backend_trace, vec!["flame_eval"]);
+}
+
+#[test]
+fn test_evaluator_config_flag_defaults_to_native_newton() {
+    use avenc::ast::*;
+    use avenc::evaluator::{EvaluatorBackend, Orchestrator, OrchestratorConfig, VarMap};
+
+    // Verify default config backend is Native
+    let default_config = OrchestratorConfig::default();
+    assert_eq!(default_config.backend, EvaluatorBackend::Native);
+
+    let eq = Equation {
+        lhs: "y".to_string(),
+        op: ConstraintOp::Equal,
+        rhs: Expr::Bin(
+            BinaryOp::Mul,
+            Box::new(Expr::Var("x".to_string())),
+            Box::new(Expr::Num(2.0)),
+        ),
+        original_text: "y = x * 2.0".to_string(),
+        line: 1,
+        col: 1,
+    };
+
+    let orchestrator = Orchestrator::from_config(&default_config, vec![eq]);
+    assert_eq!(orchestrator.evaluator.name(), "native_analytic");
+
+    let mut inputs = VarMap::new();
+    inputs.set("x", 21.0);
+    let pt = orchestrator
+        .solve_single(&inputs)
+        .expect("Native solve failed");
+    assert_eq!(pt.vars.get("y"), Some(42.0));
+    assert_eq!(pt.diagnostics.backend_trace, vec!["native_analytic"]);
+    assert_eq!(pt.diagnostics.residual, 0.0);
+}

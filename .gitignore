@@ -31,3 +31,6 @@ Thumbs.db
 # Local CLI binaries
 /bin/
 
+# Node dependencies
+node_modules/
+

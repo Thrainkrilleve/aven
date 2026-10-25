@@ -39,9 +39,9 @@ def main():
     for i, vars_dict in enumerate(tests):
         result, err = external_evaluate(vars_dict)
         if err:
-            print(f"[{i}] FAIL  {vars_dict}  →  {err}")
+            print(f"[{i}] FAIL  {vars_dict}  ->  {err}")
         else:
-            print(f"[{i}] OK    {vars_dict}  →  value={result['value']:.4f}  "
+            print(f"[{i}] OK    {vars_dict}  ->  value={result['value']:.4f}  "
                   f"backend={result['backend_id']}")
 
 if __name__ == "__main__":

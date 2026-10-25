@@ -33,7 +33,7 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "Test suite failed!" -ForegroundColor Red
     exit 1
 }
-Write-Host "All 15 unit tests PASSED." -ForegroundColor Green
+Write-Host "All unit tests PASSED." -ForegroundColor Green
 
 # 4. Multi-Pillar Demo
 Write-Host ""

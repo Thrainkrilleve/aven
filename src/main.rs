@@ -36,7 +36,9 @@ fn print_usage() {
     println!("avenc v{} — The Aven Language Toolchain", VERSION);
     println!("Usage:");
     println!("  avenc run <file.aven>            Execute .aven file and print settled relations");
-    println!("  avenc pareto <file.aven> [var] [min] [max]");
+    println!(
+        "  avenc pareto <file.aven> [var] [min] [max] [--backend native|external] [--cmd <command>]"
+    );
     println!(
         "                                   Generate Pareto trade-off frontier & detect knee point"
     );
@@ -70,10 +72,27 @@ fn main() {
                 eprintln!("Error: missing file argument for 'pareto'");
                 process::exit(1);
             }
-            let sweep_var = args.get(3).map(|s| s.as_str());
-            let min_val = args.get(4).and_then(|s| s.parse::<f64>().ok());
-            let max_val = args.get(5).and_then(|s| s.parse::<f64>().ok());
-            cmd_pareto(&args[2], sweep_var, min_val, max_val);
+            let sweep_var = args
+                .get(3)
+                .filter(|s| !s.starts_with("--"))
+                .map(|s| s.as_str());
+            let min_val = args
+                .get(4)
+                .filter(|s| !s.starts_with("--"))
+                .and_then(|s| s.parse::<f64>().ok());
+            let max_val = args
+                .get(5)
+                .filter(|s| !s.starts_with("--"))
+                .and_then(|s| s.parse::<f64>().ok());
+            let backend_arg = args
+                .windows(2)
+                .find(|w| w[0] == "--backend")
+                .map(|w| w[1].as_str());
+            let cmd_arg = args
+                .windows(2)
+                .find(|w| w[0] == "--cmd")
+                .map(|w| w[1].as_str());
+            cmd_pareto(&args[2], sweep_var, min_val, max_val, backend_arg, cmd_arg);
         }
         "why" => {
             if args.len() < 4 {
@@ -497,7 +516,14 @@ fn cmd_demo() {
     println!("============================================================");
 }
 
-fn cmd_pareto(path: &str, sweep_var: Option<&str>, min_val: Option<f64>, max_val: Option<f64>) {
+fn cmd_pareto(
+    path: &str,
+    sweep_var: Option<&str>,
+    min_val: Option<f64>,
+    max_val: Option<f64>,
+    backend_arg: Option<&str>,
+    cmd_arg: Option<&str>,
+) {
     let module = parse_file(path);
     if module.blocks.is_empty() {
         eprintln!("Error: no relation blocks found in '{}'", path);
@@ -514,9 +540,35 @@ fn cmd_pareto(path: &str, sweep_var: Option<&str>, min_val: Option<f64>, max_val
         }
     }
 
-    let evaluator =
-        std::sync::Arc::new(evaluator::NativeEvaluator::new(rel_block.equations.clone()));
-    let orchestrator = evaluator::Orchestrator::new(evaluator);
+    let config = if let Some("external") = backend_arg {
+        let (command, args) = if let Some(cmd) = cmd_arg {
+            let parts: Vec<String> = cmd.split_whitespace().map(|s| s.to_string()).collect();
+            let c = parts
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "python".to_string());
+            let a = parts[1..].to_vec();
+            (c, a)
+        } else {
+            (
+                "python".to_string(),
+                vec!["evaluations/tests/flame_eval.py".to_string()],
+            )
+        };
+        evaluator::OrchestratorConfig {
+            backend: evaluator::EvaluatorBackend::External {
+                command,
+                args,
+                backend_id: Some("flame_eval".to_string()),
+                working_dir: None,
+            },
+            seed: 42,
+        }
+    } else {
+        evaluator::OrchestratorConfig::default()
+    };
+
+    let orchestrator = evaluator::Orchestrator::from_config(&config, rel_block.equations.clone());
 
     let var = sweep_var.unwrap_or("reqs_per_second");
     let min = min_val.unwrap_or(10000.0);
