@@ -22,6 +22,7 @@ pub enum SolverError {
     UnderDetermined(crate::diagnostics::Diagnosis),
     Infeasible(String),
     Unbounded(String),
+    Undetermined(String),
     MathError(String),
 }
 
@@ -72,6 +73,7 @@ impl fmt::Display for SolverError {
             }
             SolverError::Infeasible(msg) => write!(f, "No feasible solution found: {}", msg),
             SolverError::Unbounded(msg) => write!(f, "Objective is unbounded: {}", msg),
+            SolverError::Undetermined(msg) => write!(f, "Undetermined: {}", msg),
             SolverError::MathError(msg) => write!(f, "Solver math error: {}", msg),
         }
     }
@@ -597,6 +599,7 @@ impl SolverEngine {
             }
             Outcome::Infeasible(msg) => Err(SolverError::Infeasible(msg)),
             Outcome::Unbounded(msg) => Err(SolverError::Unbounded(msg)),
+            Outcome::Undetermined(msg) => Err(SolverError::Undetermined(msg)),
         }
     }
 

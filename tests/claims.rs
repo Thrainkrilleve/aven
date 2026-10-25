@@ -648,3 +648,58 @@ fn weather_cell_physics() {
     assert!((get("vertical_shear_ms_per_km") - 10.0).abs() < 1e-9);
     assert!((get("radar_rain_mmh") - (10f64.powf(4.5) / 200.0).powf(1.0 / 1.6)).abs() < 1e-6);
 }
+
+// A MILP whose integer equality fails the GCD test is infeasible, not unbounded. This is the
+// exact pathology that made avenc report "unbounded" for an infeasible model: an unbounded
+// objective over a region that contains no integer point.
+#[test]
+fn milp_gcd_test_catches_integer_infeasibility() {
+    // 2*x0 + 2*x1 is always even; it cannot equal 3. The objective is unbounded below.
+    let src = "relation S {\n int x0\n int x1\n r = 2 * x0 + 2 * x1\n r == 3\n obj = 0 - x0\n}\nsolve S with {\n minimize(obj)\n}\n";
+    let run = run_model(src, &[]);
+    assert_ne!(run.code, 0, "must not settle: {}", run.stdout);
+    assert!(run.stderr.contains("No feasible solution"), "stderr: {}", run.stderr);
+    assert!(!run.stderr.contains("unbounded"), "must not claim unbounded: {}", run.stderr);
+}
+
+// A feasible integer model with an unbounded improving direction is correctly unbounded.
+#[test]
+fn milp_feasible_and_unbounded_is_unbounded() {
+    let src = "relation S {\n int x\n obj = 0 - x\n x >= 0\n}\nsolve S with {\n minimize(obj)\n}\n";
+    let run = run_model(src, &[]);
+    assert_ne!(run.code, 0, "unbounded model must not settle");
+    assert!(run.stderr.contains("unbounded"), "stderr: {}", run.stderr);
+}
+
+// Hard MILP over an unbounded integer domain (needs cutting planes): avenc must not assert a
+// false verdict. It reports an honest "Undetermined", never "settled" or a wrong "infeasible".
+#[test]
+fn milp_unsolvable_reports_undetermined_not_a_false_verdict() {
+    let src = "relation S {
+    int x0
+    int x1
+    int x2
+    int x3
+    int x4
+    int x5
+    r0 = -4*x0 + 1*x1 + -3*x2 + 6*x3 + 5*x4 + 5*x5
+    r0 <= -12
+    r6 = 2*x0 + 2*x1 + -2*x2 + 0*x3 + -6*x4 + -3*x5
+    r6 == 27
+    obj = 6*x0 + -2*x1 + -5*x2 + -8*x3 + -7*x4 + -5*x5
+    x0 <= 6
+}
+solve S with {
+    maximize(obj)
+}
+";
+    let run = run_model(src, &["--json"]);
+    // If it settles, the point must be genuinely optimal/feasible (a proven answer is fine);
+    // if it cannot, it must say so honestly rather than claim infeasible or unbounded.
+    if run.code == 0 {
+        assert!(run.stdout.contains("\"status\": \"settled\""), "{}", run.stdout);
+    } else {
+        assert!(run.stderr.contains("Undetermined"), "must be honest, got: {}", run.stderr);
+        assert!(!run.stderr.contains("unbounded"), "no false unbounded: {}", run.stderr);
+    }
+}

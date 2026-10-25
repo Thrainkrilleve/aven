@@ -56,6 +56,9 @@ pub enum Outcome {
     },
     Infeasible(String),
     Unbounded(String),
+    /// Could not decide (e.g. an unbounded relaxation whose integer feasibility is undecided
+    /// without cutting planes). Reported honestly rather than as a wrong verdict.
+    Undetermined(String),
 }
 
 /// Margin used to turn a strict inequality g < 0 into g <= -margin.
@@ -528,13 +531,170 @@ fn simplex_iterate(
     true
 }
 
-/// Branch-and-bound over LP relaxations. Proven optimal unless the node limit is reached.
+/// Greatest common divisor of two non-negative integers.
+fn gcd_u64(mut a: u64, mut b: u64) -> u64 {
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a
+}
+
+/// Integer-infeasibility certificate (the GCD test for linear Diophantine equations): an
+/// equality `sum a_j x_j = b` whose a_j and b are all integers and whose variables are all
+/// integer has no integer solution when gcd(a_j) does not divide b. Sound (never a false
+/// infeasible); it does not catch every infeasibility.
+fn gcd_proves_infeasible(p: &Problem, lf: &LinearForm) -> bool {
+    let near_int = |v: f64| (v - v.round()).abs() < 1e-9;
+    for row in &lf.rows {
+        if row.sense != Sense::Eq {
+            continue;
+        }
+        let terms: Vec<usize> = (0..row.a.len()).filter(|&j| row.a[j] != 0.0).collect();
+        if terms.is_empty() || !terms.iter().all(|&j| p.vars[j].integer) {
+            continue;
+        }
+        if !terms.iter().all(|&j| near_int(row.a[j])) || !near_int(row.b) {
+            continue;
+        }
+        let g = terms
+            .iter()
+            .fold(0u64, |g, &j| gcd_u64(g, row.a[j].round().abs() as u64));
+        if g > 0 && (row.b.round() as i64).rem_euclid(g as i64) != 0 {
+            return true;
+        }
+    }
+    false
+}
+
+/// True if `x` satisfies every row of `lf` and the given bounds, within tolerance.
+fn point_feasible(lf: &LinearForm, x: &[f64], lo: &[f64], hi: &[f64]) -> bool {
+    for j in 0..x.len() {
+        if x[j] < lo[j] - 1e-6 || x[j] > hi[j] + 1e-6 {
+            return false;
+        }
+    }
+    for row in &lf.rows {
+        let s: f64 = row.a.iter().zip(x).map(|(a, xi)| a * xi).sum();
+        let tol = 1e-6 * (1.0 + row.b.abs());
+        let ok = match row.sense {
+            Sense::Le => s <= row.b + tol,
+            Sense::Ge => s >= row.b - tol,
+            Sense::Eq => (s - row.b).abs() <= tol,
+        };
+        if !ok {
+            return false;
+        }
+    }
+    true
+}
+
+fn objective_at(lf: &LinearForm, x: &[f64]) -> f64 {
+    lf.c.iter().zip(x).map(|(c, xi)| c * xi).sum::<f64>() + lf.c0
+}
+
+/// Budgeted fix-and-branch feasibility search: repeatedly solve the LP and FIX the
+/// most-fractional integer variable to a whole number (trying the nearer rounding first, then
+/// the other), with limited backtracking. Returns a feasible integer point if one is found
+/// within the node budget. Finds points the plain fractional dive misses (e.g. over large or
+/// unbounded integer domains), without guaranteeing one exists.
+fn dive(lf: &LinearForm, lo0: &[f64], hi0: &[f64], int_idx: &[usize]) -> Option<Vec<f64>> {
+    fn search(
+        lf: &LinearForm,
+        lo: &[f64],
+        hi: &[f64],
+        lo0: &[f64],
+        hi0: &[f64],
+        int_idx: &[usize],
+        budget: &mut i32,
+    ) -> Option<Vec<f64>> {
+        if *budget <= 0 {
+            return None;
+        }
+        *budget -= 1;
+        let x = match solve_lp(lf, lo, hi) {
+            LpResult::Optimal(x, _) => x,
+            // Unbounded relaxation: clamp to look for a nearby feasible point
+            LpResult::Unbounded => {
+                let clo: Vec<f64> = lo.iter().map(|&b| if b.is_finite() { b } else { -1e6 }).collect();
+                let chi: Vec<f64> = hi.iter().map(|&b| if b.is_finite() { b } else { 1e6 }).collect();
+                match solve_lp(lf, &clo, &chi) {
+                    LpResult::Optimal(x, _) => x,
+                    _ => return None,
+                }
+            }
+            LpResult::Infeasible => return None,
+        };
+        let frac = int_idx
+            .iter()
+            .map(|&j| (j, (x[j] - x[j].round()).abs()))
+            .filter(|(_, d)| *d > 1e-6)
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        match frac {
+            None => {
+                let mut xr = x.clone();
+                for &j in int_idx {
+                    xr[j] = xr[j].round();
+                }
+                point_feasible(lf, &xr, lo0, hi0).then_some(xr)
+            }
+            Some((j, _)) => {
+                let near = x[j].round();
+                let far = if x[j] - x[j].floor() < 0.5 { x[j].ceil() } else { x[j].floor() };
+                for val in [near, far] {
+                    if val < lo0[j] - 1e-9 || val > hi0[j] + 1e-9 {
+                        continue;
+                    }
+                    let mut nlo = lo.to_vec();
+                    let mut nhi = hi.to_vec();
+                    nlo[j] = val;
+                    nhi[j] = val;
+                    if let Some(r) = search(lf, &nlo, &nhi, lo0, hi0, int_idx, budget) {
+                        return Some(r);
+                    }
+                    if *budget <= 0 {
+                        break;
+                    }
+                }
+                None
+            }
+        }
+    }
+    let mut budget = 4000;
+    search(lf, lo0, hi0, lo0, hi0, int_idx, &mut budget)
+}
+
+/// Branch-and-bound over LP relaxations.
+///
+/// Correctness: a completed search proves optimality or infeasibility. For models with
+/// unbounded integer domains the pure-B&B search cannot always close the gap (that needs
+/// cutting planes), so the result is then reported honestly as not proven, or as
+/// undetermined, rather than as a wrong verdict:
+///   * an equality failing the GCD test is proven infeasible;
+///   * an unbounded LP relaxation yields "unbounded" only with an integer-feasible witness,
+///     otherwise "undetermined" (never a false "unbounded");
+///   * a feasible incumbent found past the node limit is returned as "not proven optimal".
 fn solve_milp(p: &Problem, lf: &LinearForm) -> Outcome {
     let n = p.vars.len();
     let int_idx: Vec<usize> = (0..n).filter(|&j| p.vars[j].integer).collect();
+
+    if gcd_proves_infeasible(p, lf) {
+        return Outcome::Infeasible(
+            "no integer solution: an equality's coefficients share a factor that does not \
+             divide its constant (GCD test)"
+                .to_string(),
+        );
+    }
+
+    // Zero-objective form: the dive seeks any feasible integer point, so it should follow the
+    // feasible polytope rather than chase the (possibly unbounded) objective.
+    let lf_feas = LinearForm {
+        rows: lf.rows.clone(),
+        c: vec![0.0; n],
+        c0: 0.0,
+    };
+
     let root_lo: Vec<f64> = p.vars.iter().map(|v| v.lo).collect();
     let root_hi: Vec<f64> = p.vars.iter().map(|v| v.hi).collect();
-    // Integer bounds can be tightened to whole numbers immediately
     let tighten = |lo: &mut Vec<f64>, hi: &mut Vec<f64>| {
         for &j in &int_idx {
             lo[j] = (lo[j] - 1e-9).ceil();
@@ -542,40 +702,52 @@ fn solve_milp(p: &Problem, lf: &LinearForm) -> Outcome {
         }
     };
 
-    let mut stack = vec![(root_lo, root_hi)];
+    // Seed an incumbent with a diving heuristic, so weak-gap searches still return the best
+    // point they can find rather than giving up.
     let mut best: Option<(Vec<f64>, f64)> = None;
+    if !int_idx.is_empty() {
+        let (mut lo, mut hi) = (root_lo.clone(), root_hi.clone());
+        tighten(&mut lo, &mut hi);
+        if let Some(xr) = dive(&lf_feas, &lo, &hi, &int_idx) {
+            best = Some((xr.clone(), objective_at(lf, &xr)));
+        }
+    }
+
+    let mut stack = vec![(root_lo, root_hi)];
     let mut nodes = 0usize;
     const NODE_LIMIT: usize = 200_000;
-    let mut root = true;
+    let mut relaxation_unbounded = false;
+    let mut complete = true; // fully explored: optimal/infeasible provable
 
     while let Some((mut lo, mut hi)) = stack.pop() {
         nodes += 1;
         if nodes > NODE_LIMIT {
+            complete = false;
             break;
         }
         tighten(&mut lo, &mut hi);
         match solve_lp(lf, &lo, &hi) {
-            LpResult::Infeasible => {
-                root = false;
-                continue;
-            }
+            LpResult::Infeasible => continue,
             LpResult::Unbounded => {
-                return Outcome::Unbounded(if int_idx.is_empty() {
-                    "the objective can be improved without limit; add bounds".to_string()
-                } else {
-                    "the relaxation is unbounded; add bounds to the decision variables"
-                        .to_string()
-                });
-            }
-            LpResult::Optimal(x, obj) => {
-                let _ = root;
-                root = false;
-                if let Some((_, best_obj)) = &best {
-                    if obj >= best_obj - 1e-9 * (1.0 + best_obj.abs()) {
-                        continue; // cannot improve on the incumbent
+                // Cannot bound this subtree; a feasible witness decides unbounded vs not.
+                relaxation_unbounded = true;
+                complete = false;
+                if best.is_none() {
+                    let clamp = |b: f64, d: f64| if b.is_finite() { b } else { d };
+                    let clo: Vec<f64> = lo.iter().map(|&b| clamp(b, -1e6)).collect();
+                    let chi: Vec<f64> = hi.iter().map(|&b| clamp(b, 1e6)).collect();
+                    if let Some(xr) = dive(&lf_feas, &clo, &chi, &int_idx) {
+                        best = Some((xr.clone(), objective_at(lf, &xr)));
                     }
                 }
-                // Most fractional integer variable
+                continue;
+            }
+            LpResult::Optimal(x, obj) => {
+                if let Some((_, best_obj)) = &best {
+                    if obj >= best_obj - 1e-9 * (1.0 + best_obj.abs()) {
+                        continue; // this node cannot beat the incumbent
+                    }
+                }
                 let frac = int_idx
                     .iter()
                     .map(|&j| (j, (x[j] - x[j].round()).abs()))
@@ -594,7 +766,6 @@ fn solve_milp(p: &Problem, lf: &LinearForm) -> Outcome {
                         up_lo[j] = x[j].ceil();
                         let mut down_hi = hi.clone();
                         down_hi[j] = x[j].floor();
-                        // Explore the nearer side first (pushed last)
                         if x[j] - x[j].floor() < 0.5 {
                             stack.push((up_lo, hi.clone()));
                             stack.push((lo.clone(), down_hi));
@@ -608,23 +779,49 @@ fn solve_milp(p: &Problem, lf: &LinearForm) -> Outcome {
         }
     }
 
-    let proven = nodes <= NODE_LIMIT;
+    let nodes_shown = nodes.min(NODE_LIMIT);
     match best {
-        Some((x, objective)) => Outcome::Optimal {
-            x,
-            objective,
-            proven,
-            method: if int_idx.is_empty() {
-                "simplex".to_string()
+        Some((x, objective)) => {
+            if relaxation_unbounded {
+                // Feasible point exists and the relaxation is unbounded ⟹ the MILP is unbounded
+                Outcome::Unbounded(
+                    "the objective improves without bound over the integer-feasible region"
+                        .to_string(),
+                )
             } else {
-                format!("simplex branch-and-bound ({} nodes)", nodes.min(NODE_LIMIT))
-            },
-        },
-        None => Outcome::Infeasible(if proven {
-            "no point satisfies every constraint (proven by simplex)".to_string()
-        } else {
-            "no feasible point found within the branch-and-bound node limit".to_string()
-        }),
+                Outcome::Optimal {
+                    x,
+                    objective,
+                    proven: complete,
+                    method: if int_idx.is_empty() {
+                        "simplex".to_string()
+                    } else if complete {
+                        format!("simplex branch-and-bound ({} nodes)", nodes_shown)
+                    } else {
+                        format!(
+                            "simplex branch-and-bound ({} nodes; node limit reached)",
+                            nodes_shown
+                        )
+                    },
+                }
+            }
+        }
+        None => {
+            if relaxation_unbounded {
+                Outcome::Undetermined(
+                    "the continuous relaxation is unbounded and no integer-feasible point was \
+                     found; infeasibility is not proven (needs cutting planes)"
+                        .to_string(),
+                )
+            } else if complete {
+                Outcome::Infeasible("no point satisfies every constraint (proven by branch-and-bound)".to_string())
+            } else {
+                Outcome::Undetermined(format!(
+                    "no feasible point found within the branch-and-bound node limit ({} nodes)",
+                    NODE_LIMIT
+                ))
+            }
+        }
     }
 }
 
