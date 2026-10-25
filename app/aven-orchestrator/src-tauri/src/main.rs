@@ -1007,7 +1007,7 @@ fn explain_why(
             warnings = m.warnings.clone();
         }
         for &cause_seq in &latest.causes {
-            if let Some(fact) = ledger.by_seq.get(&cause_seq) {
+            if let Some(fact) = ledger.get(cause_seq) {
                 root_causes.push(fact.name.clone());
             }
         }

@@ -39,7 +39,7 @@ fn print_usage() {
     println!("avenc v{} — The Aven Language Toolchain", VERSION);
     println!("Usage:");
     println!(
-        "  avenc run <file.aven> [--allow-stale] [--json] Execute .aven file and print settled relations"
+        "  avenc run <file.aven> [--allow-stale] [--json] [--ledger out.jsonl] Execute .aven file and print settled relations"
     );
     println!(
         "                                        (enforces fact freshness; blocks decision on stale/zero-TTL data)"
@@ -63,6 +63,7 @@ fn print_usage() {
     println!(
         "  avenc check <file.aven>               Validate syntax, relations, and unit declarations"
     );
+    println!("  avenc verify-ledger <out.jsonl>       Check an audit log's hash chain (and signatures with AVEN_LEDGER_KEY)");
     println!("  avenc demo                            Run built-in multi-pillar verification test");
 }
 
@@ -87,6 +88,13 @@ fn real_main() {
     }
 
     match args[1].as_str() {
+        "verify-ledger" => {
+            let Some(file) = args.get(2) else {
+                eprintln!("Error: missing file argument for 'verify-ledger'");
+                process::exit(1);
+            };
+            cmd_verify_ledger(file);
+        }
         "emit-c" => {
             let file_arg = args.iter().skip(2).find(|a| !a.starts_with('-'));
             let Some(file) = file_arg else {
@@ -117,12 +125,19 @@ fn real_main() {
         "run" => {
             let allow_stale = args.iter().any(|a| a == "--allow-stale");
             let json = args.iter().any(|a| a == "--json");
-            let file_arg = args.iter().skip(2).find(|a| !a.starts_with("--"));
+            let ledger_out = args
+                .windows(2)
+                .find(|w| w[0] == "--ledger")
+                .map(|w| w[1].clone());
+            let file_arg = args
+                .iter()
+                .skip(2)
+                .find(|a| !a.starts_with("--") && Some(*a) != ledger_out.as_ref());
             if file_arg.is_none() {
                 eprintln!("Error: missing file argument for 'run'");
                 process::exit(1);
             }
-            cmd_run(file_arg.unwrap(), allow_stale, json);
+            cmd_run(file_arg.unwrap(), allow_stale, json, ledger_out.as_deref());
         }
         "stream" => {
             if args.len() < 3 {
@@ -350,10 +365,27 @@ impl ExecutionResult {
     }
 }
 
-fn cmd_run(path: &str, allow_stale: bool, json: bool) {
+fn cmd_run(path: &str, allow_stale: bool, json: bool, ledger_out: Option<&str>) {
     let module = parse_file(path);
     let work_dir = std::path::Path::new(path).parent();
     let res = execute_module(&module, !json, work_dir);
+
+    // The audit log is written whatever the verdict, so blocked and failed runs are recorded too
+    if let Some(out) = ledger_out {
+        if let Err(e) = fs::write(out, res.ledger.to_jsonl()) {
+            eprintln!("Error writing ledger '{}': {}", out, e);
+            process::exit(EXIT_ERROR);
+        }
+        if !json {
+            println!(
+                "Ledger: {} fact(s) written to '{}' (head {}{})",
+                res.ledger.len(),
+                out,
+                &res.ledger.head()[..16],
+                if res.ledger.is_signed() { ", HMAC-signed" } else { "" }
+            );
+        }
+    }
 
     // A decision computed from stale inputs is blocked before any other verdict.
     if !res.is_actionable && !allow_stale {
@@ -412,13 +444,53 @@ fn cmd_run(path: &str, allow_stale: bool, json: bool) {
         }
     }
 
-    if !res.ledger.facts.is_empty() {
-        println!("\nFact Ledger: {} facts settled.", res.ledger.facts.len());
+    if !res.ledger.is_empty() {
+        println!("\nFact Ledger: {} facts settled.", res.ledger.len());
     }
 
     // Exit 0 means every equation settled; an under-determined model did not.
     if res.diagnosis.is_some() {
         process::exit(EXIT_ERROR);
+    }
+}
+
+/// Ledger signing key from AVEN_LEDGER_KEY (used as raw bytes), if set.
+fn ledger_key() -> Option<Vec<u8>> {
+    env::var("AVEN_LEDGER_KEY")
+        .ok()
+        .filter(|k| !k.is_empty())
+        .map(String::into_bytes)
+}
+
+fn new_ledger() -> Ledger {
+    match ledger_key() {
+        Some(k) => Ledger::with_key(&k),
+        None => Ledger::new(),
+    }
+}
+
+fn cmd_verify_ledger(path: &str) {
+    let text = match fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("Error reading ledger '{}': {}", path, e);
+            process::exit(EXIT_ERROR);
+        }
+    };
+    let key = ledger_key();
+    match ledger::verify_jsonl(&text, key.as_deref()) {
+        Ok(v) => {
+            println!(
+                "Ledger OK: {} fact(s), chain intact{}, head {}",
+                v.facts,
+                if v.signed { ", every signature valid" } else { " (signatures not checked: AVEN_LEDGER_KEY unset)" },
+                v.head
+            );
+        }
+        Err(e) => {
+            eprintln!("Ledger TAMPERED or invalid: {}", e);
+            process::exit(EXIT_ERROR);
+        }
     }
 }
 
@@ -550,7 +622,7 @@ fn execute_module(
     }
 
     let mut env = HashMap::new();
-    let mut ledger = Ledger::new();
+    let mut ledger = new_ledger();
     let mut seq = 0;
     let mut stale_facts = Vec::new();
 
@@ -1220,7 +1292,7 @@ fn cmd_stream(path: &str, limit: usize) {
     let stdin = std::io::stdin();
     let reader = stdin.lock();
     let mut cycle = 0;
-    let mut ledger = Ledger::new();
+    let mut ledger = new_ledger();
     let mut seq = 0;
 
     for line_res in reader.lines() {
