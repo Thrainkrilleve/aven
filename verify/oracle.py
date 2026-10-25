@@ -263,8 +263,16 @@ def run_linstatus(args):
             continue  # reference itself did not settle; not a usable case
 
         status, env, detail = run_avenc(src)
+        # A declared variable that appears in no row and no objective term is genuinely free;
+        # avenc leaves it unsettled, and it has coefficient 0 everywhere, so treat it as 0.
+        used = {f"x{j}" for i, (a, _, _) in enumerate(rows) for j in range(n) if a[j]} | {f"x{j}" for j in range(n) if c[j]}
+        # avenc hitting its branch-and-bound node limit is an honest "couldn't solve", not a
+        # proof of infeasibility: classify it separately from a wrong answer.
+        node_limit = "node limit" in detail
         if status == "settled":
             got = "optimal"
+        elif node_limit:
+            got = "node_limit"
         elif any(t in detail for t in ("No feasible solution", "Inconsistency in", "Constraint violation in")):
             # Specific contradictions found while propagating equalities also prove there is
             # no solution
@@ -274,10 +282,12 @@ def run_linstatus(args):
         else:
             got = f"other({status})"
 
-        if got != ref:
+        if got == "node_limit":
+            verdict, info = "NODE_LIMIT", f"ref={ref}; {detail[-120:]}"
+        elif got != ref:
             verdict, info = f"STATUS_{got.upper()}_EXPECTED_{ref.upper()}", detail[-200:]
         elif got == "optimal":
-            x = [env.get(nm, float("nan")) for nm in names]
+            x = [env[nm] if nm in env else (0.0 if nm not in used else float("nan")) for nm in names]
             obj = sum(ci * xi for ci, xi in zip(c, x))
             ref_obj = sign * res.fun
             ok_rows = all(

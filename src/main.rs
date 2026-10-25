@@ -1026,8 +1026,46 @@ fn execute_module(
         }
         Err(solver::SolverError::UnderDetermined(diag)) => {
             if verbose {
-                println!("\n{}", diag.report());
+                println!("
+{}", diag.report());
             }
+            // Keep everything that did settle, with its causes, so a stalled model still
+            // reports its solved parts
+            let partial = solver.partial.clone();
+            for (k, cause_vars) in solver.derivation_order(&env, &partial) {
+                seq += 1;
+                let mut causes = Vec::new();
+                let mut tainted = false;
+                for v in &cause_vars {
+                    if let Some(fact) = ledger.latest(v) {
+                        causes.push(fact.seq);
+                        tainted |= fact.metadata.as_ref().map_or(false, |m| m.is_stale);
+                    }
+                }
+                if tainted && !stale_facts.contains(&k) {
+                    stale_facts.push(k.clone());
+                }
+                let origin = match solver.relations.iter().find(|e| e.lhs == k) {
+                    Some(eq) => format!("= {}", eq.rhs),
+                    None => "derived".to_string(),
+                };
+                ledger.append(Fact {
+                    seq,
+                    tick: 0,
+                    kind: "derived".to_string(),
+                    name: k.clone(),
+                    value: partial[&k],
+                    causes,
+                    origin,
+                    metadata: tainted.then(|| ledger::FactMetadata {
+                        timestamp_ms: None,
+                        ttl_ms: None,
+                        is_stale: true,
+                        warnings: vec!["causal-stale-taint".to_string()],
+                    }),
+                });
+            }
+            let env = partial;
             let is_actionable = stale_facts.is_empty();
             ExecutionResult {
                 env,

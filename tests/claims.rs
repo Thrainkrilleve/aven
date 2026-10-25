@@ -567,3 +567,84 @@ fn adapter_is_not_asked_for_values_other_relations_compute() {
     assert_close(&env, "it_kw", 200.0, 1e-9);
     assert_close(&env, "cop", 7.5 - 0.12 * 20.0, 1e-9);
 }
+
+// Backward solving through log and fractional powers must not give up when a full Newton
+// step leaves the domain: 0 dBZ inverts to the Marshall-Palmer rain rate (200 R^1.6 = 1).
+#[test]
+fn backward_solve_is_damped_near_domain_edges() {
+    for (dbz, expected) in [(0.0, (1.0f64 / 200.0).powf(1.0 / 1.6)), (45.0, (10f64.powf(4.5) / 200.0).powf(1.0 / 1.6))] {
+        let src = format!(
+            "relation R {{\n dbz = 10 * log(200 * rain ^ 1.6) / 2.302585092994046\n}}\nsolve R with {{\n dbz = {}\n}}\n",
+            dbz
+        );
+        let run = run_model(&src, &[]);
+        assert_eq!(run.code, 0, "dbz={} stderr: {}", dbz, run.stderr);
+        assert_close(&settled(&run), "rain", expected, 1e-4);
+    }
+}
+
+// Independent coupled subsystems are solved separately: an unsolvable equation elsewhere
+// must not stop a solvable 2x2 system from settling.
+#[test]
+fn independent_subsystems_solve_separately() {
+    let src = "relation R {\n total = a * b\n other = a + 2 * b\n y = sqrt(x) + sqrt(z)\n}\nsolve R with {\n total = 6\n other = 8\n y = -1\n}\n";
+    let run = run_model(src, &["--json"]);
+    assert_eq!(run.code, 1, "the sqrt equation has no real solution");
+    let line = run.stdout.lines().last().unwrap_or("");
+    assert!(line.contains("\"status\": \"underdetermined\""), "{}", line);
+    assert!(line.contains("\"a\": ") && line.contains("\"b\": "), "a and b must settle: {}", line);
+}
+
+// An integer variable fixed by equations at a fractional value makes the model infeasible
+#[test]
+fn integer_determined_by_equations_must_be_whole() {
+    let src = "relation R {\n int n\n total = 3 * n\n}\nsolve R with {\n total = 10\n}\n";
+    let run = run_model(src, &[]);
+    assert_ne!(run.code, 0, "n = 3.333 must not be accepted: {}", run.stdout);
+    assert!(run.stderr.contains("not a whole number"), "stderr: {}", run.stderr);
+}
+
+// evaluations/possible/weather-predict.aven: thermodynamics (Ambaum 2020), kinematics and the
+// Marshall-Palmer inverse, run on fixed observations without network access
+#[test]
+fn weather_cell_physics() {
+    let model = std::fs::read_to_string("evaluations/possible/weather-predict.aven").unwrap();
+    let start = model.find("relation WeatherCell").unwrap();
+    let end = start + model[start..].find("\n}").unwrap() + 2;
+    let ambaum = |t_c: f64| {
+        let t = t_c + 273.15;
+        let (cpl, cpv, rv, l0, t0) = (4219.4, 1860.078011865639, 461.52311572606084, 2500840.0, 273.16);
+        let latent = l0 - (cpl - cpv) * (t - t0);
+        6.112 * (t0 / t).powf((cpl - cpv) / rv) * ((l0 / t0 - latent / t) / rv).exp()
+    };
+    let (t, td) = (21.0, 9.0);
+    let rh = 100.0 * ambaum(td) / ambaum(t);
+    // Winds on a known plane: du/dx = 2e-5, du/dy = -1e-5, dv/dx = 3e-5, dv/dy = 4e-5
+    let pts = [(1000.0, 2000.0), (-30000.0, 15000.0), (20000.0, -40000.0)];
+    let mut binds = format!(
+        " temp_c = {}\n dewpoint_c = {}\n rh_reported = {}\n pressure_hpa = 1000\n wind_u = 0\n wind_v = 0\n aloft_u = 10\n aloft_v = 0\n aloft_height_m = 1000\n steer_u = 5\n steer_v = 5\n radar_dbz = 45\n gauge_available = 0\n gauge_rate_mmh = 0\n upstream_dbz_15 = 30\n upstream_dbz_30 = 20\n upstream_dbz_60 = 0\n layer_depth_m = 1000\n",
+        t, td, rh
+    );
+    for (n, (x, y)) in pts.iter().enumerate() {
+        let u = 3.0 + 2e-5 * x - 1e-5 * y;
+        let v = -1.0 + 3e-5 * x + 4e-5 * y;
+        binds.push_str(&format!(" x{0} = {1}\n y{0} = {2}\n u{0} = {3}\n v{0} = {4}\n", n + 1, x, y, u, v));
+    }
+    let src = format!("{}\nsolve WeatherCell with {{\n{}}}\n", &model[start..end], binds);
+    let run = run_model(&src, &["--json"]);
+    assert_eq!(run.code, 0, "stderr: {}", run.stderr);
+    let line = run.stdout.lines().last().unwrap().to_string();
+    let get = |k: &str| -> f64 {
+        let pat = format!("\"{}\": ", k);
+        let i = line.find(&pat).unwrap_or_else(|| panic!("{} missing", k)) + pat.len();
+        line[i..].split(|c| c == ',' || c == '}').next().unwrap().trim().parse().unwrap()
+    };
+    assert!((get("e_sat_hpa") - ambaum(t)).abs() < 1e-9);
+    assert!((get("relative_humidity") - rh).abs() < 1e-9);
+    assert!(get("rh_residual") < 1e-9);
+    assert!((get("divergence_per_s") - 6e-5).abs() < 1e-12);
+    assert!((get("vorticity_per_s") - 4e-5).abs() < 1e-12);
+    assert!((get("vertical_velocity_ms") + 0.06).abs() < 1e-9);
+    assert!((get("vertical_shear_ms_per_km") - 10.0).abs() < 1e-9);
+    assert!((get("radar_rain_mmh") - (10f64.powf(4.5) / 200.0).powf(1.0 / 1.6)).abs() < 1e-6);
+}

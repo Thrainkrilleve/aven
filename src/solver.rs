@@ -90,6 +90,8 @@ pub struct SolverEngine {
     pub integer_vars: BTreeSet<String>,
     pub trace: Vec<String>,
     pub diagnosis: Option<crate::diagnostics::Diagnosis>,
+    /// Values that did settle when a solve stops as under-determined
+    pub partial: HashMap<String, f64>,
 }
 
 impl Default for SolverEngine {
@@ -107,6 +109,7 @@ impl SolverEngine {
             integer_vars: BTreeSet::new(),
             trace: Vec::new(),
             diagnosis: None,
+            partial: HashMap::new(),
         }
     }
 
@@ -228,12 +231,18 @@ impl SolverEngine {
             }
         }
 
-        // 4. Clean integer variable values
+        // 4. Integer variables must hold whole numbers, even when equations (not the optimizer)
+        //    determined them; snap away floating-point noise, reject anything else
         for iv in &self.integer_vars {
             if let Some(val) = env.get_mut(iv) {
                 let rounded = val.round();
                 if (*val - rounded).abs() < 1e-4 {
                     *val = rounded;
+                } else {
+                    return Err(SolverError::Infeasible(format!(
+                        "integer variable '{}' is determined by the equations as {}, which is not a whole number",
+                        iv, val
+                    )));
                 }
             }
         }
@@ -269,6 +278,7 @@ impl SolverEngine {
                 &env,
             );
             self.diagnosis = Some(d.clone());
+            self.partial = env.clone();
             return Err(SolverError::UnderDetermined(d));
         }
 
@@ -339,14 +349,21 @@ impl SolverEngine {
                 }
             }
 
-            // Coupled multi-unknown simultaneous solving attempt
+            // Coupled multi-unknown simultaneous solving: split the blocked equations into
+            // independent subsystems (connected through shared unknowns) and try them smallest
+            // first, so one unsolvable subsystem does not prevent solving the others
             if !progressed && !blocked.is_empty() {
-                if let Some(solved_env) =
-                    self.try_coupled_silent(&blocked, env, trace.as_deref_mut())
-                {
-                    *env = solved_env;
-                    progressed = true;
-                    overall_progressed = true;
+                let mut groups = coupled_components(&blocked, env);
+                groups.sort_by_key(|g| g.len());
+                for group in groups {
+                    if let Some(solved_env) =
+                        self.try_coupled_silent(&group, env, trace.as_deref_mut())
+                    {
+                        *env = solved_env;
+                        progressed = true;
+                        overall_progressed = true;
+                        break;
+                    }
                 }
             }
 
@@ -689,10 +706,23 @@ impl SolverEngine {
                 if !step.is_finite() {
                     break;
                 }
-                x -= step;
-                if !x.is_finite() {
+                // Damped step: halve it while it leaves the function's domain (e.g. a negative
+                // base under a fractional power, a log of a non-positive value) or makes the
+                // residual worse. A full Newton step from a poor seed often overshoots there.
+                let mut lambda = 1.0;
+                let mut next = x - step;
+                for _ in 0..40 {
+                    let fn_ = g(next);
+                    if next.is_finite() && fn_.is_finite() && fn_.abs() < fx.abs() {
+                        break;
+                    }
+                    lambda *= 0.5;
+                    next = x - lambda * step;
+                }
+                if !next.is_finite() || !g(next).is_finite() || next == x {
                     break;
                 }
+                x = next;
             }
         }
 
@@ -949,4 +979,38 @@ fn solve_linear(mat: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
     }
 
     Some(x)
+}
+
+/// Splits equations into groups connected through shared unknowns (variables not in `env`).
+fn coupled_components(eqs: &[Equation], env: &HashMap<String, f64>) -> Vec<Vec<Equation>> {
+    let unknowns_of = |eq: &Equation| -> BTreeSet<String> {
+        let mut vars = eq.rhs.vars();
+        vars.insert(eq.lhs.clone());
+        vars.into_iter().filter(|v| !env.contains_key(v)).collect()
+    };
+    let sets: Vec<BTreeSet<String>> = eqs.iter().map(unknowns_of).collect();
+    let mut group_of: Vec<usize> = (0..eqs.len()).collect();
+    let find = |g: &mut Vec<usize>, mut i: usize| {
+        while g[i] != i {
+            g[i] = g[g[i]];
+            i = g[i];
+        }
+        i
+    };
+    for i in 0..eqs.len() {
+        for j in (i + 1)..eqs.len() {
+            if !sets[i].is_disjoint(&sets[j]) {
+                let (a, b) = (find(&mut group_of, i), find(&mut group_of, j));
+                if a != b {
+                    group_of[a] = b;
+                }
+            }
+        }
+    }
+    let mut groups: HashMap<usize, Vec<Equation>> = HashMap::new();
+    for i in 0..eqs.len() {
+        let root = find(&mut group_of, i);
+        groups.entry(root).or_default().push(eqs[i].clone());
+    }
+    groups.into_values().collect()
 }
