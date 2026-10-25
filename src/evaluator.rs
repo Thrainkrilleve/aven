@@ -338,11 +338,20 @@ impl Evaluator for ExternalEvaluator {
         // Spawn child process with piped stdin/stdout/stderr
         let mut cmd = std::process::Command::new(&self.command);
         let mut resolved_args: Vec<String> = self.args.clone();
-        if let Some(dir) = &self.working_dir {
+        let ws_env = std::env::var("AVEN_WORKSPACE")
+            .ok()
+            .map(std::path::PathBuf::from);
+        let effective_dir = self.working_dir.as_ref().or(ws_env.as_ref());
+
+        if let Some(dir) = effective_dir {
             for arg in &mut resolved_args {
                 let p = std::path::Path::new(arg);
                 if !dir.join(p).exists() && p.exists() {
                     if let Ok(abs) = std::fs::canonicalize(p) {
+                        *arg = abs.to_string_lossy().to_string();
+                    }
+                } else if dir.join(p).exists() {
+                    if let Ok(abs) = std::fs::canonicalize(dir.join(p)) {
                         *arg = abs.to_string_lossy().to_string();
                     }
                 }

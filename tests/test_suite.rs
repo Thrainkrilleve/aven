@@ -1971,3 +1971,143 @@ fn test_frontier_cache_and_epsilon_box_dominance() {
         "Near-identical point within eps box must be pruned"
     );
 }
+
+#[test]
+fn test_concurrent_50_threads_frontier_cache_and_simultaneous_stale_taint() {
+    use avenc::ast::*;
+    use avenc::evaluator::{NativeEvaluator, Orchestrator, VarMap};
+    use avenc::ledger::{Fact, FactMetadata, Ledger};
+    use std::sync::Arc;
+    use std::thread;
+
+    // 1. Stress-test frontier_cache across 50 concurrent OS threads
+    let eq = Equation {
+        lhs: "active_cpu".to_string(),
+        op: ConstraintOp::Equal,
+        rhs: Expr::Bin(
+            BinaryOp::Mul,
+            Box::new(Expr::Var("target_pods".to_string())),
+            Box::new(Expr::Num(0.5)),
+        ),
+        original_text: "active_cpu = target_pods * 0.5".to_string(),
+        line: 1,
+        col: 1,
+    };
+
+    let evaluator = Arc::new(NativeEvaluator::new(vec![eq]));
+    let orchestrator = Arc::new(Orchestrator::new(evaluator));
+
+    let mut handles = Vec::new();
+    for thread_id in 0..50 {
+        let orch = Arc::clone(&orchestrator);
+        handles.push(thread::spawn(move || {
+            let mut inputs = VarMap::new();
+            inputs.set("target_pods", 10.0 + (thread_id % 5) as f64);
+            let objs = vec!["target_pods".to_string(), "active_cpu".to_string()];
+            let res = orch.solve_pareto(&inputs, "target_pods", (10.0, 30.0), 4, &objs);
+            assert!(
+                res.is_ok(),
+                "Thread {} solve_pareto must succeed",
+                thread_id
+            );
+            res.unwrap()
+        }));
+    }
+
+    for h in handles {
+        let frontier = h.join().expect("Thread should not panic");
+        assert_eq!(frontier.len(), 5);
+    }
+
+    // Cache should hold entries for each unique sweep key without deadlocks or corruption
+    let cache_len = orchestrator.frontier_cache.lock().unwrap().len();
+    assert!((1..=5).contains(&cache_len));
+
+    // 2. Multi-fact simultaneous expiration and causal stale taint cascade
+    let mut ledger = Ledger::new();
+    let stale_meta = FactMetadata {
+        timestamp_ms: Some(0),
+        ttl_ms: Some(0),
+        is_stale: true,
+        warnings: vec!["zero-ttl-expired".to_string()],
+    };
+
+    // Multiple root facts expire simultaneously: total_cpu_cores and total_mem_gi
+    ledger.append(Fact {
+        seq: 1,
+        tick: 0,
+        kind: "input".to_string(),
+        name: "total_cpu_cores".to_string(),
+        value: 32.0,
+        causes: vec![],
+        origin: "external: kubectl".to_string(),
+        metadata: Some(stale_meta.clone()),
+    });
+    ledger.append(Fact {
+        seq: 2,
+        tick: 0,
+        kind: "input".to_string(),
+        name: "total_mem_gi".to_string(),
+        value: 60.803,
+        causes: vec![],
+        origin: "external: kubectl".to_string(),
+        metadata: Some(stale_meta),
+    });
+
+    // Derived fact depending on total_cpu_cores: cpu_headroom
+    ledger.append(Fact {
+        seq: 3,
+        tick: 0,
+        kind: "derived".to_string(),
+        name: "cpu_headroom".to_string(),
+        value: 24.0,
+        causes: vec![1],
+        origin: "= total_cpu_cores - 8".to_string(),
+        metadata: Some(FactMetadata {
+            timestamp_ms: None,
+            ttl_ms: None,
+            is_stale: true,
+            warnings: vec!["causal-stale-taint".to_string()],
+        }),
+    });
+
+    // Derived fact depending on total_mem_gi: mem_headroom
+    ledger.append(Fact {
+        seq: 4,
+        tick: 0,
+        kind: "derived".to_string(),
+        name: "mem_headroom".to_string(),
+        value: 44.803,
+        causes: vec![2],
+        origin: "= total_mem_gi - 16".to_string(),
+        metadata: Some(FactMetadata {
+            timestamp_ms: None,
+            ttl_ms: None,
+            is_stale: true,
+            warnings: vec!["causal-stale-taint".to_string()],
+        }),
+    });
+
+    // Coupled derived decision depending on both: max_allocatable_pods
+    ledger.append(Fact {
+        seq: 5,
+        tick: 0,
+        kind: "derived".to_string(),
+        name: "max_allocatable_pods".to_string(),
+        value: 240.0,
+        causes: vec![3, 4],
+        origin: "min(cpu_headroom, mem_headroom)".to_string(),
+        metadata: Some(FactMetadata {
+            timestamp_ms: None,
+            ttl_ms: None,
+            is_stale: true,
+            warnings: vec!["causal-stale-taint".to_string()],
+        }),
+    });
+
+    let why_coupled = ledger.why("max_allocatable_pods");
+    assert!(why_coupled.contains("[STALE: expired TTL]"));
+    assert!(why_coupled.contains("[warnings: causal-stale-taint]"));
+    assert!(why_coupled.contains("total_cpu_cores"));
+    assert!(why_coupled.contains("total_mem_gi"));
+}
