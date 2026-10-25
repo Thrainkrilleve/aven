@@ -14,6 +14,7 @@ pub struct Diagnosis {
     pub zero_gradient_relations: Vec<String>,
     pub degenerate_equations: Vec<String>,
     pub rank: usize,
+    pub unreachable_targets: Vec<String>,
 }
 
 impl Diagnosis {
@@ -26,7 +27,15 @@ impl Diagnosis {
             lines.push(format!("│ {:<width$} │", s, width = width - 2));
         };
 
-        if self.dof == 0 {
+        if !self.unreachable_targets.is_empty() {
+            add_row(
+                &mut lines,
+                "DETERMINED SYSTEM (0 DOF) — solver stalled, here is why:",
+            );
+            for ut in &self.unreachable_targets {
+                add_row(&mut lines, &format!("  {}", ut));
+            }
+        } else if self.dof == 0 {
             add_row(
                 &mut lines,
                 "DETERMINED SYSTEM (0 DOF) — solver stalled, here is why:",
@@ -181,6 +190,15 @@ impl Diagnostician {
 
                 if !unknowns.is_empty() {
                     let mut probe_env = HashMap::new();
+                    if let Some(solve) = module
+                        .solves
+                        .iter()
+                        .find(|s| s.target == blk.name || s.targets.contains(&blk.name))
+                    {
+                        for b in &solve.bindings {
+                            probe_env.insert(b.name.clone(), b.value);
+                        }
+                    }
                     for (i, u) in unknowns.iter().enumerate() {
                         probe_env.insert(u.clone(), Self::probe_val(i));
                     }
@@ -230,6 +248,30 @@ impl Diagnostician {
         let free_cols: Vec<usize> = (0..n).filter(|c| !pivots.contains(c)).collect();
         let free_vars: Vec<String> = free_cols.into_iter().map(|c| unknowns[c].clone()).collect();
 
+        // Check for unreachable discrete targets (ceil, floor, round with non-integer targets)
+        let mut unreachable_targets = Vec::new();
+        let mut unreachable_rel_texts = BTreeSet::new();
+        let mut unreachable_unknowns = BTreeSet::new();
+
+        for rel in relations {
+            if let Some(&target) = env.get(&rel.lhs) {
+                if let Expr::Call(ref fn_name, _) = rel.rhs {
+                    if matches!(fn_name.as_str(), "ceil" | "floor" | "round") {
+                        if target.fract().abs() > 1e-6 {
+                            unreachable_targets.push(format!(
+                                "{} only returns whole numbers, {} is not reachable",
+                                fn_name, target
+                            ));
+                            unreachable_rel_texts.insert(rel.original_text.clone());
+                            for u in rel.rhs.vars() {
+                                unreachable_unknowns.insert(u);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Identify zero-gradient relations (e.g. ceil, floor, round)
         let mut zero_gradient_relations = Vec::new();
         for (i, rel) in relations.iter().enumerate() {
@@ -239,11 +281,12 @@ impl Diagnostician {
             }
         }
 
-        // Identify degenerate / redundant equations
+        // Identify degenerate / redundant equations (excluding discrete relations with unreachable targets)
         let degenerate_equations: Vec<String> = degenerate_row_indices
             .into_iter()
             .filter(|&idx| idx < relations.len())
             .map(|idx| relations[idx].original_text.clone())
+            .filter(|eq| !unreachable_rel_texts.contains(eq))
             .collect();
 
         // Check for orphan variables
@@ -283,16 +326,32 @@ impl Diagnostician {
             }
         }
 
+        let dof = if !unreachable_targets.is_empty() {
+            0
+        } else {
+            n.saturating_sub(rank)
+        };
+
+        let free_vars = if !unreachable_targets.is_empty() {
+            free_vars
+                .into_iter()
+                .filter(|v| !unreachable_unknowns.contains(v))
+                .collect()
+        } else {
+            free_vars
+        };
+
         Diagnosis {
             unknowns: unknowns.to_vec(),
             equations: relations.iter().map(|r| r.original_text.clone()).collect(),
-            dof: n.saturating_sub(rank),
+            dof,
             free_vars,
             orphans,
             minimal_fixes,
             zero_gradient_relations,
             degenerate_equations,
             rank,
+            unreachable_targets,
         }
     }
 }

@@ -613,7 +613,7 @@ impl DimensionalChecker {
             for _round in 0..20 {
                 let mut progressed = false;
                 for eq in &blk.equations {
-                    let inferred_rhs = self.infer_expr(&eq.rhs, &var_dims)?;
+                    let inferred_rhs = self.infer_expr(&eq.rhs, &var_dims, eq.line, eq.col)?;
                     if let Some(ref d_rhs) = inferred_rhs {
                         if let Some(d_lhs) = var_dims.get(&eq.lhs) {
                             if d_lhs != d_rhs {
@@ -632,13 +632,40 @@ impl DimensionalChecker {
                         }
                     } else if let Some(d_lhs) = var_dims.get(&eq.lhs).cloned() {
                         // Omnidirectional reverse propagation: lhs is known, deduce unknown in RHS
-                        if self.propagate_reverse(&eq.rhs, &d_lhs, &mut var_dims)? {
+                        if self.propagate_reverse(
+                            &eq.rhs,
+                            &d_lhs,
+                            &mut var_dims,
+                            eq.line,
+                            eq.col,
+                        )? {
                             progressed = true;
                         }
                     }
                 }
                 if !progressed {
                     break;
+                }
+            }
+        }
+
+        // 4. Check constraints in solve directives
+        for solve in &module.solves {
+            for c in &solve.constraints {
+                let inferred_rhs = self.infer_expr(&c.rhs, &var_dims, c.line, c.col)?;
+                if let Some(ref d_rhs) = inferred_rhs {
+                    if let Some(d_lhs) = var_dims.get(&c.lhs) {
+                        if d_lhs != d_rhs {
+                            return Err(TypeError::DimensionalMismatch {
+                                context: format!("constraint '{}'", c.original_text),
+                                left_dim: d_lhs.clone(),
+                                right_dim: d_rhs.clone(),
+                                op: format!("{}", c.op),
+                                line: c.line,
+                                col: c.col,
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -654,14 +681,16 @@ impl DimensionalChecker {
         &self,
         expr: &Expr,
         var_dims: &HashMap<String, Dim>,
+        line: usize,
+        col: usize,
     ) -> Result<Option<Dim>, TypeError> {
         match expr {
             Expr::Num(_) => Ok(Some(Dim::SCALAR)),
             Expr::Var(name) => Ok(var_dims.get(name).cloned()),
-            Expr::UnaryMinus(inner) => self.infer_expr(inner, var_dims),
+            Expr::UnaryMinus(inner) => self.infer_expr(inner, var_dims, line, col),
             Expr::Bin(BinaryOp::Add | BinaryOp::Sub, left, right) => {
-                let dl = self.infer_expr(left, var_dims)?;
-                let dr = self.infer_expr(right, var_dims)?;
+                let dl = self.infer_expr(left, var_dims, line, col)?;
+                let dr = self.infer_expr(right, var_dims, line, col)?;
                 match (dl, dr) {
                     (Some(l), Some(r)) => {
                         if l != r {
@@ -670,8 +699,8 @@ impl DimensionalChecker {
                                 left_dim: l,
                                 right_dim: r,
                                 op: "+/-".to_string(),
-                                line: 0,
-                                col: 0,
+                                line,
+                                col,
                             });
                         }
                         Ok(Some(l))
@@ -682,24 +711,24 @@ impl DimensionalChecker {
                 }
             }
             Expr::Bin(BinaryOp::Mul, left, right) => {
-                let dl = self.infer_expr(left, var_dims)?;
-                let dr = self.infer_expr(right, var_dims)?;
+                let dl = self.infer_expr(left, var_dims, line, col)?;
+                let dr = self.infer_expr(right, var_dims, line, col)?;
                 match (dl, dr) {
                     (Some(l), Some(r)) => Ok(Some(l * r)),
                     _ => Ok(None),
                 }
             }
             Expr::Bin(BinaryOp::Div, left, right) => {
-                let dl = self.infer_expr(left, var_dims)?;
-                let dr = self.infer_expr(right, var_dims)?;
+                let dl = self.infer_expr(left, var_dims, line, col)?;
+                let dr = self.infer_expr(right, var_dims, line, col)?;
                 match (dl, dr) {
                     (Some(l), Some(r)) => Ok(Some(l / r)),
                     _ => Ok(None),
                 }
             }
             Expr::Bin(BinaryOp::Pow, base, exp) => {
-                let d_base = self.infer_expr(base, var_dims)?;
-                let d_exp = self.infer_expr(exp, var_dims)?;
+                let d_base = self.infer_expr(base, var_dims, line, col)?;
+                let d_exp = self.infer_expr(exp, var_dims, line, col)?;
                 if let Some(ref de) = d_exp {
                     if !de.is_dimensionless() {
                         return Err(TypeError::DimensionalMismatch {
@@ -707,8 +736,8 @@ impl DimensionalChecker {
                             left_dim: de.clone(),
                             right_dim: Dim::SCALAR,
                             op: "^".to_string(),
-                            line: 0,
-                            col: 0,
+                            line,
+                            col,
                         });
                     }
                 }
@@ -722,7 +751,7 @@ impl DimensionalChecker {
                 Ok(d_base)
             }
             Expr::Call(fn_name, inner) => {
-                let d_inner = self.infer_expr(inner, var_dims)?;
+                let d_inner = self.infer_expr(inner, var_dims, line, col)?;
                 if matches!(fn_name.as_str(), "sin" | "cos" | "tan") {
                     if let Some(ref d) = d_inner {
                         if !d.is_dimensionless() && *d != Dim::ANGLE {
@@ -730,8 +759,8 @@ impl DimensionalChecker {
                                 func: fn_name.clone(),
                                 expected_dim: "scalar or angle (rad/deg)".to_string(),
                                 actual_dim: d.clone(),
-                                line: 0,
-                                col: 0,
+                                line,
+                                col,
                             });
                         }
                     }
@@ -743,8 +772,8 @@ impl DimensionalChecker {
                                 func: fn_name.clone(),
                                 expected_dim: "dimensionless scalar".to_string(),
                                 actual_dim: d.clone(),
-                                line: 0,
-                                col: 0,
+                                line,
+                                col,
                             });
                         }
                     }
@@ -763,6 +792,8 @@ impl DimensionalChecker {
         expr: &Expr,
         target_dim: &Dim,
         var_dims: &mut HashMap<String, Dim>,
+        line: usize,
+        col: usize,
     ) -> Result<bool, TypeError> {
         match expr {
             Expr::Var(name) => {
@@ -772,46 +803,46 @@ impl DimensionalChecker {
                 }
             }
             Expr::Bin(BinaryOp::Mul, left, right) => {
-                let dl = self.infer_expr(left, var_dims)?;
-                let dr = self.infer_expr(right, var_dims)?;
+                let dl = self.infer_expr(left, var_dims, line, col)?;
+                let dr = self.infer_expr(right, var_dims, line, col)?;
                 match (dl, dr) {
                     (Some(l), None) => {
                         let needed_r = target_dim / l;
-                        return self.propagate_reverse(right, &needed_r, var_dims);
+                        return self.propagate_reverse(right, &needed_r, var_dims, line, col);
                     }
                     (None, Some(r)) => {
                         let needed_l = target_dim / r;
-                        return self.propagate_reverse(left, &needed_l, var_dims);
+                        return self.propagate_reverse(left, &needed_l, var_dims, line, col);
                     }
                     _ => {}
                 }
             }
             Expr::Bin(BinaryOp::Div, left, right) => {
-                let dl = self.infer_expr(left, var_dims)?;
-                let dr = self.infer_expr(right, var_dims)?;
+                let dl = self.infer_expr(left, var_dims, line, col)?;
+                let dr = self.infer_expr(right, var_dims, line, col)?;
                 match (dl, dr) {
                     (Some(l), None) => {
                         // target = l / r => r = l / target
                         let needed_r = l / target_dim;
-                        return self.propagate_reverse(right, &needed_r, var_dims);
+                        return self.propagate_reverse(right, &needed_r, var_dims, line, col);
                     }
                     (None, Some(r)) => {
                         // target = l / r => l = target * r
                         let needed_l = target_dim * r;
-                        return self.propagate_reverse(left, &needed_l, var_dims);
+                        return self.propagate_reverse(left, &needed_l, var_dims, line, col);
                     }
                     _ => {}
                 }
             }
             Expr::Bin(BinaryOp::Add | BinaryOp::Sub, left, right) => {
-                let dl = self.infer_expr(left, var_dims)?;
-                let dr = self.infer_expr(right, var_dims)?;
+                let dl = self.infer_expr(left, var_dims, line, col)?;
+                let dr = self.infer_expr(right, var_dims, line, col)?;
                 let mut p = false;
                 if dl.is_none() {
-                    p |= self.propagate_reverse(left, target_dim, var_dims)?;
+                    p |= self.propagate_reverse(left, target_dim, var_dims, line, col)?;
                 }
                 if dr.is_none() {
-                    p |= self.propagate_reverse(right, target_dim, var_dims)?;
+                    p |= self.propagate_reverse(right, target_dim, var_dims, line, col)?;
                 }
                 return Ok(p);
             }

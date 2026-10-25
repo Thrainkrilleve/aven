@@ -2378,3 +2378,283 @@ fn test_real_production_traffic_trace_replay_and_capacity_tracking() {
         avg_solve_us
     );
 }
+
+#[test]
+fn test_optimizer_two_integer_variables_nodes_and_drives() {
+    use avenc::lexer::Lexer;
+    use avenc::parser::Parser;
+    use avenc::solver::SolverEngine;
+    use std::collections::HashMap;
+
+    let src = r#"
+    relation Cluster {
+        int nodes
+        int drives
+        capacity = nodes * drives * 13.5
+        cost = nodes * 2000.0 + nodes * drives * 600.0
+        capacity >= 100.0
+        drives <= 12.0
+    }
+
+    solve Cluster with {
+        minimize(cost)
+    }
+    "#;
+
+    let mut lexer = Lexer::new(src);
+    let tokens = lexer.tokenize().expect("tokenize failed");
+    let mut parser = Parser::new(tokens);
+    let module = parser.parse_module("ClusterModule").expect("parse failed");
+
+    let blk = &module.blocks[0];
+    let solve = &module.solves[0];
+
+    let mut solver = SolverEngine::new();
+    for eq in &blk.equations {
+        solver.add_relation(eq.clone());
+    }
+    for iv in &blk.integer_vars {
+        solver.add_integer_var(iv.clone());
+    }
+    for c in &solve.constraints {
+        solver.add_constraint(c.clone());
+    }
+    for obj in &solve.objectives {
+        solver.add_objective(obj.clone());
+    }
+
+    let inputs = HashMap::new();
+    let solved = solver
+        .solve(&inputs)
+        .expect("Solver failed on 2-variable integer optimization");
+
+    // Must find 1 node with 8 drives (cost 6,800), NOT getting stuck at the cap of 12 drives
+    assert_eq!(solved.get("nodes").copied(), Some(1.0));
+    assert_eq!(solved.get("drives").copied(), Some(8.0));
+    assert_eq!(solved.get("cost").copied(), Some(6800.0));
+    assert_eq!(solved.get("capacity").copied(), Some(108.0));
+}
+
+#[test]
+fn test_optimizer_minimum_away_from_bounds() {
+    use avenc::lexer::Lexer;
+    use avenc::parser::Parser;
+    use avenc::solver::SolverEngine;
+    use std::collections::HashMap;
+
+    let src = r#"
+    relation Quad {
+        cost = (x - 3.0) * (x - 3.0) + 1.0
+        x <= 10.0
+    }
+
+    solve Quad with {
+        minimize(cost)
+    }
+    "#;
+
+    let mut lexer = Lexer::new(src);
+    let tokens = lexer.tokenize().expect("tokenize failed");
+    let mut parser = Parser::new(tokens);
+    let module = parser.parse_module("QuadModule").expect("parse failed");
+
+    let blk = &module.blocks[0];
+    let solve = &module.solves[0];
+
+    let mut solver = SolverEngine::new();
+    for eq in &blk.equations {
+        solver.add_relation(eq.clone());
+    }
+    for c in &solve.constraints {
+        solver.add_constraint(c.clone());
+    }
+    for obj in &solve.objectives {
+        solver.add_objective(obj.clone());
+    }
+
+    let inputs = HashMap::new();
+    let solved = solver
+        .solve(&inputs)
+        .expect("Solver failed on unconstrained minimum away from bound");
+
+    // The unconstrained minimum is at x = 3, cost = 1.
+    // It must NOT pick the boundary point x = 10 (cost 50).
+    let x_val = solved.get("x").copied().unwrap();
+    let cost_val = solved.get("cost").copied().unwrap();
+    assert!(
+        (x_val - 3.0).abs() < 1e-4,
+        "Expected x = 3.0, got {:.4}",
+        x_val
+    );
+    assert!(
+        (cost_val - 1.0).abs() < 1e-4,
+        "Expected cost = 1.0, got {:.4}",
+        cost_val
+    );
+}
+
+#[test]
+fn test_optimizer_unconstrained_without_inequalities() {
+    use avenc::lexer::Lexer;
+    use avenc::parser::Parser;
+    use avenc::solver::SolverEngine;
+    use std::collections::HashMap;
+
+    let src = r#"
+    relation UnconstrainedQuad {
+        cost = (x - 3.0) * (x - 3.0) + 1.0
+    }
+
+    solve UnconstrainedQuad with {
+        minimize(cost)
+    }
+    "#;
+
+    let mut lexer = Lexer::new(src);
+    let tokens = lexer.tokenize().expect("tokenize failed");
+    let mut parser = Parser::new(tokens);
+    let module = parser
+        .parse_module("UnconstrainedModule")
+        .expect("parse failed");
+
+    let blk = &module.blocks[0];
+    let solve = &module.solves[0];
+
+    let mut solver = SolverEngine::new();
+    for eq in &blk.equations {
+        solver.add_relation(eq.clone());
+    }
+    for obj in &solve.objectives {
+        solver.add_objective(obj.clone());
+    }
+
+    let inputs = HashMap::new();
+    let solved = solver
+        .solve(&inputs)
+        .expect("Solver must not report infeasible when no inequalities exist");
+
+    let x_val = solved.get("x").copied().unwrap();
+    let cost_val = solved.get("cost").copied().unwrap();
+    assert!(
+        (x_val - 3.0).abs() < 1e-4,
+        "Expected x = 3.0, got {:.4}",
+        x_val
+    );
+    assert!(
+        (cost_val - 1.0).abs() < 1e-4,
+        "Expected cost = 1.0, got {:.4}",
+        cost_val
+    );
+}
+
+#[test]
+fn test_ceil_unreachable_target_reports_not_reachable() {
+    use avenc::lexer::Lexer;
+    use avenc::parser::Parser;
+    use avenc::solver::{SolverEngine, SolverError};
+    use std::collections::HashMap;
+
+    let src = r#"
+    relation Workers {
+        allocated_workers = ceil(raw_workers / 0.7)
+    }
+
+    solve Workers with {
+        allocated_workers = 1428.5
+    }
+    "#;
+
+    let mut lexer = Lexer::new(src);
+    let tokens = lexer.tokenize().expect("tokenize failed");
+    let mut parser = Parser::new(tokens);
+    let module = parser.parse_module("WorkersModule").expect("parse failed");
+
+    let blk = &module.blocks[0];
+    let solve = &module.solves[0];
+
+    let mut solver = SolverEngine::new();
+    for eq in &blk.equations {
+        solver.add_relation(eq.clone());
+    }
+
+    let mut inputs = HashMap::new();
+    for b in &solve.bindings {
+        inputs.insert(b.name.clone(), b.value);
+    }
+
+    let res = solver.solve(&inputs);
+    match res {
+        Err(SolverError::UnderDetermined(diag)) => {
+            // Must be reported as DETERMINED (0 DOF), not under-determined
+            assert_eq!(
+                diag.dof, 0,
+                "Expected 0 DOF for determined system with unreachable ceil target"
+            );
+            assert!(
+                diag.free_vars.is_empty(),
+                "Must not report false free variables"
+            );
+            assert!(
+                diag.degenerate_equations.is_empty(),
+                "Must not report false redundant equations"
+            );
+            assert_eq!(diag.unreachable_targets.len(), 1);
+            assert!(
+                diag.unreachable_targets[0]
+                    .contains("ceil only returns whole numbers, 1428.5 is not reachable")
+            );
+
+            let report = diag.report();
+            assert!(report.contains("DETERMINED SYSTEM (0 DOF) — solver stalled, here is why:"));
+            assert!(report.contains("ceil only returns whole numbers, 1428.5 is not reachable"));
+            assert!(!report.contains("UNDER-DETERMINED SYSTEM"));
+            assert!(!report.contains("FREE variables"));
+            assert!(!report.contains("DEGENERATE / REDUNDANT EQUATION"));
+        }
+        other => panic!(
+            "Expected SolverError::UnderDetermined with unreachable target, got {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
+fn test_unit_error_preserves_source_line_and_col() {
+    use avenc::lexer::Lexer;
+    use avenc::parser::Parser;
+    use avenc::units::{DimensionalChecker, TypeError};
+
+    let src = r#"
+signal network_rate : Gbps
+signal storage_size : MB
+
+relation Mismatch {
+    bad_sum = network_rate + storage_size
+}
+
+solve Mismatch with {
+    network_rate = 10.0 Gbps
+    storage_size = 500.0 MB
+}
+"#;
+
+    let mut lexer = Lexer::new(src);
+    let tokens = lexer.tokenize().expect("tokenize failed");
+    let mut parser = Parser::new(tokens);
+    let module = parser.parse_module("MismatchModule").expect("parse failed");
+
+    let mut checker = DimensionalChecker::new();
+    let res = checker.check_module(&module);
+
+    match res {
+        Err(TypeError::DimensionalMismatch { line, col, op, .. }) => {
+            assert_eq!(line, 6, "Expected mismatch on line 6, got {}", line);
+            assert_eq!(col, 5, "Expected mismatch at col 5, got {}", col);
+            assert_eq!(op, "+/-");
+        }
+        other => panic!(
+            "Expected TypeError::DimensionalMismatch with valid position, got {:?}",
+            other
+        ),
+    }
+}
