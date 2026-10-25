@@ -337,6 +337,73 @@ impl SolverEngine {
         Ok(overall_progressed)
     }
 
+    /// Reconstructs how each solved value was derived, in derivation order.
+    ///
+    /// Mirrors the propagation rule used by `solve`: an equation with exactly one unknown
+    /// determines that unknown, and its other variables are the direct causes. Values settled
+    /// jointly (coupled systems, constrained optimization) list every already-known variable of
+    /// the equations, constraints and objectives involved. Returns (variable, causes) pairs.
+    pub fn derivation_order(
+        &self,
+        initial: &HashMap<String, f64>,
+        solved: &HashMap<String, f64>,
+    ) -> Vec<(String, Vec<String>)> {
+        let mut known: BTreeSet<String> = initial.keys().cloned().collect();
+        let mut order = Vec::new();
+        let pending = |known: &BTreeSet<String>| {
+            solved
+                .keys()
+                .filter(|k| !known.contains(*k))
+                .cloned()
+                .collect::<BTreeSet<String>>()
+        };
+
+        loop {
+            let remaining = pending(&known);
+            if remaining.is_empty() {
+                break;
+            }
+
+            let mut progressed = false;
+            for eq in &self.relations {
+                let mut vars = eq.rhs.vars();
+                vars.insert(eq.lhs.clone());
+                let unknown: Vec<&String> = vars.iter().filter(|v| !known.contains(*v)).collect();
+                if unknown.len() == 1 && solved.contains_key(unknown[0]) {
+                    let u = unknown[0].clone();
+                    let causes: Vec<String> = vars.iter().filter(|v| **v != u).cloned().collect();
+                    known.insert(u.clone());
+                    order.push((u, causes));
+                    progressed = true;
+                }
+            }
+            if progressed {
+                continue;
+            }
+
+            // Jointly settled values: depend on every known variable that constrains them.
+            let mut joint_causes = BTreeSet::new();
+            for eq in &self.relations {
+                let mut vars = eq.rhs.vars();
+                vars.insert(eq.lhs.clone());
+                if vars.iter().any(|v| remaining.contains(v)) {
+                    joint_causes.extend(vars.into_iter().filter(|v| known.contains(v)));
+                }
+            }
+            for c in &self.constraints {
+                let mut vars = c.rhs.vars();
+                vars.insert(c.lhs.clone());
+                joint_causes.extend(vars.into_iter().filter(|v| known.contains(v)));
+            }
+            let causes: Vec<String> = joint_causes.into_iter().collect();
+            for u in &remaining {
+                order.push((u.clone(), causes.clone()));
+            }
+            known.extend(remaining);
+        }
+        order
+    }
+
     pub fn solve_pure_equalities(
         &mut self,
         relations: &[Equation],

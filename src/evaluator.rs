@@ -131,6 +131,9 @@ impl VarMap {
     }
 }
 
+/// JSON keys that carry freshness metadata rather than model values
+const FRESHNESS_KEYS: &[&str] = &["timestamp_ms", "timestamp", "ttl_ms", "ttl"];
+
 /// Evaluation result returned by any backend.
 #[derive(Clone, Debug)]
 pub struct EvalResult {
@@ -140,6 +143,8 @@ pub struct EvalResult {
     pub timestamp_ms: Option<u64>,
     pub ttl_ms: Option<u64>,
     pub warnings: Vec<String>,
+    /// SHA-256 of the raw bytes the backend returned (None for in-process evaluation)
+    pub payload_sha256: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -263,6 +268,7 @@ impl Evaluator for NativeEvaluator {
             timestamp_ms: None,
             ttl_ms: None,
             warnings: Vec::new(),
+            payload_sha256: None,
         })
     }
 
@@ -571,9 +577,9 @@ impl Evaluator for ExternalEvaluator {
 
         let mut out_values = inputs.values.clone();
         out_values.extend(parsed_numbers);
-        if !out_values.contains_key("value") {
-            let first_val = out_values.values().next().copied().unwrap_or(0.0);
-            out_values.insert("value".to_string(), first_val);
+        // Freshness metadata is not a model variable
+        for meta_key in FRESHNESS_KEYS {
+            out_values.remove(*meta_key);
         }
 
         Ok(EvalResult {
@@ -583,6 +589,7 @@ impl Evaluator for ExternalEvaluator {
             timestamp_ms,
             ttl_ms,
             warnings,
+            payload_sha256: Some(sha256_hex(&output.stdout)),
         })
     }
 
@@ -745,9 +752,9 @@ impl Evaluator for IpcEvaluator {
 
         let mut out_values = inputs.values.clone();
         out_values.extend(parsed_numbers);
-        if !out_values.contains_key("value") {
-            let first_val = out_values.values().next().copied().unwrap_or(0.0);
-            out_values.insert("value".to_string(), first_val);
+        // Freshness metadata is not a model variable
+        for meta_key in FRESHNESS_KEYS {
+            out_values.remove(*meta_key);
         }
 
         Ok(EvalResult {
@@ -757,6 +764,7 @@ impl Evaluator for IpcEvaluator {
             timestamp_ms,
             ttl_ms,
             warnings,
+            payload_sha256: Some(sha256_hex(response_line.as_bytes())),
         })
     }
 

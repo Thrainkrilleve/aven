@@ -38,7 +38,7 @@ fn print_usage() {
     println!("avenc v{} — The Aven Language Toolchain", VERSION);
     println!("Usage:");
     println!(
-        "  avenc run <file.aven> [--allow-stale] Execute .aven file and print settled relations"
+        "  avenc run <file.aven> [--allow-stale] [--json] Execute .aven file and print settled relations"
     );
     println!(
         "                                        (enforces fact freshness; blocks decision on stale/zero-TTL data)"
@@ -74,14 +74,42 @@ fn main() {
     }
 
     match args[1].as_str() {
+        "emit-c" => {
+            let file_arg = args.iter().skip(2).find(|a| !a.starts_with('-'));
+            let Some(file) = file_arg else {
+                eprintln!("Error: missing file argument for 'emit-c'");
+                process::exit(1);
+            };
+            let options = codegen_c::CodegenOptions {
+                traceable: args.iter().any(|a| a == "--traceable"),
+                checked_c: args.iter().any(|a| a == "--checked-c"),
+            };
+            let out_file = args.windows(2).find(|w| w[0] == "-o").map(|w| w[1].as_str());
+            cmd_build(file, true, out_file, &options);
+        }
+        "bench" => {
+            let file_arg = args.iter().skip(2).find(|a| !a.starts_with('-'));
+            let Some(file) = file_arg else {
+                eprintln!("Error: missing file argument for 'bench'");
+                process::exit(1);
+            };
+            let iterations = args
+                .windows(2)
+                .find(|w| w[0] == "--iterations")
+                .and_then(|w| w[1].parse::<usize>().ok())
+                .unwrap_or(200)
+                .max(1);
+            cmd_bench(file, iterations);
+        }
         "run" => {
             let allow_stale = args.iter().any(|a| a == "--allow-stale");
+            let json = args.iter().any(|a| a == "--json");
             let file_arg = args.iter().skip(2).find(|a| !a.starts_with("--"));
             if file_arg.is_none() {
                 eprintln!("Error: missing file argument for 'run'");
                 process::exit(1);
             }
-            cmd_run(file_arg.unwrap(), allow_stale);
+            cmd_run(file_arg.unwrap(), allow_stale, json);
         }
         "stream" => {
             if args.len() < 3 {
@@ -287,13 +315,34 @@ pub struct ExecutionResult {
     pub diagnosis: Option<diagnostics::Diagnosis>,
     pub is_actionable: bool,
     pub stale_facts: Vec<String>,
+    pub error: Option<solver::SolverError>,
 }
 
-fn cmd_run(path: &str, allow_stale: bool) {
+// Exit codes documented in wiki/Compiler-Toolchain-avenc.md §4
+const EXIT_ERROR: i32 = 1;
+const EXIT_CONSTRAINT_VIOLATION: i32 = 2;
+const EXIT_DECISION_BLOCKED: i32 = 3;
+
+impl ExecutionResult {
+    /// Prints a solver error and exits with its documented exit code.
+    fn exit_on_error(&self) {
+        if let Some(e) = &self.error {
+            eprintln!("\nSolver Error: {}", e);
+            let code = match e {
+                solver::SolverError::ConstraintViolation { .. } => EXIT_CONSTRAINT_VIOLATION,
+                _ => EXIT_ERROR,
+            };
+            process::exit(code);
+        }
+    }
+}
+
+fn cmd_run(path: &str, allow_stale: bool, json: bool) {
     let module = parse_file(path);
     let work_dir = std::path::Path::new(path).parent();
-    let res = execute_module(&module, true, work_dir);
+    let res = execute_module(&module, !json, work_dir);
 
+    // A decision computed from stale inputs is blocked before any other verdict.
     if !res.is_actionable && !allow_stale {
         eprintln!("\n❌ DECISION BLOCKED: Freshness Enforcement Failure");
         eprintln!("  The following external fact(s) are STALE (expired TTL or ttl_ms=0):");
@@ -304,8 +353,9 @@ fn cmd_run(path: &str, allow_stale: bool) {
             "\n  Refusing to settle actionable decision on unrefreshed metrics to prevent automated scaling on bad data."
         );
         eprintln!("  Pass --allow-stale to explicitly override in non-production environments.");
-        process::exit(1);
+        process::exit(EXIT_DECISION_BLOCKED);
     }
+    res.exit_on_error();
 
     let mut integer_vars = std::collections::BTreeSet::new();
     for blk in &module.blocks {
@@ -319,9 +369,28 @@ fn cmd_run(path: &str, allow_stale: bool) {
         }
     }
 
-    println!("\nSettled Environment:");
     let mut sorted_keys: Vec<&String> = res.env.keys().collect();
     sorted_keys.sort();
+
+    if json {
+        // Full-precision machine-readable output (f64 Display is the shortest round-trip form)
+        let status = if res.diagnosis.is_some() {
+            "underdetermined"
+        } else {
+            "settled"
+        };
+        let fields: Vec<String> = sorted_keys
+            .iter()
+            .map(|k| format!("\"{}\": {}", k, res.env[*k]))
+            .collect();
+        println!("{{\"status\": \"{}\", \"env\": {{{}}}}}", status, fields.join(", "));
+        if res.diagnosis.is_some() {
+            process::exit(EXIT_ERROR);
+        }
+        return;
+    }
+
+    println!("\nSettled Environment:");
     for k in sorted_keys {
         if integer_vars.contains(k) {
             println!("  {:<16} = {:.0} (int)", k, res.env[k]);
@@ -333,6 +402,63 @@ fn cmd_run(path: &str, allow_stale: bool) {
     if !res.ledger.facts.is_empty() {
         println!("\nFact Ledger: {} facts settled.", res.ledger.facts.len());
     }
+
+    // Exit 0 means every equation settled; an under-determined model did not.
+    if res.diagnosis.is_some() {
+        process::exit(EXIT_ERROR);
+    }
+}
+
+fn cmd_bench(path: &str, iterations: usize) {
+    let source = match fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error reading file '{}': {}", path, e);
+            process::exit(1);
+        }
+    };
+    let module = parse_file(path);
+    let work_dir = std::path::Path::new(path).parent();
+
+    let stats = |mut samples: Vec<f64>| -> (f64, f64, f64) {
+        samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let pick = |q: f64| samples[((samples.len() - 1) as f64 * q).round() as usize];
+        (samples[0], pick(0.5), pick(0.95))
+    };
+
+    let mut parse_us = Vec::with_capacity(iterations);
+    for _ in 0..iterations {
+        let t0 = std::time::Instant::now();
+        let tokens = Lexer::new(&source).tokenize().expect("tokenize failed");
+        let _ = Parser::new(tokens).parse_module(path).expect("parse failed");
+        parse_us.push(t0.elapsed().as_secs_f64() * 1e6);
+    }
+
+    let mut solve_us = Vec::with_capacity(iterations);
+    let mut last = None;
+    for _ in 0..iterations {
+        let t0 = std::time::Instant::now();
+        let res = execute_module(&module, false, work_dir);
+        solve_us.push(t0.elapsed().as_secs_f64() * 1e6);
+        last = Some(res);
+    }
+
+    println!("avenc bench '{}' — {} iterations", path, iterations);
+    println!("  {:<28} {:>12} {:>12} {:>12}", "stage", "min µs", "median µs", "p95 µs");
+    for (name, samples) in [
+        ("lex + parse", parse_us),
+        ("solve (incl. external/IPC)", solve_us),
+    ] {
+        let (min, med, p95) = stats(samples);
+        println!("  {:<28} {:>12.1} {:>12.1} {:>12.1}", name, min, med, p95);
+    }
+    if let Some(res) = last {
+        if let Some(e) = &res.error {
+            println!("  note: every solve ended with: {}", e);
+        } else if res.diagnosis.is_some() {
+            println!("  note: model is under-determined; timings cover the stalled solve");
+        }
+    }
 }
 
 fn cmd_why(path: &str, var: &str, depth: Option<usize>) {
@@ -341,6 +467,7 @@ fn cmd_why(path: &str, var: &str, depth: Option<usize>) {
     let res = execute_module(&module, false, work_dir);
     println!("Causal Derivation Tree for '{}':", var);
     println!("{}", res.ledger.why_with_depth(var, depth));
+    res.exit_on_error();
 }
 
 fn cmd_build(
@@ -362,6 +489,7 @@ fn cmd_build(
 
     let work_dir = std::path::Path::new(path).parent();
     let res = execute_module(&module, false, work_dir);
+    res.exit_on_error();
     let mut bindings = HashMap::new();
     for (k, v) in res.env {
         bindings.insert(k, v);
@@ -489,7 +617,6 @@ fn execute_module(
                 if let Some(dir) = working_dir {
                     ext_eval = ext_eval.with_working_dir(dir);
                 }
-                ext_eval = ext_eval.with_required_keys(&required_keys);
                 if verbose {
                     println!(
                         "Executing external evaluator '{}' for relation '{}'...",
@@ -499,8 +626,7 @@ fn execute_module(
                 (ext_eval.evaluate(&varmap), "external")
             }
             BackendDecl::Ipc { endpoint } => {
-                let ipc_eval =
-                    evaluator::IpcEvaluator::new(endpoint).with_required_keys(&required_keys);
+                let ipc_eval = evaluator::IpcEvaluator::new(endpoint);
                 if verbose {
                     println!(
                         "Connecting to persistent IPC evaluator at '{}' for relation '{}'...",
@@ -514,6 +640,33 @@ fn execute_module(
 
         match eval_res {
             Ok(res) => {
+                // Relations are omnidirectional: a variable the adapter did not report is only
+                // missing if the block's equations cannot derive it from what was reported.
+                let mut known: std::collections::HashSet<String> =
+                    env.keys().chain(res.values.keys()).cloned().collect();
+                loop {
+                    let mut progressed = false;
+                    for eq in &blk.equations {
+                        let mut vars = eq.rhs.vars();
+                        vars.insert(eq.lhs.clone());
+                        let unknown: Vec<&String> =
+                            vars.iter().filter(|v| !known.contains(*v)).collect();
+                        if unknown.len() == 1 {
+                            known.insert(unknown[0].clone());
+                            progressed = true;
+                        }
+                    }
+                    if !progressed {
+                        break;
+                    }
+                }
+                if let Some(missing) = required_keys.iter().find(|k| !known.contains(*k)) {
+                    eprintln!(
+                        "{} evaluation failed for block '{}': Malformed output: Schema validation failed: {} adapter '{}' omitted required numeric field '{}', and the block's equations cannot derive it",
+                        backend_type, blk.name, backend_type, res.backend_id, missing
+                    );
+                    process::exit(EXIT_ERROR);
+                }
                 if verbose {
                     println!(
                         "  [{}] {} settled in {:.1} µs (backend: {})",
@@ -566,7 +719,10 @@ fn execute_module(
                             name: k,
                             value: v,
                             causes: Vec::new(),
-                            origin: format!("{}: {}", backend_type, res.backend_id),
+                            origin: match &res.payload_sha256 {
+                                Some(h) => format!("{}: {} sha256:{}", backend_type, res.backend_id, h),
+                                None => format!("{}: {}", backend_type, res.backend_id),
+                            },
                             metadata: Some(metadata),
                         });
                     }
@@ -580,6 +736,26 @@ fn execute_module(
                 process::exit(1);
             }
         }
+    }
+
+    // Direction-pinned `forward` blocks, first pass: evaluate every equation whose inputs are
+    // already known, so relations can use forward results (e.g. a cost feeding a profit model).
+    if let Err(e) = eval_forward_blocks(
+        module,
+        &mut env,
+        &mut ledger,
+        &mut seq,
+        &mut stale_facts,
+        false,
+    ) {
+        return ExecutionResult {
+            env,
+            ledger,
+            diagnosis: None,
+            is_actionable: stale_facts.is_empty(),
+            stale_facts,
+            error: Some(e),
+        };
     }
 
     // Set up solver engine: load equations and constraints across all Relation blocks
@@ -616,36 +792,36 @@ fn execute_module(
                 }
             }
 
-            // Record derived facts into the ledger with causal stale taint propagation
-            for (k, v) in &solved_env {
-                if !env.contains_key(k) {
+            // Record derived facts in derivation order so every cause is already in the
+            // ledger, and propagate stale taint along the real derivation graph.
+            for (k, cause_vars) in solver.derivation_order(&env, &solved_env) {
+                let v = &solved_env[&k];
+                {
+                    let k = &k;
                     seq += 1;
                     let mut causes = Vec::new();
                     let mut is_tainted_stale = false;
-                    let mut origin = "derived".to_string();
-                    if let Some(eq) = solver.relations.iter().find(|e| &e.lhs == k) {
-                        origin = format!("= {}", eq.rhs);
-                        for input_var in eq.rhs.vars() {
-                            if let Some(fact) = ledger.latest(&input_var) {
-                                causes.push(fact.seq);
-                                if fact.metadata.as_ref().map_or(false, |m| m.is_stale) {
-                                    is_tainted_stale = true;
-                                }
+                    for input_var in &cause_vars {
+                        if let Some(fact) = ledger.latest(input_var) {
+                            causes.push(fact.seq);
+                            if fact.metadata.as_ref().map_or(false, |m| m.is_stale) {
+                                is_tainted_stale = true;
                             }
                         }
-                    } else if let Some(c) = solver.constraints.iter().find(|c| &c.lhs == k) {
-                        origin = format!("{} {}", c.op, c.rhs);
-                        for input_var in c.rhs.vars() {
-                            if let Some(fact) = ledger.latest(&input_var) {
-                                causes.push(fact.seq);
-                                if fact.metadata.as_ref().map_or(false, |m| m.is_stale) {
-                                    is_tainted_stale = true;
-                                }
-                            }
-                        }
-                    } else if solver.integer_vars.contains(k) {
-                        origin = "integer optimization".to_string();
                     }
+                    let origin = if let Some(eq) = solver.relations.iter().find(|e| &e.lhs == k) {
+                        format!("= {}", eq.rhs)
+                    } else if let Some(eq) = solver
+                        .relations
+                        .iter()
+                        .find(|e| e.rhs.vars().contains(k))
+                    {
+                        format!("solved from {}", eq.original_text)
+                    } else if solver.integer_vars.contains(k) {
+                        "integer optimization".to_string()
+                    } else {
+                        "derived".to_string()
+                    };
 
                     if is_tainted_stale && !stale_facts.contains(k) {
                         stale_facts.push(k.clone());
@@ -675,6 +851,27 @@ fn execute_module(
                 }
             }
 
+            // Direction-pinned `forward` blocks, second pass: everything not yet evaluated must
+            // now have its inputs (strict).
+            let mut solved_env = solved_env;
+            if let Err(e) = eval_forward_blocks(
+                module,
+                &mut solved_env,
+                &mut ledger,
+                &mut seq,
+                &mut stale_facts,
+                true,
+            ) {
+                return ExecutionResult {
+                    env: solved_env,
+                    ledger,
+                    diagnosis: None,
+                    is_actionable: stale_facts.is_empty(),
+                    stale_facts,
+                    error: Some(e),
+                };
+            }
+
             let is_actionable = stale_facts.is_empty();
             ExecutionResult {
                 env: solved_env,
@@ -682,6 +879,7 @@ fn execute_module(
                 diagnosis: None,
                 is_actionable,
                 stale_facts,
+                error: None,
             }
         }
         Err(solver::SolverError::UnderDetermined(diag)) => {
@@ -695,11 +893,21 @@ fn execute_module(
                 diagnosis: Some(diag),
                 is_actionable,
                 stale_facts,
+                error: None,
             }
         }
         Err(e) => {
-            eprintln!("\nSolver Error: {}", e);
-            process::exit(1);
+            // Returned rather than exiting here so the caller can apply exit-code precedence
+            // (a stale decision is blocked before a constraint verdict is reported).
+            let is_actionable = stale_facts.is_empty();
+            ExecutionResult {
+                env,
+                ledger,
+                diagnosis: None,
+                is_actionable,
+                stale_facts,
+                error: Some(e),
+            }
         }
     }
 }
@@ -1123,4 +1331,88 @@ fn cmd_stream(path: &str, limit: usize) {
         "Stream completed: {} telemetry cycles verified by Aven.",
         cycle
     );
+}
+
+/// Evaluates `forward` blocks strictly forward in dependency order (the order the C emitter
+/// uses). With `strict` false, equations whose inputs are not yet known are skipped; with
+/// `strict` true they are an error. A forward equation whose output is already settled must
+/// agree with it.
+fn eval_forward_blocks(
+    module: &AvenModule,
+    env: &mut HashMap<String, f64>,
+    ledger: &mut Ledger,
+    seq: &mut usize,
+    stale_facts: &mut Vec<String>,
+    strict: bool,
+) -> Result<(), solver::SolverError> {
+    for blk in module.blocks.iter().filter(|b| b.kind == BlockKind::Forward) {
+        let order = CTranspiler::topo_sort(blk)
+            .map_err(|e| solver::SolverError::MathError(e.to_string()))?;
+        for idx in order {
+            let eq = &blk.equations[idx];
+            if !eq.rhs.vars().iter().all(|v| env.contains_key(v)) {
+                if strict {
+                    let missing: Vec<String> = eq
+                        .rhs
+                        .vars()
+                        .into_iter()
+                        .filter(|v| !env.contains_key(v))
+                        .collect();
+                    return Err(solver::SolverError::MathError(format!(
+                        "forward block '{}': '{}' needs {} which nothing provides",
+                        blk.name,
+                        eq.original_text,
+                        missing.join(", ")
+                    )));
+                }
+                continue;
+            }
+            let value = diff::eval_expr(&eq.rhs, env).map_err(|e| {
+                solver::SolverError::MathError(format!(
+                    "forward block '{}': {}: {}",
+                    blk.name, eq.original_text, e
+                ))
+            })?;
+            if let Some(&existing) = env.get(&eq.lhs) {
+                if (existing - value).abs() > 1e-6 * (1.0 + value.abs()) {
+                    return Err(solver::SolverError::Inconsistency {
+                        relation: eq.original_text.clone(),
+                        lhs: eq.lhs.clone(),
+                        expected: value,
+                        given: existing,
+                    });
+                }
+                continue;
+            }
+            *seq += 1;
+            let mut causes = Vec::new();
+            let mut tainted = false;
+            for v in eq.rhs.vars() {
+                if let Some(fact) = ledger.latest(&v) {
+                    causes.push(fact.seq);
+                    tainted |= fact.metadata.as_ref().map_or(false, |m| m.is_stale);
+                }
+            }
+            if tainted && !stale_facts.contains(&eq.lhs) {
+                stale_facts.push(eq.lhs.clone());
+            }
+            env.insert(eq.lhs.clone(), value);
+            ledger.append(Fact {
+                seq: *seq,
+                tick: 0,
+                kind: "derived".to_string(),
+                name: eq.lhs.clone(),
+                value,
+                causes,
+                origin: format!("forward {}: = {}", blk.name, eq.rhs),
+                metadata: tainted.then(|| ledger::FactMetadata {
+                    timestamp_ms: None,
+                    ttl_ms: None,
+                    is_stale: true,
+                    warnings: vec!["causal-stale-taint".to_string()],
+                }),
+            });
+        }
+    }
+    Ok(())
 }
