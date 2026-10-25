@@ -460,3 +460,85 @@ fn flight_model_matches_us_standard_atmosphere_1976() {
         assert!((p - p_ref).abs() / p_ref < 1e-3, "h={} m: p={} Pa, USSA76 {} Pa", h, p, p_ref);
     }
 }
+
+// wiki/Fact-Ledgers-and-Provenance.md: tamper-evident, append-only audit trail
+#[test]
+fn ledger_hmac_matches_rfc4231_vector() {
+    // RFC 4231 test case 2
+    assert_eq!(
+        avenc::ledger::hmac_sha256_hex(b"Jefe", b"what do ya want for nothing?"),
+        "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+    );
+}
+
+#[test]
+fn ledger_chain_is_deterministic_and_verifies() {
+    use avenc::ledger::{verify_jsonl, Fact, Ledger};
+    let build = |key: Option<&[u8]>| {
+        let mut l = key.map_or_else(Ledger::new, Ledger::with_key);
+        for i in 1..=4 {
+            l.append(Fact {
+                seq: i,
+                tick: 0,
+                kind: "derived".to_string(),
+                name: format!("v{}", i),
+                value: 0.1 * i as f64,
+                causes: if i > 1 { vec![i - 1] } else { vec![] },
+                origin: "= test \"quoted\"".to_string(),
+                metadata: None,
+            });
+        }
+        l
+    };
+    let a = build(None);
+    assert_eq!(a.head(), build(None).head(), "same facts must give the same head hash");
+    assert!(a.verify().is_ok());
+    let v = verify_jsonl(&a.to_jsonl(), None).expect("exported log must verify");
+    assert_eq!(v.facts, 4);
+    assert_eq!(v.head, a.head());
+
+    let signed = build(Some(b"k"));
+    assert!(verify_jsonl(&signed.to_jsonl(), Some(b"k")).is_ok());
+    assert!(verify_jsonl(&signed.to_jsonl(), Some(b"wrong key")).is_err());
+    assert!(verify_jsonl(&a.to_jsonl(), Some(b"k")).is_err(), "unsigned log must fail a signed check");
+}
+
+#[test]
+fn ledger_cli_detects_tampering() {
+    let dir = std::env::temp_dir().join(format!("aven_ledger_cli_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let log = dir.join("fleet.jsonl");
+    let log_s = log.to_string_lossy().into_owned();
+    let run = avenc(&["run", "examples/fleet.aven", "--ledger", log_s.as_str()]);
+    assert_eq!(run.code, 0, "stderr: {}", run.stderr);
+    assert_eq!(avenc(&["verify-ledger", log_s.as_str()]).code, 0);
+
+    let text = std::fs::read_to_string(&log).unwrap();
+    let forged = text.replacen("\"name\": \"cost\", \"value\": 44.10000000000001", "\"name\": \"cost\", \"value\": 40", 1);
+    assert_ne!(forged, text, "test must actually change the log");
+    std::fs::write(&log, forged).unwrap();
+    let check = avenc(&["verify-ledger", log_s.as_str()]);
+    assert_eq!(check.code, 1, "forged log accepted: {}", check.stdout);
+    assert!(check.stderr.contains("TAMPERED"), "stderr: {}", check.stderr);
+}
+
+// Non-convex integer models are certified globally optimal by interval branch-and-bound
+#[test]
+fn nonconvex_integer_optimum_is_proven() {
+    let src = "relation Cluster {
+    int nodes
+    int drives
+    capacity = nodes * drives * 13.5
+    cost = nodes * 2000.0 + nodes * drives * 600.0
+    capacity >= 100.0
+    drives <= 12.0
+}
+solve Cluster with {
+    minimize(cost)
+}
+";
+    let run = run_model(src, &["--json"]);
+    assert_eq!(run.code, 0, "stderr: {}", run.stderr);
+    assert!(run.stdout.contains("\"optimality\": \"proven\""), "{}", run.stdout);
+    assert!(run.stdout.contains("\"cost\": 6800"), "{}", run.stdout);
+}
