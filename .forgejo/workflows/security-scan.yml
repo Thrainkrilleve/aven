@@ -1,18 +1,79 @@
-name: Security & Virus Scan
-on: [push]
+name: Security Audit & Vulnerability Scan
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
 
 jobs:
-  virus-scan:
+  rust-security-audit:
+    name: Rust Dependencies & Advisory Audit
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout Code
         uses: actions/checkout@v4
-        
-      - name: Install and Run ClamAV
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked || true
+
+      - name: Audit Dependencies against RustSec Database
+        run: cargo audit || true
+
+  c99-binary-hardening:
+    name: Binary ELF Hardening Audit (checksec)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Security Tools
         run: |
-          apt-get update
-          apt-get install -y clamav
-          freshclam || true # Update definitions
-          
-          # Run the scan and fail if a virus is found
-          clamscan -r -i .
+          sudo apt-get update
+          sudo apt-get install -y gcc checksec
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build avenc Compiler
+        run: cargo build --release
+
+      - name: Emit Hardened C99 Binary
+        run: |
+          ./target/release/avenc build examples/server_capacity.aven --emit-c --traceable --checked-c > /tmp/server_capacity.c
+          gcc -std=c99 -O2 \
+            -Wall -Wextra -Werror \
+            -fstack-protector-strong \
+            -fstack-clash-protection \
+            -fcf-protection=full \
+            -D_FORTIFY_SOURCE=2 \
+            -fPIE -pie \
+            -Wl,-z,relro,-z,now \
+            /tmp/server_capacity.c \
+            -o /tmp/server_capacity_hardened -lm
+
+      - name: Verify ELF Hardening Flags
+        run: |
+          echo "Running checksec on compiled Aven binary..."
+          checksec --file=/tmp/server_capacity_hardened
+
+  clamav-virus-scan:
+    name: ClamAV Antivirus Filesystem Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install ClamAV
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clamav
+          sudo freshclam || true
+
+      - name: Scan Repository Files
+        run: |
+          clamscan -r -i --exclude-dir="^./target" --exclude-dir="^./.git" .
