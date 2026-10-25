@@ -3,9 +3,9 @@
 **Declarative Invariant Programming & Relational Multi-Physics Engine**
 
 [![Build & Test](https://img.shields.io/badge/tests-78%20passed-brightgreen.svg)](#testing--verification)
-[![Zero Dependencies](https://img.shields.io/badge/dependencies-pure%20Rust%20std-blue.svg)](#zero-dependency-architecture)
-[![Throughput](https://img.shields.io/badge/IPC%20Throughput-352.9%20solves%2Fsec-orange.svg)](#high-performance-persistent-ipc-daemon)
-[![Median Latency](https://img.shields.io/badge/Median%20Latency-9.7%20ms-purple.svg)](#high-performance-persistent-ipc-daemon)
+[![Zero Dependencies](https://img.shields.io/badge/dependencies-pure%20Rust%20std-blue.svg)](#key-capabilities)
+[![Throughput](https://img.shields.io/badge/IPC%20Throughput-1%2C720%20solves%2Fsec-orange.svg)](#live-multi-stream-flight-dynamics-mesh)
+[![Median Latency](https://img.shields.io/badge/Median%20Latency-0.56%20ms-purple.svg)](#live-multi-stream-flight-dynamics-mesh)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](#license)
 
 Aven is a domain-specific relational programming language and deterministic solver engine designed for physical systems, telemetry fusion, automated control, and multi-objective optimization. 
@@ -149,6 +149,9 @@ Fusing real-time commercial transponder data from **OpenSky Network** (4,700+ ac
 | **Subprocess Mode (`using external(...)`)** | `125.1 ms` | $7.4\,\text{solves/sec}$ | Baseline |
 | **Lazy-Import Subprocess** | `71.5 ms` | $54.1\,\text{solves/sec}$ | $1.7\times$ faster |
 | **Persistent IPC Daemon (`using ipc(...)`)** | **`9.7 ms`** | **`352.9 solves/sec`** | **$12.9\times$ faster / $47\times$ throughput** |
+| **`avenc bench`, live IPC daemon (one client)** | **`0.56 ms`** (p95 `0.71 ms`) | **`1,720 solves/sec`** | Badge figures |
+
+The first three rows come from the `stream_ringer.py` multi-worker harness, which includes its own process and worker overhead. The badge figures are the complete `avenc` solve (TCP round trip to the daemon plus the relational solve of `flight_mesh_ipc.aven`, 24 facts), measured with `avenc bench evaluations/flight_mesh/flight_mesh_ipc.aven --iterations 2000` against the live daemon: medians 0.561–0.566 ms and 1,700–1,734 solves/sec over three runs (2026-10-25, 8-core Windows workstation).
 
 - **In-Memory Physics Resolution:** $144.3\,\mu\text{s}$ compute time inside daemon.
 - **Round-Trip Loopback Settle:** $2.95\,\text{ms}$ total connection and solve duration.

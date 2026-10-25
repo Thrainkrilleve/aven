@@ -539,6 +539,10 @@ fn cmd_bench(path: &str, iterations: usize) {
         last = Some(res);
     }
 
+    // Sequential single-client throughput: completed solves per second of solve time
+    let solve_total_s: f64 = solve_us.iter().sum::<f64>() / 1e6;
+    let throughput = solve_us.len() as f64 / solve_total_s;
+
     println!("avenc bench '{}' — {} iterations", path, iterations);
     println!("  {:<28} {:>12} {:>12} {:>12}", "stage", "min µs", "median µs", "p95 µs");
     for (name, samples) in [
@@ -548,6 +552,10 @@ fn cmd_bench(path: &str, iterations: usize) {
         let (min, med, p95) = stats(samples);
         println!("  {:<28} {:>12.1} {:>12.1} {:>12.1}", name, min, med, p95);
     }
+    println!(
+        "  sequential throughput: {:.1} solves/sec (one client, {} solves)",
+        throughput, iterations
+    );
     if let Some(res) = last {
         if let Some(e) = &res.error {
             println!("  note: every solve ended with: {}", e);
