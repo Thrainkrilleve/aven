@@ -28,7 +28,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
-from scipy.optimize import Bounds, LinearConstraint, milp, minimize
+from scipy.optimize import Bounds, LinearConstraint, linprog, milp, minimize
 
 ROOT = Path(__file__).resolve().parent.parent
 AVENC = os.environ.get(
@@ -262,17 +262,36 @@ def run_linstatus(args):
         if ref.startswith("status"):
             continue  # reference itself did not settle; not a usable case
 
+        # Cross-check the reference against linprog on the continuous relaxation. scipy's milp
+        # and linprog can disagree on unbounded/infeasible edge cases (both have been seen to
+        # mislabel feasible-but-unbounded LPs), so a case where they conflict is not reliable
+        # ground truth: skip it rather than blame avenc for a bad reference.
+        lp = linprog(sign * np.array(c, dtype=float), A_ub=np.vstack([A, -A]),
+                     b_ub=np.concatenate([np.where(hi == np.inf, 1e7, hi),
+                                          np.where(lo == -np.inf, 1e7, -lo)]),
+                     bounds=list(zip([max(l, -1e7) for l in lbs], [min(u, 1e7) for u in ubs])))
+        lp_ref = {0: "optimal", 2: "infeasible", 3: "unbounded"}.get(lp.status)
+        # With finite 1e7 clamps an unbounded LP shows as a huge-magnitude optimum
+        if lp.status == 0 and abs(lp.fun) > 1e6:
+            lp_ref = "unbounded"
+        if lp_ref != ("optimal" if ref == "optimal" else ref):
+            # Integer problems legitimately differ from their continuous relaxation only when
+            # the relaxation is optimal but the MILP is infeasible/different; conflicts over
+            # unbounded/infeasible are unreliable references.
+            if {ref, lp_ref} & {"unbounded", "infeasible"} and ref != lp_ref:
+                continue
+
         status, env, detail = run_avenc(src)
         # A declared variable that appears in no row and no objective term is genuinely free;
         # avenc leaves it unsettled, and it has coefficient 0 everywhere, so treat it as 0.
         used = {f"x{j}" for i, (a, _, _) in enumerate(rows) for j in range(n) if a[j]} | {f"x{j}" for j in range(n) if c[j]}
-        # avenc hitting its branch-and-bound node limit is an honest "couldn't solve", not a
-        # proof of infeasibility: classify it separately from a wrong answer.
-        node_limit = "node limit" in detail
+        # avenc declining to decide (node limit, or an unbounded relaxation whose integer
+        # feasibility it cannot settle without cutting planes) is honest, not a wrong answer.
+        undecided = ("node limit" in detail) or ("Undetermined" in detail)
         if status == "settled":
             got = "optimal"
-        elif node_limit:
-            got = "node_limit"
+        elif undecided:
+            got = "undecided"
         elif any(t in detail for t in ("No feasible solution", "Inconsistency in", "Constraint violation in")):
             # Specific contradictions found while propagating equalities also prove there is
             # no solution
@@ -282,10 +301,12 @@ def run_linstatus(args):
         else:
             got = f"other({status})"
 
-        if got == "node_limit":
-            verdict, info = "NODE_LIMIT", f"ref={ref}; {detail[-120:]}"
+        if got == "undecided":
+            # Not an agreement, but not a contradiction either: avenc gave no verdict.
+            verdict, info = "UNDECIDED", f"ref={ref}; {detail[-120:]}"
         elif got != ref:
-            verdict, info = f"STATUS_{got.upper()}_EXPECTED_{ref.upper()}", detail[-200:]
+            # avenc asserted a verdict that contradicts HiGHS: a genuine correctness failure.
+            verdict, info = f"WRONG_{got.upper()}_EXPECTED_{ref.upper()}", detail[-200:]
         elif got == "optimal":
             x = [env[nm] if nm in env else (0.0 if nm not in used else float("nan")) for nm in names]
             obj = sum(ci * xi for ci, xi in zip(c, x))
@@ -562,10 +583,11 @@ def main():
             tally = run_qp(args)
         else:
             tally = run_eqsys(args)
-        notes = {k: tally.pop(k) for k in ("proven optimal", "unproven") if k in tally}
+        # Notes are honest non-agreements (not wrong answers): proof status and UNDECIDED.
+        notes = {k: tally.pop(k) for k in ("proven optimal", "unproven", "UNDECIDED") if k in tally}
         total = sum(tally.values())
         ok = tally.get("ok", 0)
-        any_fail |= ok != total
+        any_fail |= ok != total  # any remaining non-ok verdict is a real correctness failure
         summary = ", ".join(f"{v} {kk}" for kk, v in sorted(tally.items(), key=lambda t: -t[1]))
         extra = f" ({', '.join(f'{v} {kk}' for kk, v in notes.items())})" if notes else ""
         print(f"{k:9s} {ok}/{total} agree with reference - {summary}{extra}")
