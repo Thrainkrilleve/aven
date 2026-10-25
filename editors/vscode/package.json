@@ -1,0 +1,119 @@
+{
+  "name": "aven-lang",
+  "displayName": "Aven Language Support",
+  "description": "Language support for Aven (.aven): syntax highlighting, unit-aware dimensions, snippets, live diagnostics, and compiler commands for OpenVSCode and Antigravity.",
+  "version": "0.1.0",
+  "publisher": "thrain",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Snippets"
+  ],
+  "keywords": [
+    "aven",
+    "physics",
+    "solver",
+    "units",
+    "simulation",
+    "digital-twin"
+  ],
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "onLanguage:aven"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "aven",
+        "aliases": [
+          "Aven",
+          "aven"
+        ],
+        "extensions": [
+          ".aven"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "aven",
+        "scopeName": "source.aven",
+        "path": "./syntaxes/aven.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "aven",
+        "path": "./snippets/aven.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "aven.check",
+        "title": "Aven: Check Model (Syntax, Units & Rank)",
+        "category": "Aven"
+      },
+      {
+        "command": "aven.run",
+        "title": "Aven: Run / Solve Model",
+        "category": "Aven"
+      },
+      {
+        "command": "aven.why",
+        "title": "Aven: Explain Variable (Causal Why)",
+        "category": "Aven"
+      },
+      {
+        "command": "aven.buildC",
+        "title": "Aven: Transpile to C99",
+        "category": "Aven"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "aven.run",
+          "when": "resourceExtname == .aven",
+          "group": "aven@1"
+        },
+        {
+          "command": "aven.check",
+          "when": "resourceExtname == .aven",
+          "group": "aven@2"
+        },
+        {
+          "command": "aven.why",
+          "when": "resourceExtname == .aven",
+          "group": "aven@3"
+        },
+        {
+          "command": "aven.buildC",
+          "when": "resourceExtname == .aven",
+          "group": "aven@4"
+        }
+      ]
+    },
+    "problemMatchers": [
+      {
+        "name": "avenc",
+        "owner": "aven",
+        "fileLocation": [
+          "relative",
+          "${workspaceFolder}"
+        ],
+        "pattern": [
+          {
+            "regexp": "^.*?line\\s+(\\d+),\\s*col\\s+(\\d+):?\\s*(.*)$",
+            "line": 1,
+            "column": 2,
+            "message": 3
+          }
+        ]
+      }
+    ]
+  }
+}

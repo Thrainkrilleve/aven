@@ -1,0 +1,56 @@
+{
+  "Physical Relation": {
+    "prefix": "relation",
+    "body": [
+      "relation ${1:Name} {",
+      "    ${2:output} = ${3:input} * ${4:factor}",
+      "}"
+    ],
+    "description": "Define a physical relation block"
+  },
+  "IPC External Relation": {
+    "prefix": "relation-ipc",
+    "body": [
+      "external relation ${1:LiveSensor} using ipc(\"${2:127.0.0.1:9090}\") {",
+      "    ${3:sensor_value} = ${4:observed_value}",
+      "}"
+    ],
+    "description": "Define an external relation connected to a real-time IPC telemetry daemon"
+  },
+  "Solve Block": {
+    "prefix": "solve",
+    "body": [
+      "solve ${1:RelationName} with {",
+      "    ${2:input_var} = ${3:100.0}",
+      "}"
+    ],
+    "description": "Define a coupled solving query block"
+  },
+  "Optimization Solve Block": {
+    "prefix": "solve-opt",
+    "body": [
+      "solve ${1:RelationName} with {",
+      "    int ${2:replicas}",
+      "    ${3:capacity} >= ${4:100.0}",
+      "    minimize(${5:cost})",
+      "}"
+    ],
+    "description": "Define an integer / branch-and-bound optimization solve block"
+  },
+  "Forward Block": {
+    "prefix": "forward",
+    "body": [
+      "forward ${1:BlockName} {",
+      "    ${2:output} <- ${3:expression}",
+      "}"
+    ],
+    "description": "Define a forward causal DAG compute block"
+  },
+  "Unit Declaration": {
+    "prefix": "unit",
+    "body": [
+      "unit ${1:kW} = ${2:1000} * ${3:W}"
+    ],
+    "description": "Declare an extensible physical unit"
+  }
+}
