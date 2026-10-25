@@ -15,6 +15,7 @@ mod diff;
 mod evaluator;
 mod ledger;
 mod lexer;
+mod optimize;
 mod parser;
 mod solver;
 mod units;

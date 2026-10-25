@@ -21,6 +21,7 @@ pub enum SolverError {
     },
     UnderDetermined(crate::diagnostics::Diagnosis),
     Infeasible(String),
+    Unbounded(String),
     MathError(String),
 }
 
@@ -70,6 +71,7 @@ impl fmt::Display for SolverError {
                 }
             }
             SolverError::Infeasible(msg) => write!(f, "No feasible solution found: {}", msg),
+            SolverError::Unbounded(msg) => write!(f, "Objective is unbounded: {}", msg),
             SolverError::MathError(msg) => write!(f, "Solver math error: {}", msg),
         }
     }
@@ -193,7 +195,26 @@ impl SolverEngine {
             self.solve_with_optimization(&mut env)?;
         }
 
-        // 3. Verify feasibility of all constraints against settled env
+        // 3. Every equation must hold for the settled values
+        for eq in &self.relations {
+            let mut vs = eq.rhs.vars();
+            vs.insert(eq.lhs.clone());
+            if vs.iter().all(|v| env.contains_key(v)) {
+                let expected = eval_expr(&eq.rhs, &env)
+                    .map_err(|e| SolverError::MathError(e.to_string()))?;
+                let given = env[&eq.lhs];
+                if (expected - given).abs() > 1e-6 * (1.0 + expected.abs()) {
+                    return Err(SolverError::Inconsistency {
+                        relation: eq.original_text.clone(),
+                        lhs: eq.lhs.clone(),
+                        expected,
+                        given,
+                    });
+                }
+            }
+        }
+
+        // 4. Verify feasibility of all constraints against settled env
         for c in &self.constraints {
             if !Self::check_constraint(c, &env)? {
                 let lhs_val = env.get(&c.lhs).copied().unwrap_or(0.0);
@@ -419,492 +440,176 @@ impl SolverEngine {
         &mut self,
         env: &mut HashMap<String, f64>,
     ) -> Result<bool, SolverError> {
+        use crate::optimize::{Ineq, Outcome, Problem, Var};
+
         let mut all_vars = BTreeSet::new();
         for eq in &self.relations {
             all_vars.insert(eq.lhs.clone());
-            for v in eq.rhs.vars() {
-                all_vars.insert(v);
-            }
+            all_vars.extend(eq.rhs.vars());
         }
         for c in &self.constraints {
             all_vars.insert(c.lhs.clone());
-            for v in c.rhs.vars() {
-                all_vars.insert(v);
-            }
+            all_vars.extend(c.rhs.vars());
         }
         for obj in &self.objectives {
             all_vars.insert(obj.target.clone());
         }
-
-        let remaining_unknowns: Vec<String> = all_vars
+        let unknowns: Vec<String> = all_vars
             .into_iter()
             .filter(|v| !env.contains_key(v))
             .collect();
-
-        if remaining_unknowns.is_empty() {
+        if unknowns.is_empty() {
             return Ok(false);
         }
+        let is_unknown = |v: &String| unknowns.contains(v);
 
-        let primary_obj = self.objectives.first().cloned();
-        let base_relations = self.relations.clone();
-        let constraints_list = self.constraints.clone();
-
-        // 1. Separate decision variables from dependent derived variables
-        let mut dec_vars: Vec<String> = self
-            .integer_vars
+        // Simple bounds (x >= const, x <= const, x == const) become variable bounds; every other
+        // constraint becomes an inequality g(x) <= 0 or an equation.
+        let mut vars: Vec<Var> = unknowns
             .iter()
-            .filter(|iv| remaining_unknowns.contains(iv))
+            .map(|u| Var {
+                name: u.clone(),
+                lo: f64::NEG_INFINITY,
+                hi: f64::INFINITY,
+                integer: self.integer_vars.contains(u),
+            })
+            .collect();
+        let mut ineqs = Vec::new();
+        let mut eqs = Vec::new();
+        let sub = |a: Expr, b: Expr| Expr::Bin(BinaryOp::Sub, Box::new(a), Box::new(b));
+        for c in &self.constraints {
+            let rhs_has_unknown = c.rhs.vars().iter().any(|v| is_unknown(v));
+            let rhs_const = if rhs_has_unknown {
+                None
+            } else {
+                eval_expr(&c.rhs, env).ok()
+            };
+            if let (Some(j), Some(b)) = (unknowns.iter().position(|u| u == &c.lhs), rhs_const) {
+                match c.op {
+                    ConstraintOp::GreaterEqual => {
+                        vars[j].lo = vars[j].lo.max(b);
+                        continue;
+                    }
+                    ConstraintOp::LessEqual => {
+                        vars[j].hi = vars[j].hi.min(b);
+                        continue;
+                    }
+                    ConstraintOp::Equal => {
+                        vars[j].lo = vars[j].lo.max(b);
+                        vars[j].hi = vars[j].hi.min(b);
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+            if !is_unknown(&c.lhs) && !rhs_has_unknown {
+                continue; // fully known: verified after solving
+            }
+            let lhs = Expr::Var(c.lhs.clone());
+            match c.op {
+                ConstraintOp::LessEqual | ConstraintOp::Less => ineqs.push(Ineq {
+                    expr: sub(lhs, c.rhs.clone()),
+                    strict: c.op == ConstraintOp::Less,
+                }),
+                ConstraintOp::GreaterEqual | ConstraintOp::Greater => ineqs.push(Ineq {
+                    expr: sub(c.rhs.clone(), lhs),
+                    strict: c.op == ConstraintOp::Greater,
+                }),
+                ConstraintOp::Equal => eqs.push(sub(lhs, c.rhs.clone())),
+                // != cannot be optimized over; it is verified after solving
+                ConstraintOp::NotEqual => {}
+            }
+        }
+        // Integer quantities (servers, drives, pods) are non-negative unless bounded otherwise
+        for v in vars.iter_mut() {
+            if v.integer && v.lo == f64::NEG_INFINITY {
+                v.lo = 0.0;
+            }
+        }
+        for eq in &self.relations {
+            if is_unknown(&eq.lhs) || eq.rhs.vars().iter().any(|v| is_unknown(v)) {
+                eqs.push(sub(Expr::Var(eq.lhs.clone()), eq.rhs.clone()));
+            }
+        }
+
+        let objective = self.objectives.first().map(|o| match o.kind {
+            ObjectiveKind::Minimize => Expr::Var(o.target.clone()),
+            ObjectiveKind::Maximize => Expr::UnaryMinus(Box::new(Expr::Var(o.target.clone()))),
+        });
+        if self.objectives.len() > 1 {
+            self.trace.push(format!(
+                "[optimize] {} objectives declared; optimizing the first ('{}'). Use `avenc pareto` for trade-offs.",
+                self.objectives.len(),
+                self.objectives[0].target
+            ));
+        }
+
+        let problem = Problem {
+            vars,
+            eqs,
+            ineqs,
+            objective,
+            env: env.clone(),
+        };
+        match problem.solve() {
+            Outcome::Optimal {
+                x,
+                objective,
+                proven,
+                method,
+            } => {
+                for (v, xi) in problem.vars.iter().zip(&x) {
+                    env.insert(v.name.clone(), *xi);
+                }
+                self.recompute_forward_values(env, &unknowns);
+                let shown = match self.objectives.first() {
+                    Some(o) if o.kind == ObjectiveKind::Maximize => -objective,
+                    _ => objective,
+                };
+                self.trace.push(format!(
+                    "[optimize] {} — objective = {:.6} ({})",
+                    method,
+                    shown,
+                    if proven {
+                        "proven optimal"
+                    } else {
+                        "not proven globally optimal"
+                    }
+                ));
+                Ok(true)
+            }
+            Outcome::Infeasible(msg) => Err(SolverError::Infeasible(msg)),
+            Outcome::Unbounded(msg) => Err(SolverError::Unbounded(msg)),
+        }
+    }
+
+    /// Recomputes every unknown defined by an equation whose right-hand side is already
+    /// settled, so derived values match their equations exactly instead of carrying the
+    /// optimizer's tolerance.
+    fn recompute_forward_values(&self, env: &mut HashMap<String, f64>, unknowns: &[String]) {
+        let lhs_vars: BTreeSet<&String> = self.relations.iter().map(|e| &e.lhs).collect();
+        let mut settled: BTreeSet<String> = env
+            .keys()
+            .filter(|k| !unknowns.contains(*k) || !lhs_vars.contains(*k))
             .cloned()
             .collect();
-
-        // Simulate forward/backward reachability from env + dec_vars to identify all independent decision variables
         loop {
-            let mut simulated: BTreeSet<String> = env.keys().cloned().collect();
-            simulated.extend(dec_vars.iter().cloned());
-            loop {
-                let mut progressed = false;
-                for eq in &base_relations {
-                    let mut unk = eq.rhs.vars();
-                    unk.insert(eq.lhs.clone());
-                    let missing: Vec<String> =
-                        unk.into_iter().filter(|v| !simulated.contains(v)).collect();
-                    if missing.len() == 1 {
-                        simulated.insert(missing[0].clone());
+            let mut progressed = false;
+            for eq in &self.relations {
+                if settled.contains(&eq.lhs) || !unknowns.contains(&eq.lhs) {
+                    continue;
+                }
+                if eq.rhs.vars().iter().all(|v| settled.contains(v)) {
+                    if let Ok(v) = eval_expr(&eq.rhs, env) {
+                        env.insert(eq.lhs.clone(), v);
+                        settled.insert(eq.lhs.clone());
                         progressed = true;
                     }
                 }
-                if !progressed {
-                    break;
-                }
             }
-            let unreached: Vec<String> = remaining_unknowns
-                .iter()
-                .filter(|u| !simulated.contains(*u))
-                .cloned()
-                .collect();
-            if unreached.is_empty() {
+            if !progressed {
                 break;
             }
-            // Pick an unresolved variable as an additional decision variable (avoid picking the objective target if others exist)
-            let candidate = if let Some(ref obj) = primary_obj {
-                unreached
-                    .iter()
-                    .find(|u| *u != &obj.target)
-                    .unwrap_or(&unreached[0])
-                    .clone()
-            } else {
-                unreached[0].clone()
-            };
-            dec_vars.push(candidate);
-        }
-
-        let d = dec_vars.len();
-        let is_maximize = matches!(
-            primary_obj.as_ref().map(|o| o.kind),
-            Some(ObjectiveKind::Maximize)
-        );
-
-        let compute_objective = |cand_env: &HashMap<String, f64>| -> Option<f64> {
-            if let Some(ref obj) = primary_obj {
-                cand_env.get(&obj.target).copied()
-            } else {
-                Some(0.0)
-            }
-        };
-
-        let is_better = |new_score: f64, current_best: f64| -> bool {
-            if is_maximize {
-                new_score > current_best + 1e-7
-            } else {
-                new_score < current_best - 1e-7
-            }
-        };
-
-        // Helper to evaluate a decision vector under given variable bounds
-        let eval_point = |cand_x: &[f64],
-                          bounds: &HashMap<String, (f64, f64)>|
-         -> Option<(HashMap<String, f64>, f64, f64)> {
-            let mut cand_env = env.clone();
-            for (i, v) in dec_vars.iter().enumerate() {
-                cand_env.insert(v.clone(), cand_x[i]);
-            }
-            if self
-                .solve_equalities(&base_relations, &mut cand_env, None)
-                .is_err()
-            {
-                return None;
-            }
-            for u in &remaining_unknowns {
-                if !cand_env.contains_key(u) {
-                    return None;
-                }
-            }
-            let mut viol = 0.0;
-            for (i, v) in dec_vars.iter().enumerate() {
-                if let Some(&(lo, hi)) = bounds.get(v) {
-                    if cand_x[i] < lo - 1e-6 {
-                        viol += lo - cand_x[i];
-                    }
-                    if cand_x[i] > hi + 1e-6 {
-                        viol += cand_x[i] - hi;
-                    }
-                }
-            }
-            for c in &constraints_list {
-                let lhs_val = *cand_env.get(&c.lhs)?;
-                let rhs_val = eval_expr(&c.rhs, &cand_env).ok()?;
-                let v_diff = match c.op {
-                    ConstraintOp::LessEqual => (lhs_val - rhs_val).max(0.0),
-                    ConstraintOp::GreaterEqual => (rhs_val - lhs_val).max(0.0),
-                    ConstraintOp::Less => (lhs_val - rhs_val + 1e-7).max(0.0),
-                    ConstraintOp::Greater => (rhs_val - lhs_val + 1e-7).max(0.0),
-                    ConstraintOp::Equal => (lhs_val - rhs_val).abs(),
-                    ConstraintOp::NotEqual => {
-                        if (lhs_val - rhs_val).abs() < 1e-7 {
-                            1.0
-                        } else {
-                            0.0
-                        }
-                    }
-                };
-                viol += v_diff;
-            }
-            let score = compute_objective(&cand_env)?;
-            Some((cand_env, score, viol))
-        };
-
-        // 2. Precompute seeds
-        // 2a. Unconstrained stationary points from objective derivative (e.g. min (x-3)^2 + 1 => x = 3)
-        let mut interior_seeds: Vec<Vec<f64>> = Vec::new();
-        if let Some(ref obj) = primary_obj {
-            for eq in &base_relations {
-                if eq.lhs == obj.target {
-                    for (i, v) in dec_vars.iter().enumerate() {
-                        if let Ok(deriv) = diff(&eq.rhs, v) {
-                            let dummy_eq = Equation {
-                                lhs: "_deriv".to_string(),
-                                op: ConstraintOp::Equal,
-                                rhs: deriv,
-                                original_text: "_deriv = 0".to_string(),
-                                line: 0,
-                                col: 0,
-                            };
-                            let mut d_env = env.clone();
-                            d_env.insert("_deriv".to_string(), 0.0);
-                            for (j, other_v) in dec_vars.iter().enumerate() {
-                                if i != j {
-                                    d_env.insert(other_v.clone(), 1.0);
-                                }
-                            }
-                            if let Some(root) = self.solve_one_unknown(&dummy_eq, v, &d_env) {
-                                if root.is_finite() {
-                                    let mut seed = vec![1.0; d];
-                                    seed[i] = root;
-                                    interior_seeds.push(seed);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 2b. Boundary equality solutions from constraints (active constraints)
-        let mut boundary_seeds: Vec<Vec<f64>> = Vec::new();
-        for c in &constraints_list {
-            let mut test_rel = base_relations.clone();
-            test_rel.push(Equation {
-                lhs: c.lhs.clone(),
-                op: ConstraintOp::Equal,
-                rhs: c.rhs.clone(),
-                original_text: format!("{} = {}", c.lhs, c.rhs),
-                line: c.line,
-                col: c.col,
-            });
-            let mut test_env = env.clone();
-            if self
-                .solve_equalities(&test_rel, &mut test_env, None)
-                .is_ok()
-            {
-                if dec_vars.iter().all(|v| test_env.contains_key(v)) {
-                    let pt: Vec<f64> = dec_vars.iter().map(|v| test_env[v]).collect();
-                    boundary_seeds.push(pt);
-                }
-            }
-        }
-
-        // 2c. Pairs of constraints for multi-variable boundaries
-        if constraints_list.len() > 1 && d >= 2 {
-            for i in 0..constraints_list.len() {
-                for j in (i + 1)..constraints_list.len() {
-                    let mut test_rel = base_relations.clone();
-                    test_rel.push(Equation {
-                        lhs: constraints_list[i].lhs.clone(),
-                        op: ConstraintOp::Equal,
-                        rhs: constraints_list[i].rhs.clone(),
-                        original_text: format!(
-                            "{} = {}",
-                            constraints_list[i].lhs, constraints_list[i].rhs
-                        ),
-                        line: constraints_list[i].line,
-                        col: constraints_list[i].col,
-                    });
-                    test_rel.push(Equation {
-                        lhs: constraints_list[j].lhs.clone(),
-                        op: ConstraintOp::Equal,
-                        rhs: constraints_list[j].rhs.clone(),
-                        original_text: format!(
-                            "{} = {}",
-                            constraints_list[j].lhs, constraints_list[j].rhs
-                        ),
-                        line: constraints_list[j].line,
-                        col: constraints_list[j].col,
-                    });
-                    let mut test_env = env.clone();
-                    if self
-                        .solve_equalities(&test_rel, &mut test_env, None)
-                        .is_ok()
-                    {
-                        if dec_vars.iter().all(|v| test_env.contains_key(v)) {
-                            let pt: Vec<f64> = dec_vars.iter().map(|v| test_env[v]).collect();
-                            boundary_seeds.push(pt);
-                        }
-                    }
-                }
-            }
-        }
-
-        // 3. Set up Branch-and-Bound root node
-        let mut root_bounds = HashMap::new();
-        for v in &dec_vars {
-            let mut explicit_lo = None;
-            let mut explicit_hi = None;
-            for c in &constraints_list {
-                if &c.lhs == v {
-                    if let Expr::Num(n) = c.rhs {
-                        match c.op {
-                            ConstraintOp::GreaterEqual | ConstraintOp::Greater => {
-                                explicit_lo = Some(explicit_lo.map_or(n, |cur: f64| cur.max(n)));
-                            }
-                            ConstraintOp::LessEqual | ConstraintOp::Less => {
-                                explicit_hi = Some(explicit_hi.map_or(n, |cur: f64| cur.min(n)));
-                            }
-                            ConstraintOp::Equal => {
-                                explicit_lo = Some(explicit_lo.map_or(n, |cur: f64| cur.max(n)));
-                                explicit_hi = Some(explicit_hi.map_or(n, |cur: f64| cur.min(n)));
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-            let lo = explicit_lo.unwrap_or(if self.integer_vars.contains(v) {
-                0.0
-            } else {
-                -1e7
-            });
-            let hi = explicit_hi.unwrap_or(1e7);
-            root_bounds.insert(v.clone(), (lo, hi));
-        }
-
-        struct BnBNode {
-            bounds: HashMap<String, (f64, f64)>,
-        }
-
-        struct CandidateSolution {
-            env: HashMap<String, f64>,
-            objective_val: f64,
-        }
-
-        let mut queue = vec![BnBNode {
-            bounds: root_bounds,
-        }];
-        let mut best_solution: Option<CandidateSolution> = None;
-        let mut bnb_traces: Vec<String> = Vec::new();
-        let mut max_nodes = 300;
-
-        while let Some(node) = queue.pop() {
-            if max_nodes == 0 {
-                break;
-            }
-            max_nodes -= 1;
-
-            let lower_vec: Vec<f64> = dec_vars.iter().map(|v| node.bounds[v].0).collect();
-            let upper_vec: Vec<f64> = dec_vars.iter().map(|v| node.bounds[v].1).collect();
-
-            // Gather candidate seeds for this subproblem
-            let mut seeds: Vec<Vec<f64>> = Vec::new();
-            for s in &interior_seeds {
-                seeds.push(s.clone());
-            }
-            for s in &boundary_seeds {
-                seeds.push(s.clone());
-            }
-
-            // Bound midpoints and endpoints
-            let mid_pt: Vec<f64> = (0..d)
-                .map(|i| {
-                    let lo = lower_vec[i];
-                    let hi = upper_vec[i];
-                    if lo > -1e5 && hi < 1e5 {
-                        (lo + hi) / 2.0
-                    } else if lo > -1e5 {
-                        lo + 1.0
-                    } else if hi < 1e5 {
-                        hi - 1.0
-                    } else {
-                        1.0
-                    }
-                })
-                .collect();
-            seeds.push(mid_pt);
-
-            let low_clamped: Vec<f64> = (0..d).map(|i| lower_vec[i].max(-1e4)).collect();
-            seeds.push(low_clamped);
-            let up_clamped: Vec<f64> = (0..d).map(|i| upper_vec[i].min(1e4)).collect();
-            seeds.push(up_clamped);
-
-            seeds.push(vec![0.0; d]);
-            seeds.push(vec![1.0; d]);
-            seeds.push(vec![10.0; d]);
-
-            // Polish each seed with Nelder-Mead on the penalized objective
-            let mut best_relaxed_point: Option<(Vec<f64>, HashMap<String, f64>, f64)> = None;
-
-            for raw_seed in seeds {
-                let clamped_seed: Vec<f64> = (0..d)
-                    .map(|i| raw_seed[i].max(lower_vec[i]).min(upper_vec[i]))
-                    .collect();
-
-                let (opt_x, _) =
-                    nelder_mead(
-                        &clamped_seed,
-                        &lower_vec,
-                        &upper_vec,
-                        60,
-                        |pt| match eval_point(pt, &node.bounds) {
-                            Some((_, score, viol)) => {
-                                let base = if is_maximize { -score } else { score };
-                                base + 1e7 * viol + 1e5 * viol * viol
-                            }
-                            None => 1e15,
-                        },
-                    );
-
-                for cand in &[opt_x, clamped_seed] {
-                    if let Some((cand_env, score, viol)) = eval_point(cand, &node.bounds) {
-                        if viol <= 1e-5 {
-                            let update = match &best_relaxed_point {
-                                None => true,
-                                Some((_, _, best_score)) => is_better(score, *best_score),
-                            };
-                            if update {
-                                best_relaxed_point = Some((cand.clone(), cand_env, score));
-                            }
-                        }
-                    }
-                }
-            }
-
-            let (relaxed_x, relaxed_env, relaxed_score) = match best_relaxed_point {
-                Some(p) => p,
-                None => continue, // Infeasible relaxation, prune branch
-            };
-
-            // Bound pruning: if relaxation cannot beat incumbent best, prune branch
-            if let Some(ref best) = best_solution {
-                if !is_better(relaxed_score, best.objective_val) {
-                    continue;
-                }
-            }
-
-            // Integrality check on decision integer variables
-            let int_dec_indices: Vec<usize> = (0..d)
-                .filter(|&i| self.integer_vars.contains(&dec_vars[i]))
-                .collect();
-
-            let mut fractional: Vec<(usize, f64, f64)> = Vec::new();
-            for &idx in &int_dec_indices {
-                let val = relaxed_x[idx];
-                let round_val = val.round();
-                let dist = (val - round_val).abs();
-                if dist > 1e-4 {
-                    fractional.push((idx, val, dist));
-                }
-            }
-
-            if fractional.is_empty() {
-                // Feasible integer solution found!
-                let update = match &best_solution {
-                    None => true,
-                    Some(best) => is_better(relaxed_score, best.objective_val),
-                };
-                if update {
-                    let combo_str = int_dec_indices
-                        .iter()
-                        .map(|&i| format!("{} = {:.0}", dec_vars[i], relaxed_x[i].round()))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    if !combo_str.is_empty() {
-                        bnb_traces.push(format!(
-                            "[branch-and-bound] candidate {} is feasible (objective = {:.4})",
-                            combo_str, relaxed_score
-                        ));
-                    }
-                    best_solution = Some(CandidateSolution {
-                        env: relaxed_env,
-                        objective_val: relaxed_score,
-                    });
-                }
-            } else {
-                // Branch on the integer variable with largest fractional distance from integer (closest to 0.5)
-                fractional
-                    .sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
-                let (split_idx, split_val, _) = fractional[0];
-                let split_var = &dec_vars[split_idx];
-                let floor_val = split_val.floor();
-                let ceil_val = split_val.ceil();
-
-                // Left child: x <= floor
-                let mut left_bounds = node.bounds.clone();
-                let cur_lo = left_bounds[split_var].0;
-                let cur_hi = left_bounds[split_var].1;
-                let new_hi = cur_hi.min(floor_val);
-                if cur_lo <= new_hi + 1e-7 {
-                    left_bounds.get_mut(split_var).unwrap().1 = new_hi;
-                    queue.push(BnBNode {
-                        bounds: left_bounds,
-                    });
-                }
-
-                // Right child: x >= ceil
-                let mut right_bounds = node.bounds.clone();
-                let cur_lo_r = right_bounds[split_var].0;
-                let cur_hi_r = right_bounds[split_var].1;
-                let new_lo = cur_lo_r.max(ceil_val);
-                if new_lo <= cur_hi_r + 1e-7 {
-                    right_bounds.get_mut(split_var).unwrap().0 = new_lo;
-                    queue.push(BnBNode {
-                        bounds: right_bounds,
-                    });
-                }
-            }
-        }
-
-        self.trace.extend(bnb_traces);
-
-        if let Some(best) = best_solution {
-            *env = best.env;
-            self.trace.push(format!(
-                "[optimize] settled optimal solution with objective = {:.4}",
-                best.objective_val
-            ));
-            Ok(true)
-        } else {
-            Err(SolverError::Infeasible(
-                "constraints could not be satisfied by any candidate integer or boundary values"
-                    .to_string(),
-            ))
         }
     }
 
@@ -1183,165 +888,6 @@ impl SolverEngine {
     }
 }
 
-/// Nelder-Mead simplex search for continuous non-linear optimization with box bounds
-fn nelder_mead<F>(
-    x0: &[f64],
-    lower: &[f64],
-    upper: &[f64],
-    max_iter: usize,
-    mut f: F,
-) -> (Vec<f64>, f64)
-where
-    F: FnMut(&[f64]) -> f64,
-{
-    let d = x0.len();
-    if d == 0 {
-        return (vec![], f(&[]));
-    }
-
-    let clamp_vec = |v: &[f64]| -> Vec<f64> {
-        let mut out = v.to_vec();
-        for i in 0..d {
-            out[i] = out[i].max(lower[i]).min(upper[i]);
-        }
-        out
-    };
-
-    // Construct initial simplex with d + 1 vertices
-    let p0 = clamp_vec(x0);
-    let mut vertices = Vec::with_capacity(d + 1);
-    let mut scores = Vec::with_capacity(d + 1);
-
-    let f0 = f(&p0);
-    vertices.push(p0.clone());
-    scores.push(f0);
-
-    for i in 0..d {
-        let mut pi = p0.clone();
-        let span = (upper[i] - lower[i]).abs();
-        let step = if span < 1e6 && span > 1e-4 {
-            0.05 * span
-        } else {
-            0.05 * 1.0f64.max(p0[i].abs())
-        };
-        if pi[i] + step <= upper[i] {
-            pi[i] += step;
-        } else {
-            pi[i] -= step;
-        }
-        pi = clamp_vec(&pi);
-        let score = f(&pi);
-        vertices.push(pi);
-        scores.push(score);
-    }
-
-    for _ in 0..max_iter {
-        // Sort vertices so scores[0] <= scores[1] <= ... <= scores[d]
-        let mut order: Vec<usize> = (0..=d).collect();
-        order.sort_by(|&a, &b| {
-            scores[a]
-                .partial_cmp(&scores[b])
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-
-        let sorted_vertices: Vec<Vec<f64>> =
-            order.iter().map(|&idx| vertices[idx].clone()).collect();
-        let sorted_scores: Vec<f64> = order.iter().map(|&idx| scores[idx]).collect();
-        vertices = sorted_vertices;
-        scores = sorted_scores;
-
-        if (scores[d] - scores[0]).abs() < 1e-9 {
-            break;
-        }
-
-        // Compute centroid of all vertices except the worst (d)
-        let mut c = vec![0.0; d];
-        for i in 0..d {
-            for j in 0..d {
-                c[j] += vertices[i][j];
-            }
-        }
-        for j in 0..d {
-            c[j] /= d as f64;
-        }
-
-        // Reflection
-        let mut xr = vec![0.0; d];
-        for j in 0..d {
-            xr[j] = c[j] + 1.0 * (c[j] - vertices[d][j]);
-        }
-        xr = clamp_vec(&xr);
-        let fr = f(&xr);
-
-        if scores[0] <= fr && fr < scores[d - 1] {
-            vertices[d] = xr;
-            scores[d] = fr;
-            continue;
-        }
-
-        if fr < scores[0] {
-            // Expansion
-            let mut xe = vec![0.0; d];
-            for j in 0..d {
-                xe[j] = c[j] + 2.0 * (xr[j] - c[j]);
-            }
-            xe = clamp_vec(&xe);
-            let fe = f(&xe);
-            if fe < fr {
-                vertices[d] = xe;
-                scores[d] = fe;
-            } else {
-                vertices[d] = xr;
-                scores[d] = fr;
-            }
-            continue;
-        }
-
-        // Contraction
-        if fr < scores[d] {
-            let mut xc = vec![0.0; d];
-            for j in 0..d {
-                xc[j] = c[j] + 0.5 * (xr[j] - c[j]);
-            }
-            xc = clamp_vec(&xc);
-            let fc = f(&xc);
-            if fc <= fr {
-                vertices[d] = xc;
-                scores[d] = fc;
-                continue;
-            }
-        } else {
-            let mut xc = vec![0.0; d];
-            for j in 0..d {
-                xc[j] = c[j] - 0.5 * (c[j] - vertices[d][j]);
-            }
-            xc = clamp_vec(&xc);
-            let fc = f(&xc);
-            if fc < scores[d] {
-                vertices[d] = xc;
-                scores[d] = fc;
-                continue;
-            }
-        }
-
-        // Shrink
-        for i in 1..=d {
-            for j in 0..d {
-                vertices[i][j] = vertices[0][j] + 0.5 * (vertices[i][j] - vertices[0][j]);
-            }
-            vertices[i] = clamp_vec(&vertices[i]);
-            scores[i] = f(&vertices[i]);
-        }
-    }
-
-    let mut best_idx = 0;
-    for i in 1..=d {
-        if scores[i] < scores[best_idx] {
-            best_idx = i;
-        }
-    }
-    (vertices[best_idx].clone(), scores[best_idx])
-}
 
 /// Gaussian elimination with partial pivoting: M * x = b
 fn solve_linear(mat: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {

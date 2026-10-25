@@ -16,6 +16,7 @@ pub mod diff;
 pub mod evaluator;
 pub mod ledger;
 pub mod lexer;
+pub mod optimize;
 pub mod parser;
 pub mod solver;
 pub mod units;
