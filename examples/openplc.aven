@@ -1,6 +1,14 @@
 // examples/openplc.aven — OpenPLC industrial process telemetry & relational verification
 // Milestone v0.6.0: First-Class External Relations connected to OpenPLC Adapter
 
+// Adapter telemetry this model records. An adapter's fields only enter the model when the
+// model uses them: in an equation or constraint, or declared here as a signal.
+signal power_w
+signal temp_c
+signal throughput_pph
+signal quality_pct
+signal network_load_pct
+
 relation ManufacturingLine using external("python", "evaluations/tests/PLC-test/openplc_adapter.py") {
 }
 

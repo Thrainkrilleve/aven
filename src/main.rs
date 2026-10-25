@@ -763,7 +763,29 @@ fn execute_module(
                     .map(|d| d.as_millis() as u64)
                     .unwrap_or(0);
 
-                for (k, v) in res.values {
+                // Only variables the model uses become facts; other numeric fields an adapter
+                // reports (e.g. its own timing) are not part of the model
+                let model_vars = module_variables(module);
+                let mut ignored: Vec<&String> = res
+                    .values
+                    .keys()
+                    .filter(|k| !model_vars.contains(*k))
+                    .collect();
+                ignored.sort();
+                if verbose && !ignored.is_empty() {
+                    println!(
+                        "  [{}] ignored adapter fields not used by the model: {}",
+                        backend_type,
+                        ignored.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                    );
+                }
+                let mut values: Vec<(String, f64)> = res
+                    .values
+                    .into_iter()
+                    .filter(|(k, _)| model_vars.contains(k))
+                    .collect();
+                values.sort_by(|a, b| a.0.cmp(&b.0));
+                for (k, v) in values {
                     if !env.contains_key(&k) {
                         seq += 1;
                         env.insert(k.clone(), v);
@@ -1500,4 +1522,32 @@ fn eval_forward_blocks(
         }
     }
     Ok(())
+}
+
+/// Every variable a module refers to: declared signals, equation sides, constraints,
+/// objectives and bindings.
+fn module_variables(module: &AvenModule) -> std::collections::HashSet<String> {
+    let mut vars: std::collections::HashSet<String> =
+        module.signals.iter().map(|s| s.name.clone()).collect();
+    for blk in &module.blocks {
+        for eq in &blk.equations {
+            vars.insert(eq.lhs.clone());
+            vars.extend(eq.rhs.vars());
+        }
+        vars.extend(blk.integer_vars.iter().cloned());
+    }
+    for solve in &module.solves {
+        for b in &solve.bindings {
+            vars.insert(b.name.clone());
+        }
+        for c in &solve.constraints {
+            vars.insert(c.lhs.clone());
+            vars.extend(c.rhs.vars());
+        }
+        for o in &solve.objectives {
+            vars.insert(o.target.clone());
+        }
+        vars.extend(solve.integer_vars.iter().cloned());
+    }
+    vars
 }
