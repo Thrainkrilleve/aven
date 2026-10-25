@@ -2,8 +2,7 @@
 
 use avenc::ast::{BackendDecl, BlockKind};
 use avenc::evaluator::{
-    Evaluator, EvaluatorBackend, ExternalEvaluator, Orchestrator,
-    OrchestratorConfig, SolveStatus, VarMap,
+    EvaluatorBackend, ExternalEvaluator, Orchestrator, OrchestratorConfig, SolveStatus, VarMap,
 };
 use avenc::lexer::Lexer;
 use avenc::parser::Parser;
@@ -199,36 +198,18 @@ fn build_orchestrator(backend_choice: &str) -> Orchestrator {
             Orchestrator::from_config(&config, vec![])
         }
         "openplc_v4" => {
-            // Simulated PLC dynamic model based on evaluations/tests/PLC-test/test.st
-            struct OpenPlcEvaluator;
-            impl Evaluator for OpenPlcEvaluator {
-                fn evaluate(&self, inputs: &VarMap) -> Result<avenc::evaluator::EvalResult, avenc::evaluator::EvalError> {
-                    let t_start = Instant::now();
-                    let io_points = inputs.get("io_points").unwrap_or(24.0);
-                    let cpu_load = inputs.get("cpu_load_pct").unwrap_or(35.0);
-                    let power_w = 120.0 + io_points * 2.8;
-                    let scan_ms = (7.5 + (cpu_load * 0.04)).clamp(5.0, 25.0);
-                    let throughput_pph = (140.0 - scan_ms * 2.0).max(0.0);
-                    let quality_pct = (99.8 - scan_ms * 0.05).clamp(90.0, 100.0);
-
-                    let mut out = inputs.values.clone();
-                    out.insert("power_w".to_string(), power_w);
-                    out.insert("scan_ms".to_string(), scan_ms);
-                    out.insert("throughput_pph".to_string(), throughput_pph);
-                    out.insert("quality_pct".to_string(), quality_pct);
-                    out.insert("value".to_string(), throughput_pph);
-
-                    Ok(avenc::evaluator::EvalResult {
-                        values: out,
-                        backend_id: "openplc_v4".to_string(),
-                        solve_time_us: t_start.elapsed().as_secs_f64() * 1_000_000.0,
-                    })
-                }
-                fn name(&self) -> &str {
-                    "openplc_v4"
-                }
+            let adapter_path = repo_root
+                .join("evaluations")
+                .join("tests")
+                .join("PLC-test")
+                .join("openplc_adapter.py");
+            let arg = adapter_path.to_string_lossy().to_string();
+            let mut ext = ExternalEvaluator::new("python", &[arg.as_str()]);
+            ext = ext.with_backend_id("openplc");
+            if let Some(parent) = adapter_path.parent() {
+                ext = ext.with_working_dir(parent);
             }
-            Orchestrator::new(Arc::new(OpenPlcEvaluator))
+            Orchestrator::new(Arc::new(ext))
         }
         _ => {
             // Default: flame_eval external python backend

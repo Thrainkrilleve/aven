@@ -761,3 +761,37 @@ fn test_first_class_external_relation_syntax_and_autobinding() {
     assert_eq!(pt.diagnostics.backend_trace, vec!["flame_eval"]);
     assert!(pt.vars.get("value").is_some());
 }
+
+#[test]
+fn test_openplc_external_adapter_and_stream_varmap() {
+    use avenc::evaluator::{ExternalEvaluator, Orchestrator, SolveStatus, VarMap};
+
+    let script = "evaluations/tests/PLC-test/openplc_adapter.py";
+    let ext = ExternalEvaluator::new("python", &[script]).with_backend_id("openplc");
+    let orchestrator = Orchestrator::new(std::sync::Arc::new(ext));
+
+    let mut inputs = VarMap::new();
+    inputs.set("io_points", 30.0);
+    inputs.set("cpu_load_pct", 40.0);
+
+    let res = orchestrator
+        .solve_single(&inputs)
+        .expect("OpenPLC external adapter solve failed");
+    assert!(res.is_feasible);
+    assert_eq!(res.diagnostics.status, SolveStatus::Converged);
+    assert_eq!(res.diagnostics.backend_trace, vec!["openplc"]);
+    assert_eq!(res.diagnostics.residual, 0.0);
+    assert_eq!(res.diagnostics.spec_hash.len(), 16);
+
+    // Verify all industrial variables populated into VarMap
+    let vars = &res.vars;
+    assert!(vars.get("scan_ms").is_some());
+    assert!(vars.get("power_w").is_some());
+    assert!(vars.get("temp_c").is_some());
+    assert!(vars.get("throughput_pph").is_some());
+    assert!(vars.get("quality_pct").is_some());
+    assert!(vars.get("alarm_count").is_some());
+    assert_eq!(vars.get("io_points"), Some(30.0));
+    assert_eq!(vars.get("cpu_load_pct"), Some(40.0));
+    assert_eq!(vars.get("power_w"), Some(120.0 + 30.0 * 2.8)); // 204.0 W
+}

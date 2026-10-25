@@ -1,0 +1,10 @@
+// examples/openplc.aven — OpenPLC industrial process telemetry & relational verification
+// Milestone v0.6.0: First-Class External Relations connected to OpenPLC Adapter
+
+relation ManufacturingLine using external("python", "evaluations/tests/PLC-test/openplc_adapter.py") {
+}
+
+solve ManufacturingLine with {
+    io_points = 28.0
+    cpu_load_pct = 35.0
+}

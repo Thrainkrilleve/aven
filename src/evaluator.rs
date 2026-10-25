@@ -367,14 +367,22 @@ impl Evaluator for ExternalEvaluator {
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let val = parse_json_float(&stdout, "value").ok_or_else(|| {
-            EvalError::MalformedOutput(format!("Missing 'value' in stdout: {}", stdout))
-        })?;
+        let parsed_numbers = parse_json_object_numbers(&stdout);
+        if parsed_numbers.is_empty() {
+            return Err(EvalError::MalformedOutput(format!(
+                "No numeric outputs found in stdout: {}",
+                stdout
+            )));
+        }
         let backend_id =
             parse_json_string(&stdout, "backend_id").unwrap_or_else(|| self.backend_id.clone());
 
         let mut out_values = inputs.values.clone();
-        out_values.insert("value".to_string(), val);
+        out_values.extend(parsed_numbers);
+        if !out_values.contains_key("value") {
+            let first_val = out_values.values().next().copied().unwrap_or(0.0);
+            out_values.insert("value".to_string(), first_val);
+        }
 
         Ok(EvalResult {
             values: out_values,
@@ -386,6 +394,66 @@ impl Evaluator for ExternalEvaluator {
     fn name(&self) -> &str {
         &self.backend_id
     }
+}
+
+/// Extracts all numeric key-value pairs from a flat JSON object string.
+pub fn parse_json_object_numbers(json: &str) -> HashMap<String, f64> {
+    let mut map = HashMap::new();
+    let bytes = json.as_bytes();
+    let len = bytes.len();
+    let mut idx = 0;
+
+    while idx < len {
+        if bytes[idx] == b'"' {
+            let key_start = idx + 1;
+            idx += 1;
+            while idx < len && bytes[idx] != b'"' {
+                if bytes[idx] == b'\\' && idx + 1 < len {
+                    idx += 2;
+                } else {
+                    idx += 1;
+                }
+            }
+            if idx >= len {
+                break;
+            }
+            let key_end = idx;
+            let key = String::from_utf8_lossy(&bytes[key_start..key_end]).to_string();
+            idx += 1; // skip closing quote
+
+            while idx < len && bytes[idx].is_ascii_whitespace() {
+                idx += 1;
+            }
+            if idx < len && bytes[idx] == b':' {
+                idx += 1; // skip ':'
+                while idx < len && bytes[idx].is_ascii_whitespace() {
+                    idx += 1;
+                }
+                if idx < len
+                    && (bytes[idx].is_ascii_digit() || bytes[idx] == b'-' || bytes[idx] == b'+')
+                {
+                    let num_start = idx;
+                    while idx < len
+                        && (bytes[idx].is_ascii_digit()
+                            || bytes[idx] == b'.'
+                            || bytes[idx] == b'e'
+                            || bytes[idx] == b'E'
+                            || bytes[idx] == b'-'
+                            || bytes[idx] == b'+')
+                    {
+                        idx += 1;
+                    }
+                    let num_str = String::from_utf8_lossy(&bytes[num_start..idx]);
+                    if let Ok(num) = num_str.trim().parse::<f64>() {
+                        map.insert(key, num);
+                    }
+                }
+            }
+        } else {
+            idx += 1;
+        }
+    }
+    map
 }
 
 pub fn parse_json_float(json: &str, key: &str) -> Option<f64> {

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-import json, time, random, math
+import json, time, random, math, os
+
+cache_dir = os.path.dirname(os.path.abspath(__file__))
+cache_path = os.path.join(cache_dir, "latest_plc.json")
 
 t0 = time.time()
 while True:
@@ -17,4 +20,11 @@ while True:
         "ts": time.time()
     }
     print(json.dumps(data), flush=True)
+    try:
+        tmp_path = cache_path + ".tmp"
+        with open(tmp_path, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp_path, cache_path)
+    except Exception:
+        pass
     time.sleep(1.0)
