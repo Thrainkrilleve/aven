@@ -539,6 +539,42 @@
       z-index: 100;
       white-space: pre-line;
     }
+
+    /* Why Tree & HPA Badges */
+    .badge-stale {
+      background: rgba(239, 68, 68, 0.2);
+      color: #f87171;
+      border: 1px solid #ef4444;
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-weight: 700;
+      font-size: 10px;
+    }
+    .badge-fresh {
+      background: rgba(16, 185, 129, 0.2);
+      color: #34d399;
+      border: 1px solid #10b981;
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-weight: 700;
+      font-size: 10px;
+    }
+    .badge-hold {
+      background: rgba(239, 68, 68, 0.3);
+      color: #f87171;
+      border: 1px solid #ef4444;
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-weight: 800;
+      font-size: 11px;
+      animation: banner-flash 1s infinite;
+    }
+    .supervisor-banner.blocked {
+      background: rgba(239, 68, 68, 0.2);
+      border: 1px solid #ef4444;
+      color: #fca5a5;
+      animation: banner-flash 1.2s infinite;
+    }
   </style>
 </head>
 <body>
@@ -564,6 +600,7 @@
           <select id="example-select" onchange="loadSelectedExample()" style="font-size:11px;">
             <option value="flame">FlameTest (External Hostile)</option>
             <option value="openplc">OpenPLC Manufacturing Line</option>
+            <option value="k8s_hpa">Kubernetes HPA Auto-Scaler</option>
             <option value="server_capacity">Server Capacity (RHEL Little's Law)</option>
             <option value="pendulum">Pendulum Dynamics (Native)</option>
           </select>
@@ -623,6 +660,17 @@ solve FlameTest with {
               <button class="secondary small" onclick="runBackendTest('openplc_v4')">Test</button>
             </div>
           </div>
+          <div class="backend-card">
+            <div class="backend-top">
+              <span class="backend-name">Kubernetes HPA</span>
+              <span class="backend-type-pill">Cloud Infrastructure</span>
+            </div>
+            <div class="backend-desc">Little's Law capacity sizing with strict freshness enforcement.</div>
+            <div class="backend-footer">
+              <span class="status-badge status-ready">● Ready</span>
+              <button class="secondary small" onclick="runBackendTest('k8s_capacity')">Test</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -633,7 +681,9 @@ solve FlameTest with {
       <div class="toolbar">
         <button onclick="handleSolve()">▶ Solve Point</button>
         <button class="secondary" onclick="handlePareto()">📈 Compute Pareto</button>
-        <button class="secondary" onclick="switchTab('industrial-tab'); toggleLiveStream();" id="btn-quick-stream">⚡ Live Stream Monitor</button>
+        <button class="secondary" onclick="switchTab('industrial-tab'); toggleLiveStream();" id="btn-quick-stream">⚡ Live Stream</button>
+        <button class="secondary" onclick="switchTab('why-tab'); runExplainWhy();">🔍 Causal Why</button>
+        <button class="secondary" onclick="switchTab('k8s-tab'); runK8sHpaSolve();">☸ K8s Capacity</button>
 
         <div style="height:20px; width:1px; background:var(--border); margin:0 4px;"></div>
 
@@ -643,6 +693,7 @@ solve FlameTest with {
             <option value="flame_eval">FlameTest (External)</option>
             <option value="native_analytic">Native Continuous</option>
             <option value="openplc_v4">OpenPLC Runtime</option>
+            <option value="k8s_capacity">Kubernetes HPA</option>
           </select>
         </div>
 
@@ -667,6 +718,8 @@ solve FlameTest with {
         <button class="tab-btn active" onclick="switchTab('pareto-tab')">Pareto Frontier & Knee</button>
         <button class="tab-btn" onclick="switchTab('diagnostics-tab')">Solve Point Diagnostics</button>
         <button class="tab-btn" onclick="switchTab('industrial-tab')">OpenPLC Stream Supervisor</button>
+        <button class="tab-btn" onclick="switchTab('why-tab')">Causal Provenance ('Why' Tree)</button>
+        <button class="tab-btn" onclick="switchTab('k8s-tab')">Kubernetes HPA Monitor</button>
       </div>
 
       <!-- Main Workspace Panels -->
@@ -891,6 +944,175 @@ solve FlameTest with {
             </table>
           </div>
         </div>
+
+        <!-- Causal Provenance ('Why' Tree) Tab -->
+        <div id="why-tab" class="tab-pane">
+          <!-- Control Bar -->
+          <div style="display:flex; justify-content:space-between; align-items:center; background:#0c1220; padding:12px 16px; border-radius:8px; border:1px solid var(--border); flex-wrap:wrap; gap:10px;">
+            <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+              <div class="control-group">
+                <label>Target Variable:</label>
+                <input type="text" id="why-var-input" value="target_pods" style="width:140px; font-family:monospace; font-weight:600;" placeholder="variable name">
+              </div>
+              <div class="control-group">
+                <label>Max Depth Limit:</label>
+                <input type="number" id="why-depth-input" value="20" min="0" max="100" style="width:60px;" title="0 for unlimited, default 20 to prevent unbounded DAG traversals">
+              </div>
+              <button onclick="runExplainWhy()" style="background:#38bdf8; color:#05080f; font-weight:700;">🔍 Trace Derivation Lineage</button>
+            </div>
+            <div style="display:flex; gap:6px;">
+              <button class="secondary small" onclick="quickWhyVar('target_pods')">target_pods</button>
+              <button class="secondary small" onclick="quickWhyVar('allocated_workers')">allocated_workers</button>
+              <button class="secondary small" onclick="quickWhyVar('raw_workers')">raw_workers</button>
+              <button class="secondary small" onclick="quickWhyVar('value')">value</button>
+            </div>
+          </div>
+
+          <!-- Derivation Metadata Strip -->
+          <div class="diag-grid">
+            <div class="diag-card">
+              <span class="diag-card-title">Queried Variable</span>
+              <span class="diag-card-val" id="why-card-var" style="color:var(--accent);">target_pods</span>
+            </div>
+            <div class="diag-card">
+              <span class="diag-card-title">Freshness Status</span>
+              <span class="diag-card-val" id="why-card-freshness" style="color:var(--success); font-size:14px;">● Fresh (Verified)</span>
+            </div>
+            <div class="diag-card">
+              <span class="diag-card-title">DAG Depth Setting</span>
+              <span class="diag-card-val" id="why-card-depth" style="font-size:14px;">20 (Guarded)</span>
+            </div>
+            <div class="diag-card">
+              <span class="diag-card-title">Root Cause Inputs</span>
+              <span class="diag-card-val" id="why-card-roots" style="font-size:13px; color:#cbd5e1;">reqs_per_second, avg_latency_ms</span>
+            </div>
+          </div>
+
+          <!-- Causal Tree Box -->
+          <div class="chart-container" style="flex:1;">
+            <div class="chart-header">
+              <div style="font-weight:600; color:#fff; font-size:13px;">Causal Derivation Tree & Invariant Proof</div>
+              <div style="display:flex; gap:8px;">
+                <button class="secondary small" onclick="copyWhyTree()">📋 Copy Lineage</button>
+              </div>
+            </div>
+            <pre id="why-tree-display" style="background:#050811; border:1px solid #1a243a; border-radius:6px; padding:16px; font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:12px; line-height:1.6; color:#e2e8f0; overflow-x:auto; min-height:220px; white-space:pre;">
+Click "Trace Derivation Lineage" to construct the causal provenance DAG from the Fact Ledger.
+            </pre>
+          </div>
+        </div>
+
+        <!-- Kubernetes HPA Monitor Tab -->
+        <div id="k8s-tab" class="tab-pane">
+          <!-- Live Telemetry Simulator & Injection Controls -->
+          <div style="display:flex; justify-content:space-between; align-items:center; background:#0c1220; padding:12px 16px; border-radius:8px; border:1px solid var(--border); flex-wrap:wrap; gap:12px;">
+            <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+              <div class="control-group">
+                <label>Request Rate (λ):</label>
+                <input type="range" id="k8s-rps-slider" min="5000" max="100000" step="5000" value="45000" oninput="updateK8sSliders()" style="width:110px;">
+                <span id="k8s-rps-label" style="font-family:monospace; color:var(--accent); min-width:75px;">45,000 /s</span>
+              </div>
+              <div class="control-group">
+                <label>Latency (W):</label>
+                <input type="range" id="k8s-lat-slider" min="5" max="80" step="1" value="22" oninput="updateK8sSliders()" style="width:80px;">
+                <span id="k8s-lat-label" style="font-family:monospace; color:var(--accent); min-width:45px;">22 ms</span>
+              </div>
+              <div class="control-group">
+                <label>Target Util:</label>
+                <span style="font-family:monospace; color:#cbd5e1;">70% (30% surge headroom)</span>
+              </div>
+              <div class="control-group">
+                <label>Current Pods:</label>
+                <input type="number" id="k8s-curr-pods" value="3" min="1" max="50" style="width:50px;" onchange="runK8sHpaSolve()">
+              </div>
+            </div>
+
+            <div style="display:flex; align-items:center; gap:10px;">
+              <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-weight:600; color:var(--warning);">
+                <input type="checkbox" id="k8s-stale-inject" onchange="runK8sHpaSolve()">
+                <span>⚠️ Inject Stale Telemetry (TTL=0)</span>
+              </label>
+              <button onclick="runK8sHpaSolve()" style="background:#10b981; color:#05140b; font-weight:700;">⚡ Evaluate Sizing Step</button>
+            </div>
+          </div>
+
+          <!-- Dynamic Decision & Freshness Banner -->
+          <div id="k8s-decision-banner" class="supervisor-banner converged">
+            <span id="k8s-banner-text">● Ready: Kubernetes Little's Law autoscaling pipeline idle.</span>
+            <span id="k8s-banner-badge" style="padding:2px 8px; border-radius:12px; font-size:11px; font-weight:700; background:rgba(16,185,129,0.2);">ACTIONABLE</span>
+          </div>
+
+          <!-- Scaler KPIs -->
+          <div class="diag-grid">
+            <div class="diag-card">
+              <span class="diag-card-title">Recommended Action</span>
+              <span class="diag-card-val" id="k8s-kpi-action" style="color:var(--accent);">SCALE_UP</span>
+            </div>
+            <div class="diag-card">
+              <span class="diag-card-title">Target Pods</span>
+              <span class="diag-card-val" id="k8s-kpi-target" style="color:#fff;">15 <span style="font-size:12px; color:var(--muted);">(curr: 3)</span></span>
+            </div>
+            <div class="diag-card">
+              <span class="diag-card-title">Allocated Workers</span>
+              <span class="diag-card-val" id="k8s-kpi-workers" style="color:var(--accent);">1,415</span>
+              <span style="font-size:10px; color:var(--muted);">raw: 990 concurrency</span>
+            </div>
+            <div class="diag-card">
+              <span class="diag-card-title">Solver Latency</span>
+              <span class="diag-card-val" id="k8s-kpi-time" style="color:var(--success);">38.6 µs</span>
+              <span style="font-size:10px; color:var(--muted);">Sub-millisecond loop</span>
+            </div>
+          </div>
+
+          <!-- Capacity Law Formula & Audit Log -->
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; flex:1;">
+            <div class="chart-container" style="margin:0;">
+              <div class="chart-header">
+                <div style="font-weight:600; color:#fff; font-size:13px;">Little's Law Sizing Mechanics</div>
+              </div>
+              <div style="background:#050811; border:1px solid #1a243a; border-radius:6px; padding:14px; font-size:12px; color:#cbd5e1; line-height:1.6;">
+                <div style="color:var(--accent); font-weight:700; margin-bottom:4px;">1. Little's Law Concurrency:</div>
+                <div style="font-family:monospace; background:rgba(255,255,255,0.03); padding:4px 8px; border-radius:4px; margin-bottom:8px;">
+                  L = (λ × W) / 1000 = (<span id="calc-rps">45000</span> × <span id="calc-lat">22</span>ms) / 1000 = <b id="calc-raw" style="color:#fff;">990.0</b> workers
+                </div>
+                <div style="color:var(--accent); font-weight:700; margin-bottom:4px;">2. Surge Headroom Allocation:</div>
+                <div style="font-family:monospace; background:rgba(255,255,255,0.03); padding:4px 8px; border-radius:4px; margin-bottom:8px;">
+                  Allocated = ceil(L / 0.70) = <b id="calc-alloc" style="color:#fff;">1415</b> workers (30% buffer)
+                </div>
+                <div style="color:var(--accent); font-weight:700; margin-bottom:4px;">3. Discrete Pod Packing:</div>
+                <div style="font-family:monospace; background:rgba(255,255,255,0.03); padding:4px 8px; border-radius:4px;">
+                  Target Pods = ceil(1415 / 100) = <b id="calc-target" style="color:var(--success);">15 pods</b>
+                </div>
+              </div>
+            </div>
+
+            <!-- Rolling Audit Log Table -->
+            <div class="chart-container" style="margin:0;">
+              <div class="chart-header">
+                <div style="font-weight:600; color:#fff; font-size:13px;">Audit & Safety Ledger</div>
+                <button class="secondary small" onclick="clearK8sHistory()">Clear</button>
+              </div>
+              <div style="overflow-y:auto; max-height:200px;">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>Action</th>
+                      <th>RPS</th>
+                      <th>Target</th>
+                      <th>Freshness</th>
+                    </tr>
+                  </thead>
+                  <tbody id="k8s-history-body">
+                    <tr>
+                      <td colspan="5" style="color:var(--muted); text-align:center;">No autoscaling evaluations recorded yet.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Bottom Diagnostics Bar -->
@@ -940,14 +1162,70 @@ solve FlameTest with {
         return [
           { id: "flame_eval", name: "FlameTest", description: "Hostile evaluator", kind: "External", status: "Ready", endpoint: "python" },
           { id: "native_analytic", name: "Native Continuous", description: "Analytical solver", kind: "Pure Rust", status: "Ready", endpoint: "avenc" },
-          { id: "openplc_v4", name: "OpenPLC Runtime", description: "Industrial runtime", kind: "Industrial", status: "Online (Port 502)", endpoint: "127.0.0.1:502" }
+          { id: "openplc_v4", name: "OpenPLC Runtime", description: "Industrial runtime", kind: "Industrial", status: "Online (Port 502)", endpoint: "127.0.0.1:502" },
+          { id: "k8s_capacity", name: "Kubernetes HPA Controller", description: "Autonomous Little's Law autoscaling", kind: "Cloud Infrastructure", status: "Ready", endpoint: "k8s/controller/hpa_scaling.aven" }
         ];
       }
       if (cmd === "validate_model") {
         return { success: true, detected_backend: "Native", message: "Model validated successfully." };
       }
       if (cmd === "test_backend") {
+        if (args.backend_id === "k8s_capacity") {
+          return { backend_id: "k8s_capacity", success: true, latency_ms: 12.8, status_message: "Kubernetes Capacity Controller ready. Little's Law 30% surge headroom ceiling active." };
+        }
         return { backend_id: args.backend_id, success: true, latency_ms: 32.4, status_message: "Backend reachable and responsive." };
+      }
+      if (cmd === "explain_why") {
+        const v = args.variable || "target_pods";
+        const isStale = !!(args.source && args.source.includes("stale"));
+        return {
+          variable: v,
+          derivation_tree: `#1@t0 input:reqs_per_second=45000.0000\n  #2@t0 input:avg_latency_ms=22.0000\n  #3@t0 derived:raw_workers=990.0000 (= (reqs_per_second * avg_latency_ms) / 1000.0)\n    #4@t0 input:target_utilization=0.7000\n    #5@t0 derived:allocated_workers=1415.0000 (= ceil(raw_workers / target_utilization))\n      #6@t0 input:workers_per_pod=100.0000\n      #7@t0 derived:${v}=15.0000 (= ceil(allocated_workers / workers_per_pod))`,
+          max_depth: args.depth || 20,
+          is_stale: isStale,
+          warnings: isStale ? ["Telemetry TTL=0 expired for external fact 'reqs_per_second'"] : [],
+          root_causes: ["reqs_per_second", "avg_latency_ms", "target_utilization", "workers_per_pod"]
+        };
+      }
+      if (cmd === "solve_k8s_hpa") {
+        const reqs = args.reqs_per_second || 45000.0;
+        const lat = args.avg_latency_ms || 22.0;
+        const curr = args.current_pods || 3;
+        const stale = args.inject_stale || false;
+        const raw = (reqs * lat) / 1000.0;
+        const alloc = Math.ceil(raw / 0.70);
+        const target = Math.ceil(alloc / 100.0);
+        if (stale) {
+          return {
+            is_actionable: false,
+            decision_blocked: true,
+            stale_facts: ["reqs_per_second", "raw_workers", "allocated_workers", "target_pods"],
+            reqs_per_second: reqs,
+            avg_latency_ms: lat,
+            raw_workers: raw,
+            allocated_workers: alloc,
+            target_pods: curr,
+            current_pods: curr,
+            solve_time_us: 42.1,
+            status_message: "❌ DECISION BLOCKED: Freshness Enforcement Failure (TTL=0 expired). Automated scaling locked to protect cluster.",
+            action: "HOLD_REPLICAS"
+          };
+        }
+        const action = target > curr ? "SCALE_UP" : (target < curr ? "SCALE_DOWN" : "NO_CHANGE");
+        return {
+          is_actionable: true,
+          decision_blocked: false,
+          stale_facts: [],
+          reqs_per_second: reqs,
+          avg_latency_ms: lat,
+          raw_workers: raw,
+          allocated_workers: alloc,
+          target_pods: target,
+          current_pods: curr,
+          solve_time_us: 38.6,
+          status_message: `Actionable: Sized ${target} pods with Little's Law 30% surge headroom ceiling in 38.6 µs.`,
+          action: action
+        };
       }
       if (cmd === "solve_point") {
         const x = args.x || 0.5, y = args.y || -0.2;
@@ -1079,6 +1357,20 @@ solve ServerCapacity with {
     avg_payload_kb = 64.0
 }
 `,
+      k8s_hpa: `// Aven Kubernetes Capacity Model — Little's Law with 30% Headroom
+relation K8sCapacity using external("python", "k8s/controller/workload_adapter.py") {
+    raw_workers = (reqs_per_second * avg_latency_ms) / 1000.0
+    allocated_workers = raw_workers / target_utilization
+    target_pods = ceil(allocated_workers / pod_capacity_workers)
+}
+
+solve K8sCapacity with {
+    reqs_per_second = 45000.0
+    avg_latency_ms = 22.0
+    target_utilization = 0.70
+    pod_capacity_workers = 100.0
+}
+`,
       pendulum: `// Aven Mechanical Model — Non-linear Pendulum
 relation PendulumDynamics {
     omega = sqrt(9.81 / length)
@@ -1103,6 +1395,8 @@ solve PendulumDynamics with {
         validateCurrentModel();
         if (key === "openplc") {
           document.getElementById("backend-select").value = "openplc_v4";
+        } else if (key === "k8s_hpa") {
+          document.getElementById("backend-select").value = "k8s_capacity";
         } else if (key === "server_capacity" || key === "pendulum") {
           document.getElementById("backend-select").value = "native_analytic";
         } else {
@@ -1120,6 +1414,8 @@ solve PendulumDynamics with {
         if (tabId === "pareto-tab") return b.textContent.includes("Pareto");
         if (tabId === "diagnostics-tab") return b.textContent.includes("Diagnostics");
         if (tabId === "industrial-tab") return b.textContent.includes("OpenPLC");
+        if (tabId === "why-tab") return b.textContent.includes("Why");
+        if (tabId === "k8s-tab") return b.textContent.includes("Kubernetes");
         return false;
       });
       if (btn) btn.classList.add("active");
@@ -1622,6 +1918,187 @@ solve PendulumDynamics with {
       });
     }
 
+    // -----------------------------------------------------------------------
+    // Causal Provenance ('Why' Tree) Supervisor
+    // -----------------------------------------------------------------------
+    async function runExplainWhy() {
+      const varName = document.getElementById("why-var-input").value.trim() || "target_pods";
+      const depthVal = parseInt(document.getElementById("why-depth-input").value, 10);
+      const depth = (!isNaN(depthVal) && depthVal > 0) ? depthVal : null;
+      const modelSource = document.getElementById("model-code").value;
+
+      document.getElementById("why-card-var").textContent = varName;
+      document.getElementById("why-tree-display").textContent = "Analyzing Fact Ledger causal DAG...";
+
+      try {
+        const res = await callBackend("explain_why", {
+          variable: varName,
+          depth: depth,
+          source: modelSource
+        });
+
+        if (res) {
+          document.getElementById("why-tree-display").textContent = res.derivation_tree || `No derivation lineage found for ${varName}`;
+          
+          const freshEl = document.getElementById("why-card-freshness");
+          if (res.is_stale) {
+            freshEl.textContent = "❌ STALE (TTL Expired)";
+            freshEl.style.color = "var(--danger)";
+          } else {
+            freshEl.textContent = "● Fresh (Verified)";
+            freshEl.style.color = "var(--success)";
+          }
+
+          document.getElementById("why-card-depth").textContent = res.max_depth ? `${res.max_depth} (Guarded)` : "Unlimited";
+          document.getElementById("why-card-roots").textContent = (res.root_causes && res.root_causes.length) 
+            ? res.root_causes.join(", ") 
+            : "—";
+        }
+      } catch (err) {
+        document.getElementById("why-tree-display").textContent = `Error querying causal provenance: ${err}`;
+      }
+    }
+
+    function quickWhyVar(name) {
+      document.getElementById("why-var-input").value = name;
+      runExplainWhy();
+    }
+
+    function copyWhyTree() {
+      const txt = document.getElementById("why-tree-display").textContent;
+      navigator.clipboard.writeText(txt).then(() => {
+        const btn = event.target;
+        const prev = btn.textContent;
+        btn.textContent = "✓ Copied!";
+        setTimeout(() => { btn.textContent = prev; }, 1500);
+      }).catch(err => {
+        alert("Copy failed: " + err);
+      });
+    }
+
+    // -----------------------------------------------------------------------
+    // Kubernetes Autonomous HPA Monitor
+    // -----------------------------------------------------------------------
+    const k8sHistory = [];
+
+    function updateK8sSliders() {
+      const rps = parseFloat(document.getElementById("k8s-rps-slider").value) || 45000;
+      const lat = parseFloat(document.getElementById("k8s-lat-slider").value) || 22;
+      document.getElementById("k8s-rps-label").textContent = (+rps).toLocaleString() + " /s";
+      document.getElementById("k8s-lat-label").textContent = lat + " ms";
+      runK8sHpaSolve();
+    }
+
+    async function runK8sHpaSolve() {
+      const rps = parseFloat(document.getElementById("k8s-rps-slider").value) || 45000;
+      const lat = parseFloat(document.getElementById("k8s-lat-slider").value) || 22;
+      const curr = parseInt(document.getElementById("k8s-curr-pods").value, 10) || 3;
+      const stale = document.getElementById("k8s-stale-inject").checked;
+
+      // Update math formulas live
+      document.getElementById("calc-rps").textContent = rps;
+      document.getElementById("calc-lat").textContent = lat;
+      const raw = (rps * lat) / 1000.0;
+      const alloc = Math.ceil(raw / 0.70);
+      const target = Math.ceil(alloc / 100.0);
+      document.getElementById("calc-raw").textContent = raw.toFixed(1);
+      document.getElementById("calc-alloc").textContent = alloc.toString();
+      document.getElementById("calc-target").textContent = target + " pods";
+
+      try {
+        const res = await callBackend("solve_k8s_hpa", {
+          reqs_per_second: rps,
+          avg_latency_ms: lat,
+          current_pods: curr,
+          inject_stale: stale
+        });
+
+        if (res) {
+          updateK8sDisplay(res);
+        }
+      } catch (err) {
+        console.error("HPA solve error:", err);
+      }
+    }
+
+    function updateK8sDisplay(res) {
+      const banner = document.getElementById("k8s-decision-banner");
+      const bannerText = document.getElementById("k8s-banner-text");
+      const bannerBadge = document.getElementById("k8s-banner-badge");
+      const actionKpi = document.getElementById("k8s-kpi-action");
+
+      if (res.decision_blocked) {
+        banner.className = "supervisor-banner blocked";
+        bannerText.textContent = res.status_message;
+        bannerBadge.textContent = "HOLD_REPLICAS";
+        bannerBadge.style.background = "rgba(239, 68, 68, 0.3)";
+        bannerBadge.style.color = "#f87171";
+
+        actionKpi.textContent = "HOLD_REPLICAS";
+        actionKpi.style.color = "var(--danger)";
+      } else {
+        banner.className = "supervisor-banner converged";
+        bannerText.textContent = res.status_message;
+        bannerBadge.textContent = "ACTIONABLE";
+        bannerBadge.style.background = "rgba(16, 185, 129, 0.2)";
+        bannerBadge.style.color = "#34d399";
+
+        actionKpi.textContent = res.action;
+        if (res.action === "SCALE_UP") {
+          actionKpi.style.color = "var(--accent)";
+        } else if (res.action === "SCALE_DOWN") {
+          actionKpi.style.color = "var(--warning)";
+        } else {
+          actionKpi.style.color = "#94a3b8";
+        }
+      }
+
+      document.getElementById("k8s-kpi-target").innerHTML = `${res.target_pods} <span style="font-size:12px; color:var(--muted);">(curr: ${res.current_pods})</span>`;
+      document.getElementById("k8s-kpi-workers").textContent = (+res.allocated_workers).toLocaleString();
+      document.getElementById("k8s-kpi-time").textContent = `${res.solve_time_us.toFixed(1)} µs`;
+
+      // Append to rolling history
+      k8sHistory.unshift({
+        time: new Date().toLocaleTimeString(),
+        action: res.action,
+        rps: res.reqs_per_second,
+        target: res.target_pods,
+        blocked: res.decision_blocked
+      });
+      if (k8sHistory.length > 20) k8sHistory.pop();
+      renderK8sHistory();
+    }
+
+    function renderK8sHistory() {
+      const tbody = document.getElementById("k8s-history-body");
+      if (!tbody) return;
+      tbody.innerHTML = "";
+      k8sHistory.forEach(item => {
+        const row = document.createElement("tr");
+        const actColor = item.blocked ? "var(--danger)" : (item.action === "SCALE_UP" ? "var(--accent)" : "var(--warning)");
+        row.innerHTML = `
+          <td style="color:var(--muted); font-size:11px;">${item.time}</td>
+          <td style="color:${actColor}; font-weight:700;">${item.action}</td>
+          <td class="mono">${(+item.rps).toLocaleString()} /s</td>
+          <td class="mono" style="font-weight:700;">${item.target} pods</td>
+          <td>
+            <span class="${item.blocked ? 'badge-stale' : 'badge-fresh'}">
+              ${item.blocked ? 'TTL=0 BLOCKED' : 'VERIFIED'}
+            </span>
+          </td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+
+    function clearK8sHistory() {
+      k8sHistory.length = 0;
+      const tbody = document.getElementById("k8s-history-body");
+      if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted); text-align:center;">History cleared.</td></tr>';
+      }
+    }
+
     const tooltip = document.getElementById("tooltip");
     function showTooltip(e, text) {
       tooltip.textContent = text;
@@ -1638,6 +2115,7 @@ solve PendulumDynamics with {
       showBridgeBanner();
       refreshBackends();
       validateCurrentModel();
+      runK8sHpaSolve();
     });
   </script>
 </body>
