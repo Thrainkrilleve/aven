@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FlightAtmosphericMeshAdapterOutput",
+  "type": "object",
+  "required": [
+    "baro_altitude_m",
+    "velocity_ms",
+    "vertical_rate_ms",
+    "surface_temp_c",
+    "surface_altim_hpa",
+    "river_discharge_cfs",
+    "gauge_elevation_m",
+    "timestamp_ms",
+    "ttl_ms",
+    "backend_id"
+  ],
+  "properties": {
+    "baro_altitude_m": {
+      "type": "number",
+      "description": "Aircraft barometric altitude in meters"
+    },
+    "velocity_ms": {
+      "type": "number",
+      "description": "Aircraft ground/airspeed in meters per second"
+    },
+    "vertical_rate_ms": {
+      "type": "number",
+      "description": "Aircraft rate of climb/descent in meters per second"
+    },
+    "surface_temp_c": {
+      "type": "number",
+      "description": "Nearest surface air temperature from NOAA METAR in deg C"
+    },
+    "surface_altim_hpa": {
+      "type": "number",
+      "description": "Nearest surface altimeter pressure setting from NOAA METAR in hPa"
+    },
+    "river_discharge_cfs": {
+      "type": "number",
+      "description": "Regional USGS streamflow discharge in cubic feet per second"
+    },
+    "gauge_elevation_m": {
+      "type": "number",
+      "description": "USGS ground gauge station elevation in meters"
+    },
+    "timestamp_ms": {
+      "type": "integer",
+      "description": "Epoch timestamp in milliseconds"
+    },
+    "ttl_ms": {
+      "type": "integer",
+      "description": "Freshness time-to-live in milliseconds"
+    },
+    "backend_id": {
+      "type": "string",
+      "description": "Identifier for the multi-stream provider"
+    }
+  }
+}

@@ -9,6 +9,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
+.cache/
+**/.cache/
 
 # Scratch & temporary testing files
 /scratch/
