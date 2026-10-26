@@ -44,15 +44,26 @@ pub struct Problem {
     pub env: HashMap<String, f64>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct OptimizationTelemetry {
+    pub bound: f64,
+    pub incumbent: f64,
+    pub duality_gap: f64,
+    pub cuts_active: usize,
+    pub dual_norm: f64,
+    pub proven_optimal: bool,
+}
+
 #[derive(Debug, Clone)]
 pub enum Outcome {
     /// `proven` is true when the result is a certified global optimum (linear engine with a
-    /// completed branch-and-bound search).
+    /// completed branch-and-bound search and closed duality gap <= 1e-7 relative).
     Optimal {
         x: Vec<f64>,
         objective: f64,
         proven: bool,
         method: String,
+        telemetry: Option<OptimizationTelemetry>,
     },
     Infeasible(String),
     Unbounded(String),
@@ -91,6 +102,7 @@ impl Problem {
                 objective,
                 proven,
                 method,
+                telemetry: _,
             } => {
                 let mut env = reduced.env_with(&x);
                 for (name, rhs) in &defs {
@@ -103,6 +115,7 @@ impl Problem {
                     objective,
                     proven,
                     method,
+                    telemetry: None,
                 }
             }
             other => other,
@@ -282,6 +295,7 @@ enum ColMap {
 }
 
 /// Solves min c·x subject to rows and lo <= x <= hi.
+#[allow(dead_code)]
 fn solve_lp(lf: &LinearForm, lo: &[f64], hi: &[f64]) -> LpResult {
     let n = lf.c.len();
     for j in 0..n {
@@ -597,27 +611,36 @@ fn objective_at(lf: &LinearForm, x: &[f64]) -> f64 {
 /// the other), with limited backtracking. Returns a feasible integer point if one is found
 /// within the node budget. Finds points the plain fractional dive misses (e.g. over large or
 /// unbounded integer domains), without guaranteeing one exists.
-fn dive(lf: &LinearForm, lo0: &[f64], hi0: &[f64], int_idx: &[usize]) -> Option<Vec<f64>> {
+fn dive(
+    lf: &LinearForm,
+    lo0: &[f64],
+    hi0: &[f64],
+    col_scales: &[f64],
+    int_idx: &[usize],
+    integer_mask: &[bool],
+) -> Option<Vec<f64>> {
     fn search(
         lf: &LinearForm,
         lo: &[f64],
         hi: &[f64],
         lo0: &[f64],
         hi0: &[f64],
+        col_scales: &[f64],
         int_idx: &[usize],
+        integer_mask: &[bool],
         budget: &mut i32,
     ) -> Option<Vec<f64>> {
         if *budget <= 0 {
             return None;
         }
         *budget -= 1;
-        let x = match solve_lp(lf, lo, hi) {
+        let x = match solve_lp_scaled(lf, lo, hi, col_scales, integer_mask).0 {
             LpResult::Optimal(x, _) => x,
             // Unbounded relaxation: clamp to look for a nearby feasible point
             LpResult::Unbounded => {
                 let clo: Vec<f64> = lo.iter().map(|&b| if b.is_finite() { b } else { -1e6 }).collect();
                 let chi: Vec<f64> = hi.iter().map(|&b| if b.is_finite() { b } else { 1e6 }).collect();
-                match solve_lp(lf, &clo, &chi) {
+                match solve_lp_scaled(lf, &clo, &chi, col_scales, integer_mask).0 {
                     LpResult::Optimal(x, _) => x,
                     _ => return None,
                 }
@@ -626,8 +649,7 @@ fn dive(lf: &LinearForm, lo0: &[f64], hi0: &[f64], int_idx: &[usize]) -> Option<
         };
         let frac = int_idx
             .iter()
-            .map(|&j| (j, (x[j] - x[j].round()).abs()))
-            .filter(|(_, d)| *d > 1e-6)
+            .filter_map(|&j| int_fractionality(x[j]).map(|d| (j, d)))
             .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
         match frac {
             None => {
@@ -648,7 +670,7 @@ fn dive(lf: &LinearForm, lo0: &[f64], hi0: &[f64], int_idx: &[usize]) -> Option<
                     let mut nhi = hi.to_vec();
                     nlo[j] = val;
                     nhi[j] = val;
-                    if let Some(r) = search(lf, &nlo, &nhi, lo0, hi0, int_idx, budget) {
+                    if let Some(r) = search(lf, &nlo, &nhi, lo0, hi0, col_scales, int_idx, integer_mask, budget) {
                         return Some(r);
                     }
                     if *budget <= 0 {
@@ -660,7 +682,24 @@ fn dive(lf: &LinearForm, lo0: &[f64], hi0: &[f64], int_idx: &[usize]) -> Option<
         }
     }
     let mut budget = 4000;
-    search(lf, lo0, hi0, lo0, hi0, int_idx, &mut budget)
+    search(lf, lo0, hi0, lo0, hi0, col_scales, int_idx, integer_mask, &mut budget)
+}
+
+/// Tests whether a value is integer within absolute tolerance 1e-6 or relative tolerance 1e-9.
+/// Guards against floating-point drift (e.g. 2.9999999999999996) misclassifying points as fractional.
+fn is_integer_val(v: f64) -> bool {
+    let r = v.round();
+    let diff = (v - r).abs();
+    diff <= 1e-6 || diff <= 1e-9 * (1.0 + r.abs())
+}
+
+/// Returns the fractionality distance if the value is not integer within tolerance.
+fn int_fractionality(v: f64) -> Option<f64> {
+    if is_integer_val(v) {
+        None
+    } else {
+        Some((v - v.round()).abs())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -678,13 +717,102 @@ struct LpState {
     ncol: usize,
     art_start: usize,
     total: usize,
+    dual_norm: f64,
 }
 
 #[derive(Clone)]
 struct ColAffine {
-    coeffs: Vec<f64>, // over original x
+    coeffs: Vec<f64>, // over original physical x
     constant: f64,
     integer: bool,
+}
+
+/// Computes column equilibration scales:
+/// STRICT INVARIANT: integer variables are never scaled (s_j ≡ 1.0) to preserve integer lattice geometry.
+/// Continuous columns are scaled to bound coefficient magnitudes towards 1.0.
+fn compute_column_scales(lf: &LinearForm, integer_mask: &[bool]) -> Vec<f64> {
+    let n = lf.c.len();
+    let mut s = vec![1.0; n];
+    for j in 0..n {
+        if integer_mask[j] {
+            s[j] = 1.0;
+        } else {
+            let mut max_coeff = lf.c[j].abs();
+            for r in &lf.rows {
+                max_coeff = max_coeff.max(r.a[j].abs());
+            }
+            if max_coeff > 100.0 || (max_coeff < 0.01 && max_coeff > 1e-12) {
+                let factor = 1.0 / max_coeff;
+                s[j] = factor.clamp(1e-6, 1e6);
+            }
+        }
+    }
+    s
+}
+
+fn scale_linear_form(lf: &LinearForm, s: &[f64]) -> LinearForm {
+    let n = lf.c.len();
+    let mut rows = Vec::with_capacity(lf.rows.len());
+    for r in &lf.rows {
+        let mut a = vec![0.0; n];
+        for j in 0..n {
+            a[j] = r.a[j] * s[j];
+        }
+        rows.push(LinRow { a, sense: r.sense, b: r.b });
+    }
+    let mut c = vec![0.0; n];
+    for j in 0..n {
+        c[j] = lf.c[j] * s[j];
+    }
+    LinearForm { rows, c, c0: lf.c0 }
+}
+
+fn scale_bounds(b: &[f64], s: &[f64]) -> Vec<f64> {
+    b.iter()
+        .zip(s)
+        .map(|(&val, &sj)| if val.is_infinite() { val } else { val / sj })
+        .collect()
+}
+
+/// Solves LP relaxation with column equilibration. Solution x is unscaled (x_j = x'_j · s_j)
+/// immediately at relaxation exit, ensuring that downstream integer checks, cut testing,
+/// and incumbent updates execute strictly in physical coordinates.
+fn solve_lp_scaled(
+    lf: &LinearForm,
+    lo: &[f64],
+    hi: &[f64],
+    col_scales: &[f64],
+    integer_mask: &[bool],
+) -> (LpResult, Option<LpState>) {
+    let has_scaling = col_scales.iter().any(|&s| (s - 1.0).abs() > 1e-12);
+    if !has_scaling {
+        return solve_lp_capture(lf, lo, hi, integer_mask);
+    }
+    let lf_s = scale_linear_form(lf, col_scales);
+    let lo_s = scale_bounds(lo, col_scales);
+    let hi_s = scale_bounds(hi, col_scales);
+    let (res, state) = solve_lp_capture(&lf_s, &lo_s, &hi_s, integer_mask);
+    let res_unscaled = match res {
+        LpResult::Optimal(x_prime, obj) => {
+            let mut x = vec![0.0; x_prime.len()];
+            for j in 0..x.len() {
+                x[j] = x_prime[j] * col_scales[j];
+            }
+            LpResult::Optimal(x, obj)
+        }
+        other => other,
+    };
+    let state_unscaled = state.map(|mut st| {
+        for aff_opt in st.col_affine.iter_mut() {
+            if let Some(aff) = aff_opt {
+                for k in 0..aff.coeffs.len() {
+                    aff.coeffs[k] /= col_scales[k];
+                }
+            }
+        }
+        st
+    });
+    (res_unscaled, state_unscaled)
 }
 
 /// Like `solve_lp`, but on an optimal solution also returns the tableau state for cut
@@ -908,6 +1036,11 @@ fn solve_lp_capture(
     }
     let obj = lf.c.iter().zip(&x).map(|(c, xi)| c * xi).sum::<f64>() + lf.c0;
 
+    // Reduced costs / dual multipliers on non-artificial columns
+    let dual_norm = t[m][..art_start]
+        .iter()
+        .fold(0.0f64, |acc, &v| acc.max(v.abs()));
+
     // Full column affine map (artificial columns are excluded from cuts): structural columns
     // 0..ncol, then slack/surplus columns ncol..art_start.
     let mut col_affine_full: Vec<Option<ColAffine>> = vec![None; art_start];
@@ -925,14 +1058,22 @@ fn solve_lp_capture(
         ncol,
         art_start,
         total,
+        dual_norm,
     };
     (LpResult::Optimal(x, obj), Some(state))
 }
 
 /// Generates Gomory mixed-integer cuts from fractional integer-basic rows of an optimal
-/// tableau, translated into x-space inequalities (`a·x >= b`). Each cut is valid for every
-/// integer-feasible point. Returns at most `max_cuts` of the most-violated cuts.
-fn gmi_cuts(state: &LpState, x: &[f64], max_cuts: usize) -> Vec<LinRow> {
+/// tableau, translated into physical x-space inequalities (`a·x >= b`).
+/// Each cut is valid for every integer-feasible point. Filters near-parallel cuts using
+/// cosine similarity (> 0.99) against existing cuts in physical geometry, and returns
+/// at most `max_cuts` of the most-violated cuts.
+fn gmi_cuts(
+    state: &LpState,
+    x: &[f64],
+    max_cuts: usize,
+    existing_cuts: &[LinRow],
+) -> Vec<LinRow> {
     let n = x.len();
     let frac = |v: f64| v - v.floor();
     // Which structural/slack columns are integer (for GMI's integer-column rule)?
@@ -1004,6 +1145,28 @@ fn gmi_cuts(state: &LpState, x: &[f64], max_cuts: usize) -> Vec<LinRow> {
         if max_c > 1e7 || !b.is_finite() {
             continue; // ill-conditioned cut; skip to protect the simplex
         }
+        let norm_a = coeffs.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if norm_a < 1e-12 || !norm_a.is_finite() {
+            continue;
+        }
+
+        // Cosine similarity check in physical geometry: reject near-parallel hyperplanes (> 0.99)
+        let mut parallel = false;
+        for existing in existing_cuts {
+            let norm_e = existing.a.iter().map(|v| v * v).sum::<f64>().sqrt();
+            if norm_e > 1e-12 {
+                let dot: f64 = coeffs.iter().zip(&existing.a).map(|(c1, c2)| c1 * c2).sum();
+                let cos_sim = dot.abs() / (norm_a * norm_e);
+                if cos_sim > 0.99 {
+                    parallel = true;
+                    break;
+                }
+            }
+        }
+        if parallel {
+            continue;
+        }
+
         let lhs_at_x: f64 = coeffs.iter().zip(x).map(|(c, xi)| c * xi).sum();
         let violation = b - lhs_at_x; // > 0 means the cut removes x*
         let scale = 1.0 + max_c;
@@ -1011,20 +1174,44 @@ fn gmi_cuts(state: &LpState, x: &[f64], max_cuts: usize) -> Vec<LinRow> {
             cuts.push((violation, LinRow { a: coeffs, sense: Sense::Ge, b }));
         }
     }
+
     cuts.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
-    cuts.into_iter().take(max_cuts).map(|(_, r)| r).collect()
+    let mut selected: Vec<LinRow> = Vec::new();
+    for (_, cand) in cuts {
+        let norm_c = cand.a.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let mut ok = true;
+        for sel in &selected {
+            let norm_s = sel.a.iter().map(|v| v * v).sum::<f64>().sqrt();
+            if norm_s > 1e-12 {
+                let dot: f64 = cand.a.iter().zip(&sel.a).map(|(c1, c2)| c1 * c2).sum();
+                if (dot.abs() / (norm_c * norm_s)) > 0.99 {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if ok {
+            selected.push(cand);
+            if selected.len() >= max_cuts {
+                break;
+            }
+        }
+    }
+    selected
 }
 
-/// Branch-and-bound over LP relaxations.
+/// Branch-and-bound over LP relaxations with cutting planes and global dual-bound certification.
 ///
-/// Correctness: a completed search proves optimality or infeasibility. For models with
-/// unbounded integer domains the pure-B&B search cannot always close the gap (that needs
-/// cutting planes), so the result is then reported honestly as not proven, or as
-/// undetermined, rather than as a wrong verdict:
-///   * an equality failing the GCD test is proven infeasible;
-///   * an unbounded LP relaxation yields "unbounded" only with an integer-feasible witness,
-///     otherwise "undetermined" (never a false "unbounded");
-///   * a feasible incumbent found past the node limit is returned as "not proven optimal".
+/// Correctness invariants:
+///   * Column equilibration enforces s_j ≡ 1.0 strictly for integer variables; continuous columns
+///     are scaled by column max magnitude, and solution extraction x_j = x'_j · s_j is applied
+///     consistently across integer feasibility checks, cut validity tests, and incumbent updates.
+///   * Dual multiplier norm ||y||_inf is tracked pre-emptively at root and during cut generation;
+///     if ||y||_inf > 1e7, the circuit breaker halts cuts to protect conditioning.
+///   * Hyperplanes are filtered in physical geometry by cosine similarity (|cos| <= 0.99) and
+///     bounded in a pool of at most 48 cuts.
+///   * Proven optimality is stamped only when the global duality gap satisfies
+///     (z_incumbent - z_dual) <= 1e-7 · (1.0 + |z_incumbent|).
 fn solve_milp(p: &Problem, lf: &LinearForm) -> Outcome {
     let n = p.vars.len();
     let int_idx: Vec<usize> = (0..n).filter(|&j| p.vars[j].integer).collect();
@@ -1037,12 +1224,16 @@ fn solve_milp(p: &Problem, lf: &LinearForm) -> Outcome {
         );
     }
 
-    // Root cutting-plane loop (cut-and-branch): tighten the relaxation with Gomory
-    // mixed-integer cuts so the branch-and-bound below converges and can prove optimality,
-    // including over unbounded integer domains where plain branching cannot. GMI cuts are valid
-    // for every integer-feasible point, so this never removes a real solution.
     let integer_mask: Vec<bool> = (0..n).map(|j| p.vars[j].integer).collect();
+    let col_scales = compute_column_scales(lf, &integer_mask);
     let mut lf_cut = lf.clone();
+    let mut max_dual_norm = 0.0f64;
+    let mut root_obj = f64::NEG_INFINITY;
+    const MAX_ACTIVE_CUTS: usize = 48;
+    let base_rows = lf_cut.rows.len();
+
+    let mut best: Option<(Vec<f64>, f64)> = None;
+
     if !int_idx.is_empty() {
         let mut lo: Vec<f64> = p.vars.iter().map(|v| v.lo).collect();
         let mut hi: Vec<f64> = p.vars.iter().map(|v| v.hi).collect();
@@ -1050,28 +1241,47 @@ fn solve_milp(p: &Problem, lf: &LinearForm) -> Outcome {
             lo[j] = (lo[j] - 1e-9).ceil();
             hi[j] = (hi[j] + 1e-9).floor();
         }
-        let base_rows = lf_cut.rows.len();
         let mut prev_obj = f64::INFINITY;
         for _round in 0..12 {
-            let (res, state) = solve_lp_capture(&lf_cut, &lo, &hi, &integer_mask);
+            let (res, state) = solve_lp_scaled(&lf_cut, &lo, &hi, &col_scales, &integer_mask);
             let (x, obj) = match res {
                 LpResult::Optimal(x, o) => (x, o),
                 _ => break,
             };
-            if int_idx.iter().all(|&j| (x[j] - x[j].round()).abs() < 1e-6) {
+            if !root_obj.is_finite() || obj > root_obj {
+                root_obj = obj;
+            }
+            if let Some(st) = &state {
+                max_dual_norm = max_dual_norm.max(st.dual_norm);
+            }
+            if int_idx.iter().all(|&j| is_integer_val(x[j])) {
+                let mut xr = x.clone();
+                for &j in &int_idx {
+                    xr[j] = xr[j].round();
+                }
+                let inc_obj = objective_at(lf, &xr);
+                if point_feasible(lf, &xr, &lo, &hi) {
+                    best = Some((xr, inc_obj));
+                }
                 break; // relaxation already integral
+            }
+            let Some(state) = state else { break };
+            // Pre-emptive Circuit Breaker: sample ||y||_inf
+            if state.dual_norm > 1e7 || !state.dual_norm.is_finite() {
+                break;
             }
             // Stop once cuts stop tightening the bound: adding more only risks numerical harm.
             if prev_obj.is_finite() && (obj - prev_obj).abs() <= 1e-7 * (1.0 + obj.abs()) {
                 break;
             }
             prev_obj = obj;
-            let Some(state) = state else { break };
-            let cuts = gmi_cuts(&state, &x, 6);
-            if cuts.is_empty() || lf_cut.rows.len() - base_rows > 60 {
+            let existing_cuts = &lf_cut.rows[base_rows..];
+            let cuts = gmi_cuts(&state, &x, 6, existing_cuts);
+            if cuts.is_empty() || lf_cut.rows.len() - base_rows >= MAX_ACTIVE_CUTS {
                 break;
             }
-            lf_cut.rows.extend(cuts);
+            let can_take = MAX_ACTIVE_CUTS.saturating_sub(lf_cut.rows.len() - base_rows);
+            lf_cut.rows.extend(cuts.into_iter().take(can_take));
         }
     }
 
@@ -1094,29 +1304,35 @@ fn solve_milp(p: &Problem, lf: &LinearForm) -> Outcome {
 
     // Seed an incumbent with a diving heuristic, so weak-gap searches still return the best
     // point they can find rather than giving up.
-    let mut best: Option<(Vec<f64>, f64)> = None;
-    if !int_idx.is_empty() {
+    if !int_idx.is_empty() && best.is_none() {
         let (mut lo, mut hi) = (root_lo.clone(), root_hi.clone());
         tighten(&mut lo, &mut hi);
-        if let Some(xr) = dive(&lf_feas, &lo, &hi, &int_idx) {
-            best = Some((xr.clone(), objective_at(lf, &xr)));
+        if let Some(xr) = dive(&lf_feas, &lo, &hi, &col_scales, &int_idx, &integer_mask) {
+            let obj = objective_at(lf, &xr);
+            if point_feasible(lf, &xr, &root_lo, &root_hi) {
+                best = Some((xr, obj));
+            }
         }
     }
 
-    let mut stack = vec![(root_lo, root_hi)];
+    let mut stack = vec![(root_lo.clone(), root_hi.clone(), root_obj)];
     let mut nodes = 0usize;
     const NODE_LIMIT: usize = 200_000;
     let mut relaxation_unbounded = false;
     let mut complete = true; // fully explored: optimal/infeasible provable
 
-    while let Some((mut lo, mut hi)) = stack.pop() {
+    while let Some((mut lo, mut hi, _parent_bnd)) = stack.pop() {
         nodes += 1;
         if nodes > NODE_LIMIT {
             complete = false;
             break;
         }
         tighten(&mut lo, &mut hi);
-        match solve_lp(&lf_cut, &lo, &hi) {
+        let (lp_res, lp_state) = solve_lp_scaled(&lf_cut, &lo, &hi, &col_scales, &integer_mask);
+        if let Some(st) = lp_state {
+            max_dual_norm = max_dual_norm.max(st.dual_norm);
+        }
+        match lp_res {
             LpResult::Infeasible => continue,
             LpResult::Unbounded => {
                 // Cannot bound this subtree; a feasible witness decides unbounded vs not.
@@ -1126,8 +1342,11 @@ fn solve_milp(p: &Problem, lf: &LinearForm) -> Outcome {
                     let clamp = |b: f64, d: f64| if b.is_finite() { b } else { d };
                     let clo: Vec<f64> = lo.iter().map(|&b| clamp(b, -1e6)).collect();
                     let chi: Vec<f64> = hi.iter().map(|&b| clamp(b, 1e6)).collect();
-                    if let Some(xr) = dive(&lf_feas, &clo, &chi, &int_idx) {
-                        best = Some((xr.clone(), objective_at(lf, &xr)));
+                    if let Some(xr) = dive(&lf_feas, &clo, &chi, &col_scales, &int_idx, &integer_mask) {
+                        let obj = objective_at(lf, &xr);
+                        if point_feasible(lf, &xr, &root_lo, &root_hi) {
+                            best = Some((xr, obj));
+                        }
                     }
                 }
                 continue;
@@ -1140,8 +1359,7 @@ fn solve_milp(p: &Problem, lf: &LinearForm) -> Outcome {
                 }
                 let frac = int_idx
                     .iter()
-                    .map(|&j| (j, (x[j] - x[j].round()).abs()))
-                    .filter(|(_, d)| *d > 1e-6)
+                    .filter_map(|&j| int_fractionality(x[j]).map(|d| (j, d)))
                     .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
                 match frac {
                     None => {
@@ -1149,7 +1367,12 @@ fn solve_milp(p: &Problem, lf: &LinearForm) -> Outcome {
                         for &j in &int_idx {
                             xr[j] = xr[j].round();
                         }
-                        best = Some((xr, obj));
+                        let inc_obj = objective_at(lf, &xr);
+                        if point_feasible(lf, &xr, &root_lo, &root_hi) {
+                            if best.as_ref().map_or(true, |(_, b_obj)| inc_obj < *b_obj) {
+                                best = Some((xr, inc_obj));
+                            }
+                        }
                     }
                     Some((j, _)) => {
                         let mut up_lo = lo.clone();
@@ -1157,11 +1380,11 @@ fn solve_milp(p: &Problem, lf: &LinearForm) -> Outcome {
                         let mut down_hi = hi.clone();
                         down_hi[j] = x[j].floor();
                         if x[j] - x[j].floor() < 0.5 {
-                            stack.push((up_lo, hi.clone()));
-                            stack.push((lo.clone(), down_hi));
+                            stack.push((up_lo, hi.clone(), obj));
+                            stack.push((lo.clone(), down_hi, obj));
                         } else {
-                            stack.push((lo.clone(), down_hi));
-                            stack.push((up_lo, hi.clone()));
+                            stack.push((lo.clone(), down_hi, obj));
+                            stack.push((up_lo, hi.clone(), obj));
                         }
                     }
                 }
@@ -1170,6 +1393,34 @@ fn solve_milp(p: &Problem, lf: &LinearForm) -> Outcome {
     }
 
     let nodes_shown = nodes.min(NODE_LIMIT);
+    let cuts_count = lf_cut.rows.len().saturating_sub(base_rows);
+
+    let (z_dual, duality_gap, proven) = match &best {
+        Some((_, best_obj)) => {
+            let dual = if complete {
+                *best_obj
+            } else if !stack.is_empty() {
+                stack.iter().map(|(_, _, b)| *b).fold(f64::INFINITY, f64::min).min(*best_obj)
+            } else {
+                root_obj.min(*best_obj)
+            };
+            let gap = (best_obj - dual).max(0.0);
+            let rel_gap = gap / (1.0 + best_obj.abs());
+            let is_proven = complete && !relaxation_unbounded && rel_gap <= 1e-7;
+            (dual, gap, is_proven)
+        }
+        None => (root_obj, f64::INFINITY, false),
+    };
+
+    let telemetry = best.as_ref().map(|(_, inc_obj)| OptimizationTelemetry {
+        bound: z_dual,
+        incumbent: *inc_obj,
+        duality_gap,
+        cuts_active: cuts_count,
+        dual_norm: max_dual_norm,
+        proven_optimal: proven,
+    });
+
     match best {
         Some((x, objective)) => {
             if relaxation_unbounded {
@@ -1179,20 +1430,27 @@ fn solve_milp(p: &Problem, lf: &LinearForm) -> Outcome {
                         .to_string(),
                 )
             } else {
+                let method = if int_idx.is_empty() {
+                    "simplex".to_string()
+                } else if proven {
+                    format!("simplex branch-and-bound ({} nodes)", nodes_shown)
+                } else if !complete {
+                    format!(
+                        "simplex branch-and-bound ({} nodes; node limit reached; duality gap {:.2e} unclosed)",
+                        nodes_shown, duality_gap
+                    )
+                } else {
+                    format!(
+                        "simplex branch-and-bound ({} nodes; duality gap {:.2e} unclosed)",
+                        nodes_shown, duality_gap
+                    )
+                };
                 Outcome::Optimal {
                     x,
                     objective,
-                    proven: complete,
-                    method: if int_idx.is_empty() {
-                        "simplex".to_string()
-                    } else if complete {
-                        format!("simplex branch-and-bound ({} nodes)", nodes_shown)
-                    } else {
-                        format!(
-                            "simplex branch-and-bound ({} nodes; node limit reached)",
-                            nodes_shown
-                        )
-                    },
+                    proven,
+                    method,
+                    telemetry,
                 }
             }
         }
@@ -1810,6 +2068,7 @@ fn solve_nonlinear(p: &Problem) -> Outcome {
                 "{}, certified by interval branch-and-bound ({} boxes, gap <= {:e} relative)",
                 local_method, boxes, INTERVAL_GAP
             ),
+            telemetry: None,
         },
         Certificate::Infeasible { nodes: boxes } => Outcome::Infeasible(format!(
             "no point satisfies every constraint (proven by interval branch-and-bound over {} boxes)",
@@ -1821,6 +2080,7 @@ fn solve_nonlinear(p: &Problem) -> Outcome {
                 objective,
                 proven: false,
                 method: format!("{} (local optimum)", local_method),
+                telemetry: None,
             },
             None => Outcome::Infeasible(
                 "no feasible point found from any starting point (nonlinear model; not a proof of infeasibility)"

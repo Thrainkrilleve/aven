@@ -94,6 +94,7 @@ pub struct SolverEngine {
     pub diagnosis: Option<crate::diagnostics::Diagnosis>,
     /// Values that did settle when a solve stops as under-determined
     pub partial: HashMap<String, f64>,
+    pub opt_telemetry: Option<crate::optimize::OptimizationTelemetry>,
 }
 
 impl Default for SolverEngine {
@@ -112,6 +113,7 @@ impl SolverEngine {
             trace: Vec::new(),
             diagnosis: None,
             partial: HashMap::new(),
+            opt_telemetry: None,
         }
     }
 
@@ -576,7 +578,9 @@ impl SolverEngine {
                 objective,
                 proven,
                 method,
+                telemetry,
             } => {
+                self.opt_telemetry = telemetry.clone();
                 for (v, xi) in problem.vars.iter().zip(&x) {
                     env.insert(v.name.clone(), *xi);
                 }
@@ -585,16 +589,33 @@ impl SolverEngine {
                     Some(o) if o.kind == ObjectiveKind::Maximize => -objective,
                     _ => objective,
                 };
-                self.trace.push(format!(
-                    "[optimize] {} — objective = {:.6} ({})",
-                    method,
-                    shown,
-                    if proven {
-                        "proven optimal"
-                    } else {
-                        "not proven globally optimal"
-                    }
-                ));
+                if let Some(telem) = &telemetry {
+                    self.trace.push(format!(
+                        "[optimize] {} — objective = {:.6} ({}) [bound = {:.6}, duality_gap = {:.2e}, cuts = {}, dual_norm = {:.2e}]",
+                        method,
+                        shown,
+                        if proven {
+                            "proven optimal"
+                        } else {
+                            "not proven globally optimal"
+                        },
+                        telem.bound,
+                        telem.duality_gap,
+                        telem.cuts_active,
+                        telem.dual_norm
+                    ));
+                } else {
+                    self.trace.push(format!(
+                        "[optimize] {} — objective = {:.6} ({})",
+                        method,
+                        shown,
+                        if proven {
+                            "proven optimal"
+                        } else {
+                            "not proven globally optimal"
+                        }
+                    ));
+                }
                 Ok(true)
             }
             Outcome::Infeasible(msg) => Err(SolverError::Infeasible(msg)),

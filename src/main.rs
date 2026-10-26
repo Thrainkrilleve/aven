@@ -637,7 +637,7 @@ fn cmd_build(
 /// Whether the optimizer proved its result globally optimal, from its trace.
 fn optimality_of(trace: &[String]) -> Option<&'static str> {
     let line = trace.iter().rev().find(|l| l.starts_with("[optimize]") && l.contains("objective ="))?;
-    Some(if line.contains("(proven optimal)") { "proven" } else { "local" })
+    Some(if line.contains("proven optimal") { "proven" } else { "local" })
 }
 
 fn execute_module(
@@ -989,6 +989,30 @@ fn execute_module(
                         metadata,
                     });
                 }
+            }
+
+            if let Some(telem) = &solver.opt_telemetry {
+                seq += 1;
+                ledger.append(Fact {
+                    seq,
+                    tick: 0,
+                    kind: "audit".to_string(),
+                    name: "milp_certificate".to_string(),
+                    value: telem.incumbent,
+                    causes: Vec::new(),
+                    origin: format!(
+                        "bound:{:.6};incumbent:{:.6};duality_gap:{:.2e};cuts_active:{};dual_norm:{:.2e};proven_optimal:{}",
+                        telem.bound, telem.incumbent, telem.duality_gap, telem.cuts_active, telem.dual_norm, telem.proven_optimal
+                    ),
+                    metadata: Some(ledger::FactMetadata {
+                        warnings: if !telem.proven_optimal {
+                            vec!["duality_gap_unclosed".to_string()]
+                        } else {
+                            Vec::new()
+                        },
+                        ..Default::default()
+                    }),
+                });
             }
 
             // Direction-pinned `forward` blocks, second pass: everything not yet evaluated must
