@@ -1387,6 +1387,56 @@ fn test_underdetermination_rank_deficiency_and_minimal_fixes() {
 }
 
 #[test]
+fn test_diagnostics_scale_invariance_across_disparate_physical_units() {
+    use avenc::ast::*;
+    use avenc::diagnostics::Diagnostician;
+    use std::collections::HashMap;
+
+    // Equation 1 has massive scale (e.g. latent heat / vapor pressure ~ 1e16)
+    let eq_macro = Equation {
+        lhs: "vapor_press".to_string(),
+        op: ConstraintOp::Equal,
+        rhs: Expr::Bin(
+            BinaryOp::Mul,
+            Box::new(Expr::Num(1e16)),
+            Box::new(Expr::Var("temp_ratio".to_string())),
+        ),
+        original_text: "vapor_press = 1e16 * temp_ratio".to_string(),
+        line: 1,
+        col: 1,
+    };
+
+    // Equation 2 has standard unit scale (coefficients = 1.0)
+    let eq_unit = Equation {
+        lhs: "wind_speed".to_string(),
+        op: ConstraintOp::Equal,
+        rhs: Expr::Bin(
+            BinaryOp::Add,
+            Box::new(Expr::Var("u".to_string())),
+            Box::new(Expr::Var("v".to_string())),
+        ),
+        original_text: "wind_speed = u + v".to_string(),
+        line: 2,
+        col: 1,
+    };
+
+    let unknowns = vec![
+        "vapor_press".to_string(),
+        "temp_ratio".to_string(),
+        "wind_speed".to_string(),
+        "u".to_string(),
+        "v".to_string(),
+    ];
+    let env = HashMap::new();
+
+    let diag = Diagnostician::new().diagnose(&unknowns, &[eq_macro, eq_unit], &env);
+    // Both equations are structurally independent despite spanning 16 orders of magnitude
+    assert_eq!(diag.rank, 2);
+    assert_eq!(diag.dof, 3);
+    assert!(diag.degenerate_equations.is_empty());
+}
+
+#[test]
 fn test_solver_underdetermined_error_handling() {
     use avenc::lexer::Lexer;
     use avenc::parser::Parser;

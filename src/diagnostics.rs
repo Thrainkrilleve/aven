@@ -412,13 +412,19 @@ fn rank_and_pivots(mat: &[Vec<f64>]) -> (usize, Vec<usize>, Vec<usize>) {
     let mut a: Vec<Vec<f64>> = mat.to_vec();
     let mut row_indices: Vec<usize> = (0..rows).collect();
 
-    // Dynamically scale tolerance to matrix magnitude to handle both micro (1e-9) and macro (1e9) scales
-    let max_entry: f64 = mat
-        .iter()
-        .flat_map(|row| row.iter())
-        .map(|v| v.abs())
-        .fold(0.0f64, f64::max);
-    let pivot_tol = 1e-12 * max_entry.max(1e-15);
+    // Row-equilibrate (normalize each non-zero row by its infinity norm)
+    // so equations across vastly different physical units (e.g. Joules ~ 1e6, Pa ~ 1e5, m/s ~ 1, s^-1 ~ 1e-4)
+    // do not artificially suppress pivot selection for other independent equations.
+    for row in a.iter_mut() {
+        let r_max = row.iter().map(|v| v.abs()).fold(0.0f64, f64::max);
+        if r_max > 1e-15 {
+            for val in row.iter_mut() {
+                *val /= r_max;
+            }
+        }
+    }
+
+    let pivot_tol = 1e-9;
 
     let mut pivots = Vec::new();
     let mut r = 0;
