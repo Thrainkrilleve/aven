@@ -62,8 +62,8 @@ fn print_usage() {
     println!(
         "                                        Show causal derivation tree (default depth: 20; 0 for unlimited)"
     );
-    println!("  avenc build <file.aven> [--emit-c] [-o out.c] [--traceable] [--checked-c]");
-    println!("                                        Transpile pinned relations to standalone C");
+    println!("  avenc build <file.aven> [--emit-c] [-o out.c] [--traceable] [--checked-c] [--no-main] [--aeric-shim] [--out-dir <dir>]");
+    println!("                                        Transpile pinned relations to standalone C or AERIC deployment bundle");
     println!(
         "  avenc check <file.aven>               Validate syntax, relations, and unit declarations"
     );
@@ -117,9 +117,12 @@ fn real_main() {
             let options = codegen_c::CodegenOptions {
                 traceable: args.iter().any(|a| a == "--traceable"),
                 checked_c: args.iter().any(|a| a == "--checked-c"),
+                aeric_shim: args.iter().any(|a| a == "--aeric-shim"),
+                no_main: args.iter().any(|a| a == "--no-main"),
             };
             let out_file = args.windows(2).find(|w| w[0] == "-o").map(|w| w[1].as_str());
-            cmd_build(file, true, out_file, &options);
+            let out_dir = args.windows(2).find(|w| w[0] == "--out-dir").map(|w| w[1].as_str());
+            cmd_build(file, true, out_file, out_dir, &options);
         }
         "bench" => {
             let file_arg = args.iter().skip(2).find(|a| !a.starts_with('-'));
@@ -254,15 +257,23 @@ fn real_main() {
             let emit_c = args.iter().any(|a| a == "--emit-c");
             let traceable = args.iter().any(|a| a == "--traceable");
             let checked_c = args.iter().any(|a| a == "--checked-c");
+            let aeric_shim = args.iter().any(|a| a == "--aeric-shim");
+            let no_main = args.iter().any(|a| a == "--no-main");
             let out_file = args
                 .windows(2)
                 .find(|w| w[0] == "-o")
                 .map(|w| w[1].as_str());
+            let out_dir = args
+                .windows(2)
+                .find(|w| w[0] == "--out-dir")
+                .map(|w| w[1].as_str());
             let options = codegen_c::CodegenOptions {
                 traceable,
                 checked_c,
+                aeric_shim,
+                no_main,
             };
-            cmd_build(&args[2], emit_c, out_file, &options);
+            cmd_build(&args[2], emit_c, out_file, out_dir, &options);
         }
         "check" => {
             if args.len() < 3 {
@@ -663,6 +674,7 @@ fn cmd_build(
     path: &str,
     emit_c: bool,
     out_file: Option<&str>,
+    out_dir: Option<&str>,
     options: &codegen_c::CodegenOptions,
 ) {
     let module = parse_file(path);
@@ -675,6 +687,87 @@ fn cmd_build(
         eprintln!("Error: no relation or forward blocks found in '{}'.", path);
         process::exit(1);
     };
+
+    let stem = std::path::Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("model");
+
+    if options.aeric_shim {
+        let bundle = match CTranspiler::generate_aeric_shim(blk, stem) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("{}", e);
+                process::exit(1);
+            }
+        };
+
+        if let Some(dir) = out_dir {
+            if let Err(e) = fs::create_dir_all(dir) {
+                eprintln!("Error creating output directory '{}': {}", dir, e);
+                process::exit(1);
+            }
+            let model_c_path = format!("{}/model_{}.c", dir, stem);
+            let model_h_path = format!("{}/model_{}.h", dir, stem);
+            let shim_c_path = format!("{}/aven_shim.c", dir);
+
+            if let Err(e) = fs::write(&model_c_path, &bundle.model_c) {
+                eprintln!("Error writing '{}': {}", model_c_path, e);
+                process::exit(1);
+            }
+            if let Err(e) = fs::write(&model_h_path, &bundle.header_h) {
+                eprintln!("Error writing '{}': {}", model_h_path, e);
+                process::exit(1);
+            }
+            if let Err(e) = fs::write(&shim_c_path, &bundle.shim_c) {
+                eprintln!("Error writing '{}': {}", shim_c_path, e);
+                process::exit(1);
+            }
+            println!(
+                "Successfully emitted AERIC bundle to '{}' (model_{}.c, model_{}.h, aven_shim.c) [SHA256: {}]",
+                dir, stem, stem, bundle.model_hash
+            );
+            return;
+        } else if let Some(out_path) = out_file {
+            let p = std::path::Path::new(out_path);
+            if p.is_dir() {
+                let dir = out_path;
+                let _ = fs::create_dir_all(dir);
+                let model_c_path = format!("{}/model_{}.c", dir, stem);
+                let model_h_path = format!("{}/model_{}.h", dir, stem);
+                let shim_c_path = format!("{}/aven_shim.c", dir);
+
+                let _ = fs::write(&model_c_path, &bundle.model_c);
+                let _ = fs::write(&model_h_path, &bundle.header_h);
+                let _ = fs::write(&shim_c_path, &bundle.shim_c);
+                println!(
+                    "Successfully emitted AERIC bundle to '{}' (model_{}.c, model_{}.h, aven_shim.c) [SHA256: {}]",
+                    dir, stem, stem, bundle.model_hash
+                );
+                return;
+            } else {
+                if let Err(e) = fs::write(out_path, &bundle.single_unit_c) {
+                    eprintln!("Error writing output C file '{}': {}", out_path, e);
+                    process::exit(1);
+                }
+                println!(
+                    "Successfully emitted AERIC C unit to '{}' [SHA256: {}]",
+                    out_path, bundle.model_hash
+                );
+                return;
+            }
+        } else if emit_c {
+            println!("{}", bundle.single_unit_c);
+            return;
+        } else {
+            println!(
+                "Generated AERIC shim for model '{}' [SHA256: {}].",
+                blk.name, bundle.model_hash
+            );
+            println!("Use --emit-c to view the C unit, or --out-dir <dir> to save the bundle.");
+            return;
+        }
+    }
 
     let work_dir = std::path::Path::new(path).parent();
     let res = execute_module(&module, false, work_dir);

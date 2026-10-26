@@ -2,7 +2,7 @@
 
 **Declarative Invariant Programming & Relational Multi-Physics Engine**
 
-[![Build & Test](https://img.shields.io/badge/tests-95%20passed-brightgreen.svg)](#key-capabilities)
+[![Build & Test](https://img.shields.io/badge/tests-101%20passed-brightgreen.svg)](#key-capabilities)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-pure%20Rust%20std-blue.svg)](#key-capabilities)
 [![Throughput](https://img.shields.io/badge/IPC%20Throughput-1%2C720%20solves%2Fsec-orange.svg)](#live-multi-stream-flight-dynamics-mesh)
 [![Median Latency](https://img.shields.io/badge/Median%20Latency-0.56%20ms-purple.svg)](#live-multi-stream-flight-dynamics-mesh)
@@ -19,7 +19,7 @@ Unlike traditional imperative languages where functions require hardcoded input/
 - **Omnidirectional Relational Solving:** Declare physical relations naturally without specifying solve directions. Write $F = m \cdot a$ once, and solve for force, mass, or acceleration automatically depending on which inputs are observed.
 - **Pure-Rust Zero-Dependency Core:** The `avenc` compiler, lexer, parser, AST, evaluator, and fact ledger are written strictly in standard library Rust (`std`), requiring zero external crates.
 - **Shared Memory Rings & Native In-Process FFI (`using shm(...)`, `using native(...)`):** Zero-socket memory-mapped ring buffers driving telemetry ingestion latency down to **$10.1\,\mu\text{s}$** ($< 100\,\mu\text{s}$ target), native C/Rust dynamic library loading (`.so` / `.dll`) executing in **$5.5\,\mu\text{s}$**, and closed-loop bidirectional actuation streamed directly back to physical control daemons.
-- **Direction-Pinning & C Code Generation (`avenc emit-c`):** Transpile declarative Aven blocks into standalone, branchless ANSI C code with no runtime solver overhead, suitable for bare-metal embedded targets and hard real-time control loops.
+- **Direction-Pinning & C Code Generation (`avenc emit-c`, `--aeric-shim`):** Transpile declarative Aven blocks into standalone, branchless ANSI C code with no runtime solver overhead, suitable for bare-metal embedded targets and hard real-time control loops. Supports automated AERIC edge deployment bundles (`--aeric-shim --out-dir <dir>`) with deterministic SHA-256 model-identity hashing and non-aborting domain finiteness guards.
 - **First-Class External Adapters & Persistent IPC Daemons:** Connect relations to real-world sensors, telemetry streams, and black-box simulators via standard I/O subshells (`using external(...)`) or high-throughput persistent TCP/IPC daemons (`using ipc(...)`) executing in $< 3\,\text{ms}$.
 - **Tamper-Evident Fact Ledgers:** Every settled fact extends a SHA-256 hash chain (optionally HMAC-signed with `AVEN_LEDGER_KEY`); facts from adapters record the SHA-256 of the adapter's raw output. `avenc run --ledger out.jsonl` writes the audit log and `avenc verify-ledger out.jsonl` detects any edit, deletion, reordering or truncation. Time-to-live (`ttl_ms`) freshness tracking blocks decisions on stale data (`DECISION BLOCKED`, exit code 3).
 - **Multi-Objective Pareto Optimization:** Explore multi-dimensional tradeoff frontiers across competing constraints (e.g., latency vs. compute capacity vs. cost).
