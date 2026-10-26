@@ -7,8 +7,11 @@
 // recomputed without the key. Outside this module facts are only reachable read-only.
 #![allow(dead_code)]
 use crate::evaluator::sha256_hex;
+use std::collections::hash_map::RandomState;
 use std::collections::HashMap;
 use std::fmt;
+use std::hash::{BuildHasher, Hasher};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct FactMetadata {
@@ -407,6 +410,29 @@ pub fn hmac_sha256_hex(key: &[u8], msg: &[u8]) -> String {
     let mut outer: Vec<u8> = k.iter().map(|b| b ^ 0x5c).collect();
     outer.extend_from_slice(&hex_to_bytes(&sha256_hex(&inner)));
     sha256_hex(&outer)
+}
+
+/// Generates a cryptographically strong 256-bit (64-character hex) random key
+/// from OS entropy via standard library `RandomState`, monotonic clocks, nanosecond
+/// timestamps, process ID, and memory addresses, hashed with SHA-256.
+pub fn generate_random_key() -> String {
+    let mut material = Vec::with_capacity(128);
+    for i in 0..8 {
+        let mut hasher = RandomState::new().build_hasher();
+        hasher.write_usize(i);
+        material.extend_from_slice(&hasher.finish().to_le_bytes());
+    }
+    if let Ok(duration) = SystemTime::now().duration_since(UNIX_EPOCH) {
+        material.extend_from_slice(&duration.as_nanos().to_le_bytes());
+    }
+    let elapsed = Instant::now().elapsed().as_nanos();
+    material.extend_from_slice(&elapsed.to_le_bytes());
+    let pid = std::process::id();
+    material.extend_from_slice(&pid.to_le_bytes());
+    let dummy = Box::new(0xdeadbeef_u64);
+    let ptr_val = (&*dummy as *const u64 as usize).to_le_bytes();
+    material.extend_from_slice(&ptr_val);
+    sha256_hex(&material)
 }
 
 fn json_string(s: &str) -> String {

@@ -38,8 +38,12 @@ const VERSION: &str = "0.6.0";
 fn print_usage() {
     println!("avenc v{} — The Aven Language Toolchain", VERSION);
     println!("Usage:");
+    println!("Usage:");
     println!(
-        "  avenc run <file.aven> [--allow-stale] [--json] [--ledger out.jsonl] Execute .aven file and print settled relations"
+        "  avenc run <file.aven> [--allow-stale] [--json] [--ledger out.jsonl] [--key <KEY> | --random-key]"
+    );
+    println!(
+        "                                        Execute .aven file and print settled relations"
     );
     println!(
         "                                        (enforces fact freshness; blocks decision on stale/zero-TTL data)"
@@ -63,7 +67,8 @@ fn print_usage() {
     println!(
         "  avenc check <file.aven>               Validate syntax, relations, and unit declarations"
     );
-    println!("  avenc verify-ledger <out.jsonl>       Check an audit log's hash chain (and signatures with AVEN_LEDGER_KEY)");
+    println!("  avenc verify-ledger <out.jsonl> [--key <KEY>]");
+    println!("                                        Check an audit log's hash chain and HMAC-SHA256 signatures");
     println!("  avenc demo                            Run built-in multi-pillar verification test");
 }
 
@@ -89,11 +94,19 @@ fn real_main() {
 
     match args[1].as_str() {
         "verify-ledger" => {
-            let Some(file) = args.get(2) else {
-                eprintln!("Error: missing file argument for 'verify-ledger'");
+            let key_arg = args
+                .windows(2)
+                .find(|w| w[0] == "--key" || w[0] == "--ledger-key")
+                .map(|w| w[1].clone());
+            let file_arg = args
+                .iter()
+                .skip(2)
+                .find(|a| !a.starts_with("--") && Some(*a) != key_arg.as_ref());
+            let Some(file) = file_arg else {
+                eprintln!("Error: missing file argument for 'verify-ledger': avenc verify-ledger <out.jsonl> [--key <KEY>]");
                 process::exit(1);
             };
-            cmd_verify_ledger(file);
+            cmd_verify_ledger(file, key_arg.as_deref());
         }
         "emit-c" => {
             let file_arg = args.iter().skip(2).find(|a| !a.starts_with('-'));
@@ -125,6 +138,11 @@ fn real_main() {
         "run" => {
             let allow_stale = args.iter().any(|a| a == "--allow-stale");
             let json = args.iter().any(|a| a == "--json");
+            let random_key = args.iter().any(|a| a == "--random-key");
+            let key_arg = args
+                .windows(2)
+                .find(|w| w[0] == "--key" || w[0] == "--ledger-key")
+                .map(|w| w[1].clone());
             let ledger_out = args
                 .windows(2)
                 .find(|w| w[0] == "--ledger")
@@ -132,12 +150,19 @@ fn real_main() {
             let file_arg = args
                 .iter()
                 .skip(2)
-                .find(|a| !a.starts_with("--") && Some(*a) != ledger_out.as_ref());
+                .find(|a| !a.starts_with("--") && Some(*a) != ledger_out.as_ref() && Some(*a) != key_arg.as_ref());
             if file_arg.is_none() {
                 eprintln!("Error: missing file argument for 'run'");
                 process::exit(1);
             }
-            cmd_run(file_arg.unwrap(), allow_stale, json, ledger_out.as_deref());
+            cmd_run(
+                file_arg.unwrap(),
+                allow_stale,
+                json,
+                ledger_out.as_deref(),
+                key_arg.as_deref(),
+                random_key,
+            );
         }
         "stream" => {
             if args.len() < 3 {
@@ -373,10 +398,48 @@ impl ExecutionResult {
     }
 }
 
-fn cmd_run(path: &str, allow_stale: bool, json: bool, ledger_out: Option<&str>) {
+fn cmd_run(
+    path: &str,
+    allow_stale: bool,
+    json: bool,
+    ledger_out: Option<&str>,
+    cli_key: Option<&str>,
+    random_key: bool,
+) {
     let module = parse_file(path);
     let work_dir = std::path::Path::new(path).parent();
-    let res = execute_module(&module, !json, work_dir);
+
+    let mut generated_key_hex: Option<String> = None;
+    let signing_key: Option<Vec<u8>> = if let Some(k) = cli_key {
+        if k == "random" {
+            let rand_k = ledger::generate_random_key();
+            let bytes = rand_k.as_bytes().to_vec();
+            generated_key_hex = Some(rand_k);
+            Some(bytes)
+        } else {
+            Some(k.as_bytes().to_vec())
+        }
+    } else if random_key {
+        let rand_k = ledger::generate_random_key();
+        let bytes = rand_k.as_bytes().to_vec();
+        generated_key_hex = Some(rand_k);
+        Some(bytes)
+    } else if let Ok(env_k) = env::var("AVEN_LEDGER_KEY") {
+        if env_k == "random" {
+            let rand_k = ledger::generate_random_key();
+            let bytes = rand_k.as_bytes().to_vec();
+            generated_key_hex = Some(rand_k);
+            Some(bytes)
+        } else if !env_k.is_empty() {
+            Some(env_k.into_bytes())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let res = execute_module_with_key(&module, !json, work_dir, signing_key.as_deref());
 
     // The audit log is written whatever the verdict, so blocked and failed runs are recorded too
     if let Some(out) = ledger_out {
@@ -392,6 +455,10 @@ fn cmd_run(path: &str, allow_stale: bool, json: bool, ledger_out: Option<&str>) 
                 &res.ledger.head()[..16],
                 if res.ledger.is_signed() { ", HMAC-signed" } else { "" }
             );
+            if let Some(ref k_hex) = generated_key_hex {
+                println!("  Randomized verification key: {}", k_hex);
+                println!("  To verify: avenc verify-ledger {} --key {}", out, k_hex);
+            }
         }
     }
 
@@ -440,11 +507,16 @@ fn cmd_run(path: &str, allow_stale: bool, json: bool, ledger_out: Option<&str>) 
             .iter()
             .map(|k| format!("\"{}\": {}", k, res.env[*k]))
             .collect();
+        let ledger_key_field = match &generated_key_hex {
+            Some(k) => format!(", \"ledger_key\": \"{}\"", k),
+            None => String::new(),
+        };
         println!(
-            "{{\"status\": \"{}\", \"optimality\": {}, \"env\": {{{}}}}}",
+            "{{\"status\": \"{}\", \"optimality\": {}, \"env\": {{{}}}{}}}",
             status,
             optimality,
-            fields.join(", ")
+            fields.join(", "),
+            ledger_key_field
         );
         if res.diagnosis.is_some() {
             process::exit(EXIT_ERROR);
@@ -486,7 +558,7 @@ fn new_ledger() -> Ledger {
     }
 }
 
-fn cmd_verify_ledger(path: &str) {
+fn cmd_verify_ledger(path: &str, cli_key: Option<&str>) {
     let text = match fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) => {
@@ -494,13 +566,20 @@ fn cmd_verify_ledger(path: &str) {
             process::exit(EXIT_ERROR);
         }
     };
-    let key = ledger_key();
+    let key = cli_key
+        .filter(|k| !k.is_empty())
+        .map(|k| k.as_bytes().to_vec())
+        .or_else(ledger_key);
     match ledger::verify_jsonl(&text, key.as_deref()) {
         Ok(v) => {
             println!(
                 "Ledger OK: {} fact(s), chain intact{}, head {}",
                 v.facts,
-                if v.signed { ", every signature valid" } else { " (signatures not checked: AVEN_LEDGER_KEY unset)" },
+                if v.signed {
+                    ", every signature valid"
+                } else {
+                    " (signatures not checked: pass --key <code> or set AVEN_LEDGER_KEY)"
+                },
                 v.head
             );
         }
@@ -645,6 +724,15 @@ fn execute_module(
     verbose: bool,
     working_dir: Option<&std::path::Path>,
 ) -> ExecutionResult {
+    execute_module_with_key(module, verbose, working_dir, None)
+}
+
+fn execute_module_with_key(
+    module: &AvenModule,
+    verbose: bool,
+    working_dir: Option<&std::path::Path>,
+    signing_key: Option<&[u8]>,
+) -> ExecutionResult {
     // 0. Verify compile-time dimensional homogeneity across all relation blocks
     let mut type_checker = units::DimensionalChecker::new();
     if let Err(e) = type_checker.check_module(module) {
@@ -653,7 +741,10 @@ fn execute_module(
     }
 
     let mut env = HashMap::new();
-    let mut ledger = new_ledger();
+    let mut ledger = match signing_key {
+        Some(k) => Ledger::with_key(k),
+        None => new_ledger(),
+    };
     let mut seq = 0;
     let mut stale_facts = Vec::new();
 
