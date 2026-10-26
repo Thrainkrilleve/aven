@@ -215,6 +215,13 @@ pub enum BackendDecl {
     Ipc {
         endpoint: String,
     },
+    Shm {
+        path: String,
+    },
+    NativeFfi {
+        lib_path: String,
+        symbol: String,
+    },
 }
 
 #[derive(Debug, Clone)]

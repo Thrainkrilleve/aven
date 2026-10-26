@@ -737,7 +737,7 @@ fn test_first_class_external_relation_syntax_and_autobinding() {
                 seed: 42,
             }
         }
-        BackendDecl::Native | BackendDecl::Ipc { .. } => OrchestratorConfig::default(),
+        _ => OrchestratorConfig::default(),
     };
 
     let orchestrator = Orchestrator::from_config(&config, blk.equations.clone());

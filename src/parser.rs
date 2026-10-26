@@ -264,9 +264,82 @@ impl Parser {
                 self.expect(&TokenKind::RightParen, "')'")?;
                 Ok(BackendDecl::Ipc { endpoint })
             }
+            TokenKind::KwShm => {
+                self.take(); // consume 'shm'
+                self.expect(&TokenKind::LeftParen, "'('")?;
+                let path = match self.peek().kind.clone() {
+                    TokenKind::Str(s) => {
+                        self.take();
+                        s
+                    }
+                    _ => {
+                        let (t_line, t_col, t_text) = {
+                            let t = self.peek();
+                            (t.line, t.col, t.text.clone())
+                        };
+                        return Err(ParseError {
+                            message: format!(
+                                "expected string literal path/name in shm(...) declaration (e.g. shm(\"aven_shm\")), found '{}'",
+                                t_text
+                            ),
+                            line: t_line,
+                            col: t_col,
+                        });
+                    }
+                };
+                self.expect(&TokenKind::RightParen, "')'")?;
+                Ok(BackendDecl::Shm { path })
+            }
+            TokenKind::KwNative => {
+                self.take(); // consume 'native'
+                self.expect(&TokenKind::LeftParen, "'('")?;
+                let lib_path = match self.peek().kind.clone() {
+                    TokenKind::Str(s) => {
+                        self.take();
+                        s
+                    }
+                    _ => {
+                        let (t_line, t_col, t_text) = {
+                            let t = self.peek();
+                            (t.line, t.col, t.text.clone())
+                        };
+                        return Err(ParseError {
+                            message: format!(
+                                "expected library path string in native(...) declaration, found '{}'",
+                                t_text
+                            ),
+                            line: t_line,
+                            col: t_col,
+                        });
+                    }
+                };
+                self.expect(&TokenKind::Comma, "','")?;
+                let symbol = match self.peek().kind.clone() {
+                    TokenKind::Str(s) => {
+                        self.take();
+                        s
+                    }
+                    _ => {
+                        let (t_line, t_col, t_text) = {
+                            let t = self.peek();
+                            (t.line, t.col, t.text.clone())
+                        };
+                        return Err(ParseError {
+                            message: format!(
+                                "expected symbol name string in native(...) declaration, found '{}'",
+                                t_text
+                            ),
+                            line: t_line,
+                            col: t_col,
+                        });
+                    }
+                };
+                self.expect(&TokenKind::RightParen, "')'")?;
+                Ok(BackendDecl::NativeFfi { lib_path, symbol })
+            }
             _ => Err(ParseError {
                 message: format!(
-                    "expected 'external(...)' or 'ipc(...)', found '{}'",
+                    "expected 'external(...)', 'ipc(...)', 'shm(...)', or 'native(...)', found '{}'",
                     tok_text
                 ),
                 line: tok_line,

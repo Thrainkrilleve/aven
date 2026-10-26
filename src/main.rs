@@ -766,11 +766,13 @@ fn execute_module_with_key(
         }
     }
 
-    // Execute external or persistent IPC evaluators if declared via 'using external(...)' or 'using ipc(...)'
+    // Execute external, persistent IPC, SHM ring, or native FFI evaluators
     for blk in &module.blocks {
         let is_external = matches!(&blk.backend, BackendDecl::External { .. });
         let is_ipc = matches!(&blk.backend, BackendDecl::Ipc { .. });
-        if !is_external && !is_ipc {
+        let is_shm = matches!(&blk.backend, BackendDecl::Shm { .. });
+        let is_native_ffi = matches!(&blk.backend, BackendDecl::NativeFfi { .. });
+        if !is_external && !is_ipc && !is_shm && !is_native_ffi {
             continue;
         }
 
@@ -841,6 +843,26 @@ fn execute_module_with_key(
                     );
                 }
                 (ipc_eval.evaluate(&varmap), "ipc")
+            }
+            BackendDecl::Shm { path } => {
+                let shm_eval = evaluator::ShmEvaluator::new(path);
+                if verbose {
+                    println!(
+                        "Reading from shared-memory ring buffer at '{}' for relation '{}'...",
+                        path, blk.name
+                    );
+                }
+                (shm_eval.evaluate(&varmap), "shm")
+            }
+            BackendDecl::NativeFfi { lib_path, symbol } => {
+                let ffi_eval = evaluator::NativeFfiEvaluator::new(lib_path, symbol);
+                if verbose {
+                    println!(
+                        "Executing in-process native FFI '{}' ({}) for relation '{}'...",
+                        lib_path, symbol, blk.name
+                    );
+                }
+                (ffi_eval.evaluate(&varmap), "native_ffi")
             }
             BackendDecl::Native => unreachable!(),
         };
@@ -1126,6 +1148,33 @@ fn execute_module_with_key(
                     error: Some(e),
                     optimality: None,
                 };
+            }
+
+            // Stream real-time actuation commands to IPC daemons and SHM ring buffers
+            for blk in &module.blocks {
+                match &blk.backend {
+                    BackendDecl::Ipc { endpoint } => {
+                        let ipc_eval = evaluator::IpcEvaluator::new(endpoint);
+                        if let Err(e) = ipc_eval.actuate(&solved_env) {
+                            if verbose {
+                                eprintln!("  [ipc] Note: Actuation stream to '{}' failed or closed: {}", endpoint, e);
+                            }
+                        } else if verbose {
+                            println!("  [ipc] Streamed {} actuation command(s) to daemon at {}", solved_env.len(), endpoint);
+                        }
+                    }
+                    BackendDecl::Shm { path } => {
+                        let shm_eval = evaluator::ShmEvaluator::new(path);
+                        if let Err(e) = shm_eval.actuate(&solved_env) {
+                            if verbose {
+                                eprintln!("  [shm] Note: Actuation stream to '{}' failed: {}", path, e);
+                            }
+                        } else if verbose {
+                            println!("  [shm] Written {} actuation command(s) to ring buffer at {}", solved_env.len(), path);
+                        }
+                    }
+                    _ => {}
+                }
             }
 
             let is_actionable = stale_facts.is_empty();

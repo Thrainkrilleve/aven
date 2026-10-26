@@ -30,10 +30,10 @@ From its inception as an experimental relational solver to a production-grade mu
 
 ## 2. Future Roadmap
 
-### Phase 4: Shared-Memory Rings & Native FFI (In Progress)
-- [ ] **Shared Memory Rings (`shm`):** Bypassing loopback sockets entirely by memory-mapping telemetry buffers into shared ring buffers (`using shm("/aven_shm")`), driving latency below **$100\,\mu\text{s}$**.
-- [ ] **C / Rust Native FFI Plugins (`using native(...)`):** Dynamic library loading (`.so` / `.dll`) for zero-copy in-process evaluation.
-- [ ] **Bidirectional IPC Daemon Control:** Real-time actuation commands streamed from Aven directly to physical actuators (valves, flaps, throttling governors).
+### Phase 4: Shared-Memory Rings & Native FFI (Completed)
+- [x] **Shared Memory Rings (`shm`):** Bypassing loopback sockets entirely by memory-mapping telemetry buffers into shared ring buffers (`using shm("path")`), driving latency below **$100\,\mu\text{s}$** ($10.1\,\mu\text{s}$ measured).
+- [x] **C / Rust Native FFI Plugins (`using native(...)`):** Dynamic library loading (`.so` / `.dll`) for zero-copy in-process evaluation ($5.5\,\mu\text{s}$ measured).
+- [x] **Bidirectional IPC Daemon Control:** Real-time actuation commands streamed from Aven directly to physical actuators (valves, flaps, throttling governors).
 
 ### Phase 5: Formal Verification & SMT Export
 - [ ] **SMT-LIB2 Export:** Transpile Aven invariant specifications to Z3 / CVC5 for formal mathematical verification before deployment.

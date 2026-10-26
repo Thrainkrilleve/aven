@@ -14,6 +14,8 @@ pub enum TokenKind {
     KwUsing,
     KwExternal,
     KwIpc,
+    KwShm,
+    KwNative,
     KwInt,
 
     // Literals & Identifiers
@@ -377,6 +379,8 @@ impl<'a> Lexer<'a> {
             "using" => TokenKind::KwUsing,
             "external" => TokenKind::KwExternal,
             "ipc" => TokenKind::KwIpc,
+            "shm" => TokenKind::KwShm,
+            "native" => TokenKind::KwNative,
             "unit" => TokenKind::KwUnit,
             "signal" => TokenKind::KwSignal,
             "minimize" => TokenKind::KwMinimize,
