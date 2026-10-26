@@ -1,0 +1,12 @@
+# build artifacts
+*.obj
+*.exe
+*.o
+*.pdb
+*.ilk
+*.lib
+*.exp
+# large generated data (written to a scratch dir, never the repo)
+battery.txt
+oracle.txt
+out_*.txt

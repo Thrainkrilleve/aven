@@ -1,0 +1,8 @@
+# build artifacts
+aeric_demo
+aeric_demo.exe
+*.o
+*.obj
+*.exe
+*.pdb
+*.ilk
