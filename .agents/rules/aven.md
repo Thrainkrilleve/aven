@@ -17,16 +17,16 @@ Aven is a declarative systems modeling language combining continuous non-linear 
 - **Solve & Optimization Blocks:**
   ```aven
   solve PhysicalSizing with {
-      drive_tb = 18.0 [TB]
+      drive_tb = 18.0
       raid_efficiency = 0.75
-      usable_tb >= 100.0 [TB]
+      usable_tb >= 100.0
       drives <= 12
       minimize(drives)
   }
   ```
 - **Live IPC Telemetry:**
   ```aven
-  external relation OutsideWeather using ipc("127.0.0.1:9090") {
+  relation OutsideWeather using ipc("127.0.0.1:9090") {
       temp_c = observed_temp_c
   }
   ```

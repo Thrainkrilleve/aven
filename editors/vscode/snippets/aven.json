@@ -11,11 +11,11 @@
   "IPC External Relation": {
     "prefix": "relation-ipc",
     "body": [
-      "external relation ${1:LiveSensor} using ipc(\"${2:127.0.0.1:9090}\") {",
-      "    ${3:sensor_value} = ${4:observed_value}",
+      "relation ${1:LiveSensor} using ipc(\"${2:127.0.0.1:9090}\") {",
+      "    ${3:derived_value} = ${4:observed_value} * ${5:1.0}",
       "}"
     ],
-    "description": "Define an external relation connected to a real-time IPC telemetry daemon"
+    "description": "Relation whose facts come from a persistent TCP daemon"
   },
   "Solve Block": {
     "prefix": "solve",
@@ -41,7 +41,7 @@
     "prefix": "forward",
     "body": [
       "forward ${1:BlockName} {",
-      "    ${2:output} <- ${3:expression}",
+      "    ${2:output} = ${3:expression}",
       "}"
     ],
     "description": "Define a forward causal DAG compute block"
@@ -49,8 +49,15 @@
   "Unit Declaration": {
     "prefix": "unit",
     "body": [
-      "unit ${1:kW} = ${2:1000} * ${3:W}"
+      "unit ${1:dimension_name} : ${2:unit_a}, ${3:unit_b}"
     ],
-    "description": "Declare an extensible physical unit"
+    "description": "Declare units of a new dimension (they convert only among themselves)"
+  },
+  "Typed Signal": {
+    "prefix": "signal",
+    "body": [
+      "signal ${1:name} : ${2:km/h}"
+    ],
+    "description": "Declare the unit a variable is read and shown in"
   }
 }

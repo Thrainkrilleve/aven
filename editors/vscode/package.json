@@ -2,7 +2,7 @@
   "name": "aven-lang",
   "displayName": "Aven Language Support",
   "description": "Language support for Aven (.aven): syntax highlighting, unit-aware dimensions, snippets, live diagnostics, and compiler commands for OpenVSCode and Antigravity.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "thrain",
   "engines": {
     "vscode": "^1.75.0"
@@ -115,5 +115,7 @@
         ]
       }
     ]
-  }
+  },
+  "license": "MIT",
+  "author": "Austin Thompson"
 }

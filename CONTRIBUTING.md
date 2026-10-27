@@ -27,7 +27,7 @@ Aven replaces fragile imperative code with verified mathematical invariants and 
 
 ```bash
 # Clone the repository
-git clone https://git.thrainkrill.space/thrain/aven.git
+git clone https://github.com/Thrainkrilleve/aven.git
 cd aven
 
 # Check compilation
@@ -51,8 +51,9 @@ Every new feature or bugfix must include:
 ## Submitting Pull Requests
 
 1. Fork the repository and create your feature branch from `main`.
-2. Ensure `cargo test --release` passes 100% with zero warnings.
-3. Open a Pull Request describing:
+2. Ensure `cargo test --release` passes 100% with zero warnings (the SMT and safety-case tests need `z3` or `cvc5` on `PATH`), and that `python3 scripts/check_docs.py` reports no problems: every Aven example in the docs and on the website must compile, and documented outputs must match `avenc run`.
+3. If you change a `forward` block in `examples/` or the WebAssembly emitter, run `npm run build:models` in `web/` so the website playground matches the compiler.
+4. Open a Pull Request describing:
    - The motivation for the change.
    - The mathematical relations or physical invariants touched.
    - Test results across all test suites.

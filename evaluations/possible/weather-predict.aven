@@ -71,9 +71,13 @@ relation WeatherCell {
     // ----------------------------------------------------
     // 5. Radar: Marshall-Palmer Z = 200 R^1.6, dBZ = 10 log10 Z
     // ----------------------------------------------------
-    // The radar measures dBZ, so Aven solves this backward for the rain rate. Below about
-    // 10 dBZ (0.15 mm/h) there is no measurable rain and the relation is not meaningful.
-    radar_dbz = 10.0 * log(200.0 * radar_rain_mmh ^ 1.6) / 2.302585092994046
+    // The radar measures dBZ, so Aven solves this backward for the rain rate. Below 10 dBZ
+    // (0.15 mm/h) there is no measurable rain and the relation is not meaningful, so the
+    // reported rate is 0 there: echo_gate is 1 at or above 10 dBZ and 0 below it.
+    radar_dbz = 10.0 * log(200.0 * mp_rain_mmh ^ 1.6) / 2.302585092994046
+    echo_sign = sign(floor(radar_dbz / 10.0))
+    echo_gate = (echo_sign + abs(echo_sign)) / 2.0
+    radar_rain_mmh = echo_gate * mp_rain_mmh
 
     // Radar-estimated vs gauge-measured rain (USGS), when a gauge is nearby
     radar_minus_gauge_mmh = gauge_available * (radar_rain_mmh - gauge_rate_mmh)
@@ -85,9 +89,15 @@ relation WeatherCell {
     nowcast_dbz_15 = upstream_dbz_15
     nowcast_dbz_30 = upstream_dbz_30
     nowcast_dbz_60 = upstream_dbz_60
-    nowcast_dbz_15 = 10.0 * log(200.0 * nowcast_rain_15_mmh ^ 1.6) / 2.302585092994046
-    nowcast_dbz_30 = 10.0 * log(200.0 * nowcast_rain_30_mmh ^ 1.6) / 2.302585092994046
-    nowcast_dbz_60 = 10.0 * log(200.0 * nowcast_rain_60_mmh ^ 1.6) / 2.302585092994046
+    nowcast_dbz_15 = 10.0 * log(200.0 * mp_rain_15_mmh ^ 1.6) / 2.302585092994046
+    nowcast_dbz_30 = 10.0 * log(200.0 * mp_rain_30_mmh ^ 1.6) / 2.302585092994046
+    nowcast_dbz_60 = 10.0 * log(200.0 * mp_rain_60_mmh ^ 1.6) / 2.302585092994046
+    sign_15 = sign(floor(nowcast_dbz_15 / 10.0))
+    sign_30 = sign(floor(nowcast_dbz_30 / 10.0))
+    sign_60 = sign(floor(nowcast_dbz_60 / 10.0))
+    nowcast_rain_15_mmh = (sign_15 + abs(sign_15)) / 2.0 * mp_rain_15_mmh
+    nowcast_rain_30_mmh = (sign_30 + abs(sign_30)) / 2.0 * mp_rain_30_mmh
+    nowcast_rain_60_mmh = (sign_60 + abs(sign_60)) / 2.0 * mp_rain_60_mmh
 }
 
 // Live observations; every field comes from weather_adapter.py

@@ -1238,3 +1238,78 @@ td:first-child { white-space: nowrap; }
   html { scroll-behavior: auto; }
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+/* ---------------------------------------------------------------------------
+   /weather — live radar nowcast
+   --------------------------------------------------------------------------- */
+.wx-live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--green); margin-right: 0.35rem; box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.6); animation: wx-pulse 2s infinite; vertical-align: 1px; }
+.wx-live.stale { background: var(--amber); animation: none; }
+@keyframes wx-pulse { 0% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.5); } 70% { box-shadow: 0 0 0 8px rgba(74, 222, 128, 0); } 100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); } }
+@media (prefers-reduced-motion: reduce) { .wx-live { animation: none; } }
+.hero-live { margin: 1rem 0 1.5rem; font-size: 0.9rem; }
+.hero-live a { color: var(--text-muted); }
+.hero-live a:hover { color: var(--accent); }
+.wx-status { margin-top: 1.25rem; font-size: 0.9rem; color: var(--text-muted); font-family: var(--font-mono); }
+.wx-section { margin: 3rem 0; }
+.wx-section h2 { font-size: 1.4rem; }
+.wx-section-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+.wx-note { color: var(--text-muted); font-size: 0.92rem; max-width: 52rem; margin: 0.5rem 0 1rem; }
+.wx-seg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.wx-seg button { background: transparent; color: var(--text-muted); border: 0; padding: 0.4rem 0.8rem; font: inherit; font-size: 0.85rem; cursor: pointer; }
+.wx-seg button + button { border-left: 1px solid var(--border); }
+.wx-seg button[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); }
+.wx-score td.num, .wx-score th.num, .wx-ver td.num, .wx-ver th.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.wx-lead { font-weight: 600; white-space: nowrap; vertical-align: top; }
+.wx-base { color: var(--text-muted); }
+.wx-best { color: var(--green); font-weight: 600; }
+.wx-dim { color: var(--text-dim); font-size: 0.85rem; }
+.wx-good { color: var(--green); }
+.wx-off { color: var(--amber); }
+.wx-runs { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); gap: 1rem; }
+.wx-run { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.1rem 1.2rem; display: flex; flex-direction: column; gap: 0.9rem; min-width: 0; }
+.wx-run.wx-error { opacity: 0.8; }
+.wx-run-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.75rem; }
+.wx-run-head h3 { font-size: 1.05rem; margin: 0 0 0.15rem; }
+.wx-run-meta { margin-top: -0.5rem; }
+.wx-badge { font-size: 0.75rem; padding: 0.2rem 0.55rem; border-radius: 999px; white-space: nowrap; border: 1px solid var(--border); }
+.wx-badge.ok { color: var(--green); background: var(--green-soft); border-color: transparent; }
+.wx-badge.gated { color: var(--amber); background: var(--amber-soft); border-color: transparent; }
+.wx-badge.error { color: var(--text-muted); }
+.wx-error { color: var(--amber); font-size: 0.88rem; margin: 0; overflow-wrap: anywhere; }
+.wx-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin-bottom: 0.4rem; }
+.wx-grid { display: grid; grid-template-columns: minmax(7.5rem, auto) repeat(4, 1fr); gap: 0.3rem 0.6rem; font-family: var(--font-mono); font-size: 0.88rem; align-items: baseline; }
+.wx-grid .wx-h { text-align: right; }
+.wx-grid .wx-m { font-family: var(--font-sans); color: var(--text-muted); font-size: 0.85rem; }
+.wx-grid .wx-v { text-align: right; font-variant-numeric: tabular-nums; }
+.wx-grid small { display: block; font-size: 0.72rem; }
+.wx-checks { display: flex; flex-direction: column; gap: 0.35rem; }
+.wx-check { display: grid; grid-template-columns: auto 1fr; column-gap: 0.5rem; font-size: 0.86rem; align-items: baseline; }
+.wx-check-label { color: var(--text-muted); }
+.wx-check-val { grid-column: 2; font-family: var(--font-mono); font-size: 0.8rem; overflow-wrap: anywhere; }
+.wx-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--text-dim); align-self: center; }
+.wx-dot.ok { background: var(--green); }
+.wx-dot.warn { background: var(--amber); }
+.wx-dot.bad { background: var(--red); }
+.wx-dot.na { background: transparent; border: 1px solid var(--text-dim); }
+.wx-phys { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.5rem 1rem; margin: 0; }
+.wx-phys dt { font-size: 0.75rem; color: var(--text-dim); }
+.wx-phys dd { margin: 0; font-family: var(--font-mono); font-size: 0.88rem; }
+.wx-src-table td:first-child { width: 38%; white-space: normal; }
+.wx-ctx { display: flex; flex-direction: column; gap: 0.3rem; }
+.wx-alerts { color: var(--amber); font-size: 0.86rem; }
+.wx-sources summary { cursor: pointer; color: var(--text-muted); font-size: 0.86rem; }
+.wx-sources ul { list-style: none; padding: 0; margin: 0.5rem 0 0; display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.82rem; }
+.wx-sources li { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.wx-run-foot { display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; }
+.wx-rerun { font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted); overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .wx-src-table, .wx-src-table tbody { display: block; }
+  .wx-src-table thead { display: none; }
+  .wx-src-table tr { display: block; padding: 0.6rem 0; border-bottom: 1px solid var(--border); }
+  .wx-src-table td { display: block; width: auto !important; border: 0; padding: 0.1rem 0.75rem; }
+  .wx-src-table td:first-child { font-weight: 600; }
+}
+@media (max-width: 520px) {
+  .wx-grid { grid-template-columns: minmax(6rem, auto) repeat(4, 1fr); font-size: 0.8rem; gap: 0.3rem 0.4rem; }
+  .wx-run { padding: 1rem; }
+}

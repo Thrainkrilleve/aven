@@ -44,15 +44,7 @@ def main():
     present = np.zeros(n, dtype=bool)
     ora_alloc = np.full(n, np.nan)       # correctly-rounded double of the exact integer
     ora_cont = np.full((n, 4), np.nan)   # raw,total,payload,wire as doubles
-    with open(f"{sp}/oracle.txt") as fh:
-        for line in fh:
-            p = line.split()
-            if len(p) < 6 or p[1] == "skip": continue
-            i = int(p[0]); present[i] = True
-            ora_alloc[i] = float(p[2])                 # p[1]=raw p[2]=alloc(index1) -> wait
-    # NOTE: oracle columns are i, raw, alloc, total, payload, wire  (p[1..5])
-    # re-read correctly
-    present[:] = False; ora_alloc[:] = np.nan; ora_cont[:] = np.nan
+    # oracle columns: i, raw, alloc, total, payload, wire
     with open(f"{sp}/oracle.txt") as fh:
         for line in fh:
             p = line.split()
@@ -81,6 +73,14 @@ def main():
     pure_cols = [0, 2, 3]  # positions of raw, payload, wire within c_cont
     rel_pure = rel[:, pure_cols][mask]
     max_rel_pure = float(np.nanmax(rel_pure)) if rel_pure.size else 0.0
+    # Same, restricted to results in the normal float64 range (subnormals lose precision by design)
+    normal = np.abs(ora_cont[:, pure_cols]) >= np.finfo(np.float64).tiny
+    rel_pure_normal = np.where(normal, rel[:, pure_cols], np.nan)[mask]
+    max_rel_pure_normal = float(np.nanmax(rel_pure_normal)) if np.isfinite(rel_pure_normal).any() else 0.0
+    # Battery layout (gen_and_oracle.py): 121 edge rows, then 10,000 ceil-boundary rows, then random
+    BOUNDARY = range(121, 121 + 10000)
+    off = np.flatnonzero(within & (c_alloc != ora_alloc))
+    off_outside_boundary = [int(i) for i in off if i not in BOUNDARY]
 
     result = {
         "n_vectors": n, "finite_rows": n_fin, "nonfinite_rows": n - n_fin,
@@ -90,6 +90,9 @@ def main():
         "oracle_integer_beyond_2^53": {"correctly_rounded": beyond_ok, "total": beyond_total},
         "max_rel_err_continuous_finite": max_rel,
         "max_rel_err_pure_arithmetic": max_rel_pure,
+        "max_rel_err_pure_arithmetic_normal_range": max_rel_pure_normal,
+        "allocated_workers_off_by_ceil_snap": len(off),
+        "allocated_workers_off_outside_boundary_sweep": off_outside_boundary,
     }
     print(json.dumps(result, indent=2))
 
@@ -103,8 +106,10 @@ def main():
     print(f"\n2) vs 50-digit decimal oracle (finite rows):")
     print(f"     allocated_workers, |true| <= 2^53 : {int_exact:,}/{int_total:,} EXACT")
     print(f"     allocated_workers, |true|  > 2^53 : {beyond_ok:,}/{beyond_total:,} correctly-rounded (float64 cannot hold the exact integer)")
-    print(f"     max rel error, pure arithmetic (raw/payload/wire): {max_rel_pure:.3e}")
-    print(f"     max rel error, total_ram_needed (inherits ceil off-by-one at boundaries): {max_rel:.3e}")
+    print(f"     allocated_workers differing from the oracle: {len(off):,}, of which outside the ceil-boundary sweep: {len(off_outside_boundary)}")
+    print(f"     max rel error, pure arithmetic (raw/payload/wire), normal results: {max_rel_pure_normal:.3e}")
+    print(f"     max rel error, pure arithmetic, including subnormal results: {max_rel_pure:.3e}")
+    print(f"     max rel error, all continuous outputs incl. total_ram_needed (inherits ceil off-by-one): {max_rel:.3e}")
     print(f"\n3) Non-finite pathologies ({n-n_fin} rows): bit-diffs vs Aven-C = {cross_nonfin}")
     print("     (Inf-sign / NaN-payload artifacts on overflow & div-by-zero inputs; not computational error.)")
 

@@ -27,13 +27,14 @@ import re
 import subprocess
 import sys
 import tempfile
+import textwrap
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 AVENC = ROOT / "target" / "release" / ("avenc.exe" if os.name == "nt" else "avenc")
 SKIP_DIRS = {"target", "node_modules", "archive", ".git", ".wrangler", "evaluations"}
 
-FENCE = re.compile(r"^```([\w-]*)[^\n]*\n(.*?)^```", re.S | re.M)
+FENCE = re.compile(r"^([ \t]*)```([\w-]*)[^\n]*\n(.*?)^\1```", re.S | re.M)
 PRE = re.compile(r'<pre data-lang="(aven(?:-error)?)">(.*?)</pre>', re.S)
 COMMAND = re.compile(r"(?:^|(?<=`)|(?<=\$ ))[ \t]*(?:\./target/release/)?avenc ([a-z][a-z-]*)\b(?![.\d])", re.M)
 # Code where commands appear: fenced blocks, inline `code`, and <code>/<pre> in HTML
@@ -93,7 +94,10 @@ def main():
         rel = path.relative_to(ROOT)
         text = path.read_text(encoding="utf-8")
 
-        blocks = [(m.group(1), m.group(2), m.start()) for m in FENCE.finditer(text)]
+        # Fences may be indented (inside list items); strip that indentation from the body
+        blocks = [
+            (m.group(2), textwrap.dedent(m.group(3)), m.start()) for m in FENCE.finditer(text)
+        ]
         if path.suffix == ".html":
             blocks += [(m.group(1), html.unescape(m.group(2)).lstrip("\n"), m.start()) for m in PRE.finditer(text)]
 

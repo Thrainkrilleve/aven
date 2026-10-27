@@ -27,9 +27,10 @@ if hasattr(sys.stdout, "reconfigure"):
 
 def main():
     root = Path(__file__).resolve().parent.parent
-    avenc_exe = root / "target" / "debug" / "avenc.exe"
+    exe = "avenc.exe" if os.name == "nt" else "avenc"
+    avenc_exe = root / "target" / "debug" / exe
     if not avenc_exe.exists():
-        avenc_exe = root / "target" / "release" / "avenc.exe"
+        avenc_exe = root / "target" / "release" / exe
     if not avenc_exe.exists():
         print(f"Error: avenc executable not found at {avenc_exe}")
         sys.exit(1)
@@ -71,7 +72,9 @@ def main():
         latencies_ms.append(elapsed_ms)
 
         combined = proc.stdout + proc.stderr
-        is_blocked = "DECISION BLOCKED" in combined or proc.returncode != 0
+        # Exit 3 is avenc's freshness block; any other non-zero exit is a real failure
+        is_blocked = proc.returncode == 3 and "DECISION BLOCKED" in combined
+        failed = proc.returncode != 0 and not is_blocked
 
         # Extract target pods and wire rate from output
         target_pods = None
@@ -95,6 +98,7 @@ def main():
             "expected_ttl": expected_ttl,
             "exit_code": proc.returncode,
             "is_blocked": is_blocked,
+            "failed": failed,
             "target_pods": target_pods,
             "allocated_workers": allocated_workers,
             "wire_rate_gbps": wire_rate_gbps,
@@ -113,7 +117,9 @@ def main():
         wrk = f"{r['allocated_workers']:.0f}" if r["allocated_workers"] is not None else "HOLD"
         wire = f"{r['wire_rate_gbps']:.2f}" if r["wire_rate_gbps"] is not None else "—"
         if r["is_blocked"]:
-            status = "❌ DECISION BLOCKED (TTL=0)"
+            status = "❌ DECISION BLOCKED (stale input)"
+        elif r["failed"]:
+            status = f"✗ FAILED (exit {r['exit_code']})"
         else:
             status = f"✓ Sized ({r['elapsed_ms']:.1f}ms)"
         print(f"{r['step']:4d} | {t_s:8d} | {rps:8.0f} | {lat:5.1f}ms | {pods:>11s} | {wrk:>7s} | {wire:>9s} | {status}")
@@ -142,8 +148,13 @@ def main():
     print(" Production Trace Benchmark Summary")
     print("=" * 78)
     print(f"Total Steps Evaluated:        {len(results)}")
-    print(f"Actionable Solutions Sized:   {actionable_count} / 39 fresh steps (100% success)")
-    print(f"Stale Steps Blocked:          {blocked_count} / 1 (Step 25 TTL=0 correctly locked)")
+    stale_steps = [r["step"] for r in results if r["expected_ttl"] == 0]
+    blocked_steps = [r["step"] for r in results if r["is_blocked"]]
+    failed_steps = [r["step"] for r in results if r["failed"]]
+    fresh_total = len(results) - len(stale_steps)
+    print(f"Actionable Solutions Sized:   {actionable_count} / {fresh_total} fresh steps")
+    print(f"Stale Steps Blocked:          {blocked_count} / {len(stale_steps)} (blocked steps {blocked_steps}, stale in trace {stale_steps})")
+    print(f"Failed Steps:                 {len(failed_steps)} {failed_steps}")
     print(f"Traffic Range:                {min(r['reqs_per_second'] for r in results):.0f} to {max(r['reqs_per_second'] for r in results):.0f} req/s")
     valid_pods = [r["target_pods"] for r in results if r["target_pods"] is not None]
     print(f"Target Pod Range:             {min(valid_pods):.0f} pods to {max(valid_pods):.0f} pods")
@@ -162,6 +173,9 @@ def main():
             "total_steps": len(results),
             "actionable_count": actionable_count,
             "blocked_count": blocked_count,
+            "failed_count": len(failed_steps),
+            "avenc_version": subprocess.run([str(avenc_exe), "--version"], capture_output=True, text=True).stdout.strip(),
+            "platform": sys.platform,
             "min_reqs_per_second": min(r["reqs_per_second"] for r in results),
             "max_reqs_per_second": max(r["reqs_per_second"] for r in results),
             "min_pods": min(valid_pods),
@@ -172,7 +186,9 @@ def main():
         }, f, indent=2)
     print(f"\nArtifact saved to: {out_file}")
 
-    assert actionable_count == 39, f"Expected 39 actionable steps, got {actionable_count}"
+    assert actionable_count == fresh_total, f"Expected {fresh_total} actionable steps, got {actionable_count}"
+    assert blocked_steps == stale_steps, f"Blocked steps {blocked_steps} differ from stale steps {stale_steps}"
+    assert not failed_steps, f"Steps failed: {failed_steps}"
     assert blocked_count == 1, f"Expected 1 blocked step, got {blocked_count}"
     print("✓ All trace assertions passed cleanly.")
 

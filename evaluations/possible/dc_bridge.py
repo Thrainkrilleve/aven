@@ -100,7 +100,7 @@ class Pageviews:
         start = end - datetime.timedelta(hours=72)
         url = self.URL.format(start=f"{start:%Y%m%d%H}", end=f"{end:%Y%m%d%H}")
         req = urllib.request.Request(url, headers={
-            "User-Agent": "AvenDCDigitalTwin/1.0 (https://git.thrainkrill.space/thrain/aven)"})
+            "User-Agent": "AvenDCDigitalTwin/1.0 (https://github.com/Thrainkrilleve/aven)"})
         try:
             with urllib.request.urlopen(req, timeout=20) as r:
                 items = json.load(r)["items"]

@@ -30,6 +30,7 @@
       </button>
       <ul class="nav-links" id="nav-links">
         <li><a href="/#playground">Playground</a></li>
+        <li><a href="/weather">Live weather</a></li>
         <li><a href="/docs.html">Docs</a></li>
         <li><a href="/registry.html">Packages</a></li>
         <li><a href="https://github.com/Thrainkrilleve/aven" rel="noopener">GitHub</a></li>
@@ -59,6 +60,7 @@
             </a>
             <a href="/docs.html" class="btn btn-ghost">Read the guide</a>
           </div>
+          <p class="hero-live"><span class="wx-live"></span><a href="/weather">Live: an Aven radar nowcast running every five minutes on NOAA, NWS and USGS data, scored against the radar</a></p>
 
           <div class="install" id="install">
             <div class="install-tabs" role="tablist" aria-label="Install method">
@@ -120,12 +122,12 @@ solve Dynamics with {
           <div class="proof-item">
             <div class="proof-val">0.56<small>ms</small></div>
             <div class="proof-label">Median end-to-end solve</div>
-            <div class="proof-src"><code>avenc bench</code>, live IPC daemon, 24-fact flight model</div>
+            <div class="proof-src"><code>avenc bench</code>, live IPC daemon, flight model, 8-core Windows workstation (1.4 ms on a 4-vCPU Linux container)</div>
           </div>
           <div class="proof-item">
             <div class="proof-val">1,720<small>/s</small></div>
             <div class="proof-label">Solves per second</div>
-            <div class="proof-src">Same benchmark, one client, 8-core workstation</div>
+            <div class="proof-src">Same benchmark and machine, one client (664/s on the Linux container)</div>
           </div>
           <div class="proof-item">
             <div class="proof-val">4</div>
@@ -356,7 +358,7 @@ static void aven_ProductionProfile(double avg_latency_ms, ...,
       <div class="footer-grid">
         <div class="footer-brand">
           <a href="/" class="brand"><img src="/favicon.svg" alt="" class="brand-mark"> AVEN</a>
-          <p>A relational language and solver for physical systems, written in dependency-free Rust. MIT licensed.</p>
+          <p>A relational language and solver for physical systems, written in dependency-free Rust. Released under the MIT License.</p>
         </div>
         <div>
           <h4>Learn</h4>
@@ -380,13 +382,12 @@ static void aven_ProductionProfile(double avg_latency_ms, ...,
           <h4>Source</h4>
           <ul>
             <li><a href="https://github.com/Thrainkrilleve/aven" rel="noopener">GitHub</a></li>
-            <li><a href="https://git.thrainkrill.space/thrain/aven" rel="noopener">Forgejo origin</a></li>
             <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/CODE_OF_CONDUCT.md" rel="noopener">Code of conduct</a></li>
           </ul>
         </div>
       </div>
       <div class="footer-bottom">
-        <span>&copy; 2026 Aven contributors &middot; MIT License</span>
+        <span>&copy; 2026 Austin Thompson &middot; <a href="https://github.com/Thrainkrilleve/aven/blob/main/LICENSE" rel="noopener">MIT License</a></span>
         <span>avenc.dev</span>
       </div>
     </div>

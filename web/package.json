@@ -1,5 +1,6 @@
 {
   "name": "avenc-web",
+  "type": "module",
   "version": "1.0.0",
   "description": "Scientific facing website, WebAssembly playground, and D1 package registry for Aven",
   "main": "src/index.ts",
@@ -16,5 +17,7 @@
     "@cloudflare/workers-types": "^5.20261023.1",
     "typescript": "^5.6.3",
     "wrangler": "^4.153.0"
-  }
+  },
+  "license": "MIT",
+  "author": "Austin Thompson"
 }

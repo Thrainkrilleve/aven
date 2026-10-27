@@ -17,55 +17,62 @@ Aven bridges this gap by enforcing **relational capacity invariants** directly o
 
 ## 2. Relational Datacenter Sizing Model
 
-From [`examples/server_capacity.aven`](https://github.com/Thrainkrilleve/aven/blob/main/examples/server_capacity.aven):
+The controller's model is [`k8s/controller/hpa_scaling.aven`](https://github.com/Thrainkrilleve/aven/blob/main/k8s/controller/hpa_scaling.aven), a Little's Law sizing with a queueing-headroom ceiling whose traffic figures come from `workload_adapter.py`:
+
+```aven-fragment
+relation WorkloadCapacity using external("python", "k8s/controller/workload_adapter.py") {
+    raw_workers = (reqs_per_second * avg_latency_ms) / 1000.0
+    allocated_workers = ceil(raw_workers / target_utilization)
+    target_pods = ceil(allocated_workers / workers_per_pod)
+}
+
+solve WorkloadCapacity with {
+    workers_per_pod = 100.0
+    target_utilization = 0.70
+    target_pods >= 1.0
+}
+```
+
+### The Omnidirectional Advantage
+- **Forward mode:** given traffic and latency, compute the pods to run (what the controller does each cycle).
+- **Backward capacity mode:** fix the limits and maximize the traffic instead. With at most 64 pods of 100 workers, 20 ms latency, 70% utilization, 64 KB payloads and a 40 Gbps link, `avenc run` proves the maximum is **75,120 req/s**, set by the network (22 pods suffice):
 
 ```aven
 relation ServerScaling {
-    // 1. Worker & Pod Scaling from Inbound Traffic
+    int allocated_workers
+    int allocated_pods
     raw_workers = (reqs_per_second * avg_latency_ms) / 1000.0
-    allocated_workers = ceil(raw_workers / target_utilization)
-    allocated_pods = ceil(allocated_workers / workers_per_pod)
-
-    // 2. RAM & Network Framing Invariants
-    total_ram_mb = allocated_workers * (ram_per_worker_mb + socket_buffer_mb) + os_kernel_ram_mb
+    allocated_workers >= raw_workers / target_utilization
+    allocated_pods >= allocated_workers / workers_per_pod
     payload_gbps = (reqs_per_second * avg_payload_kb * 8.0) / 1000000.0
     wire_rate_gbps = payload_gbps * framing_overhead_ratio
 }
 
 solve ServerScaling with {
-    allocated_pods <= 500
+    avg_latency_ms = 20
+    target_utilization = 0.7
+    workers_per_pod = 100
+    avg_payload_kb = 64
+    framing_overhead_ratio = 1.04
+    allocated_pods <= 64
     wire_rate_gbps <= 40.0
-    total_ram_mb <= 262144.0 // 256 GB host limit
+    maximize(reqs_per_second)
 }
 ```
 
-### The Omnidirectional Advantage:
-- **Forward Mode:** Given inbound traffic ($50,000\,\text{req/s}$) and target latency ($20\,\text{ms}$), compute exact allocated pods and wire rate.
-- **Backward Capacity Mode:** Given a fixed budget of 64 pods or 40 Gbps top-of-rack network switch, determine the maximum safe request capacity without SLA degradation.
+---
+
+## 3. Free-Cooling Margins (Not Yet Wired to Kubernetes)
+
+The weather monitor in `evaluations/weather/` computes a free-cooling margin per airport from live NWS data (e.g. `free_cooling_margin = 18.0 - temp_c`). Using that margin to move workloads between regions is a possible application; the controller in `k8s/controller/` does not do it, and no energy saving has been measured.
 
 ---
 
-## 3. Free-Cooling Workload Migration
+## 4. Trace Replay
 
-Using real-time weather feeds (NOAA AWC METARs), Aven calculates the **free cooling margin** across geographic cluster regions:
+`benchmarks/replay_trace_bench.py` replays `evaluations/data/wikimedia_traffic_trace.json` through `evaluations/traces/traffic_replay.aven`, one `avenc run` per step. Results are in `benchmarks/trace_benchmark_results.json`:
+- 40 steps from 7,100 to 98,200 req/s, sized to 2–80 pods.
+- All 39 fresh steps sized; step 25 carries `ttl_ms = 0` and `avenc` blocked it (`DECISION BLOCKED`, exit code 3). The harness asserts that exactly the stale steps are blocked and nothing fails.
+- Median 32.8 ms and p95 43.0 ms per `avenc run` including process start-up (4-vCPU Linux container, 2026-10-27; an earlier Windows run measured 47.7 / 56.5 ms with identical sizing).
 
-```aven
-relation DatacenterCooling {
-    free_cooling_margin_c = max_intake_temp_c - ambient_temp_c
-}
-
-solve DatacenterCooling with {
-    free_cooling_margin_c >= 5.0 // Free cooling active when ambient < 20°C
-}
-```
-
-When cold air margins open up in Denver (`KDEN`, $4.0^\circ\text{C}$), Aven signals Kubernetes controllers to drain compute from hot zones (Dallas `KDFW`, $28^\circ\text{C}$) to cold zones, cutting HVAC chiller power by up to 40%.
-
----
-
-## 4. Production Replay: Wikimedia Traces
-
-In [`evaluations/traces/traffic_replay.aven`](https://github.com/Thrainkrilleve/aven/blob/main/evaluations/traces/traffic_replay.aven), Aven continuously ingested real production traffic traces from the **Wikimedia Foundation**:
-- Evaluated step-by-step scaling across 10-minute traffic windows.
-- Maintained exact target utilization ($70\%$) while strictly respecting pod ceilings.
-- Verified zero staleness blocks during sustained real-world replay.
+The trace's origin is not recorded in the repository. Wikimedia publishes pageview counts, not per-request latency or payload size, so treat the file as an illustrative traffic profile rather than a production capture.

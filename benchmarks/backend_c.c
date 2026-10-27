@@ -2,6 +2,7 @@
  * (aven_ProductionProfile, compiled from examples/server_capacity.aven).
  * Reads battery.txt, writes out_c.txt as raw IEEE-754 bits, and times the
  * solve-only loop. This is the real artifact under test, not a reimplementation. */
+#define _POSIX_C_SOURCE 199309L /* clock_gettime under -std=c99 */
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>

@@ -26,7 +26,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 UA = {
-    "User-Agent": "AvenWeatherCell/1.0 (https://git.thrainkrill.space/thrain/aven)",
+    "User-Agent": "AvenWeatherCell/1.0 (https://github.com/Thrainkrilleve/aven)",
     "Accept": "application/geo+json, application/json, text/plain",
 }
 EARTH_M_PER_DEG = 111_320.0
@@ -67,7 +67,10 @@ def iso_ms(ts):
 
 def nws_stations(lat, lon):
     pts = get_json(f"https://api.weather.gov/points/{lat:.4f},{lon:.4f}")
-    feats = get_json(pts["properties"]["observationStations"])["features"]
+    stations_url = pts["properties"].get("observationStations")
+    if not stations_url:
+        raise RuntimeError(f"NWS lists no observation stations for {lat:.3f},{lon:.3f} (outside its land coverage)")
+    feats = get_json(stations_url)["features"]
     out = []
     for f in feats:
         slon, slat = f["geometry"]["coordinates"][:2]
@@ -135,7 +138,8 @@ def triangle(site_lat, site_lon, obs):
 # ---------------------------------------------------------------------------
 
 def metar_station_pressure(station):
-    data = get_json(f"https://aviationweather.gov/api/data/metar?ids={station['id']}&format=json")
+    body = get(f"https://aviationweather.gov/api/data/metar?ids={station['id']}&format=json")
+    data = json.loads(body) if body.strip() else None  # empty reply: not a METAR station
     if not data or data[0].get("altim") is None:
         return None
     altim = float(data[0]["altim"])  # hPa
@@ -196,19 +200,38 @@ def fb_winds(site_lat, site_lon, site_elev_m):
 # NOAA nowCOAST radar and USGS gauges
 # ---------------------------------------------------------------------------
 
-def radar_dbz(lat, lon):
+RADAR_WMS = "https://nowcoast.noaa.gov/geoserver/observations/weather_radar"
+
+
+def radar_times():
+    """Times (ms) of the radar mosaic images nowCOAST holds, oldest first."""
+    xml = get(f"{RADAR_WMS}/conus_base_reflectivity_mosaic/ows?service=WMS&version=1.3.0&request=GetCapabilities")
+    dim = re.search(r'<Dimension name="time"[^>]*>([^<]*)<', xml)
+    times = sorted(iso_ms(t.strip()) for t in (dim.group(1) if dim else "").split(",") if t.strip())
+    if not times:
+        raise RuntimeError("radar capabilities list no image times")
+    return times
+
+
+def radar_dbz(lat, lon, image_ms=None):
+    """Reflectivity (dBZ, 0 for no echo) at a point, and the time of the image read: the
+    latest image, or the one taken at image_ms (a time from radar_times())."""
+    if image_ms is None:
+        image_ms = radar_times()[-1]
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(image_ms / 1000)) + "Z"
     d = 0.005
-    url = ("https://nowcoast.noaa.gov/geoserver/observations/weather_radar/ows?service=WMS&version=1.3.0"
+    url = (f"{RADAR_WMS}/ows?service=WMS&version=1.3.0"
            "&request=GetFeatureInfo&layers=conus_base_reflectivity_mosaic"
            "&query_layers=conus_base_reflectivity_mosaic&crs=EPSG:4326"
            f"&bbox={lat - d},{lon - d},{lat + d},{lon + d}&width=3&height=3&i=1&j=1"
-           "&info_format=application/json")
+           f"&info_format=application/json&time={stamp}")
     doc = json.loads(get(url))
     vals = [v for f in doc.get("features", []) for v in f.get("properties", {}).values()
             if isinstance(v, (int, float))]
     if not vals:
         raise RuntimeError(f"no radar value at {lat:.3f},{lon:.3f}")
-    return max(0.0, float(vals[0])), iso_ms(doc["timeStamp"])
+    # doc["timeStamp"] is when the server answered, not when the image was taken
+    return max(0.0, float(vals[0])), image_ms
 
 
 def usgs_rain(lat, lon):
@@ -252,26 +275,33 @@ def main():
         obs = [o for o in obs if now_ms - o["timestamp_ms"] <= FRESH_MS]
         if not obs:
             raise RuntimeError("no NWS station near the site has reported in the last 75 minutes")
-        primary = next(o for o in obs if None not in (o["temp_c"], o["dewpoint_c"], o["rh"]) and "u" in o)
+        complete = [o for o in obs if None not in (o["temp_c"], o["dewpoint_c"], o["rh"]) and "u" in o]
         tri, pts = triangle(lat, lon, obs)
 
-        if primary["pressure_pa"] is not None:
-            pressure_hpa, pressure_src = primary["pressure_pa"] / 100.0, "nws_station_pressure"
-            elev = primary["elev_m"] or 0.0
-        else:
-            res = metar_station_pressure(primary)
-            if res is None:
-                raise RuntimeError(f"no pressure for {primary['id']} from NWS or METAR")
-            (pressure_hpa, elev), pressure_src = res, "metar_altimeter"
+        # Primary station: the nearest complete report with a pressure, from NWS or else METAR
+        primary = None
+        for o in complete:
+            if o["pressure_pa"] is not None:
+                primary, pressure_hpa, elev = o, o["pressure_pa"] / 100.0, o["elev_m"] or 0.0
+                pressure_src = "nws_station_pressure"
+                break
+            res = metar_station_pressure(o)
+            if res is not None:
+                primary, (pressure_hpa, elev), pressure_src = o, res, "metar_altimeter"
+                break
+        if primary is None:
+            raise RuntimeError("no recent NWS station near the site reports temperature, dewpoint, "
+                               "humidity, wind and a pressure (NWS or METAR)")
 
         fb = fb_winds(lat, lon, elev)
-        site_dbz, radar_ms = radar_dbz(lat, lon)
+        image_ms = radar_times()[-1]  # every read uses the same image
+        site_dbz, radar_ms = radar_dbz(lat, lon, image_ms)
         upstream = {}
         for lead in LEADS_MIN:
             dx, dy = fb["steer_u"] * lead * 60, fb["steer_v"] * lead * 60
             ulat = lat - dy / EARTH_M_PER_DEG
             ulon = lon - dx / (EARTH_M_PER_DEG * math.cos(math.radians(lat)))
-            upstream[lead] = (radar_dbz(ulat, ulon)[0], ulat, ulon)
+            upstream[lead] = (radar_dbz(ulat, ulon, image_ms)[0], ulat, ulon)
         gauge = usgs_rain(lat, lon)
     except Exception as e:  # noqa: BLE001 - reported to avenc as an adapter error
         print(json.dumps({"error": f"{type(e).__name__}: {e}"}))

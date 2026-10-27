@@ -42,19 +42,23 @@ What this protects against: with a key, any modification, deletion, insertion, r
 
 Physical sensors report data at discrete intervals. If a network partition occurs, or an ADS-B transponder drops out, traditional control systems often continue operating on the last-known value (a "ghost reading").
 
-Aven natively enforces **Time-to-Live (TTL)**:
-1. Every external payload provides `timestamp_ms` and `ttl_ms` (e.g. 120,000 ms).
-2. When evaluating relations, `avenc` checks:
+Aven enforces **Time-to-Live (TTL)** on adapter facts:
+1. An adapter or daemon may report `timestamp_ms` and `ttl_ms` (e.g. 120,000 ms) alongside its values.
+2. When settling, `avenc` checks
    $$\text{now}_{\text{ms}} > \text{timestamp}_{\text{ms}} + \text{ttl}_{\text{ms}}$$
-3. If the timestamp has expired, or the adapter explicitly returns `ttl_ms = 0`:
-   - The variable is marked `is_stale: true`.
-   - The fact ledger appends a warning tag: `stale-telemetry`.
-   - Aven halts execution with:
+3. If a fact has expired, or the adapter returns `ttl_ms = 0`:
+   - Its ledger entry is marked `is_stale: true`, and every fact derived from it carries the warning `causal-stale-taint`.
+   - `avenc run` refuses to settle the decision and exits with code 3:
      ```text
-     DECISION BLOCKED: The following external fact(s) are STALE (expired TTL):
-       - baro_altitude_m (last reported 142s ago, TTL=120s)
+     ❌ DECISION BLOCKED: Freshness Enforcement Failure
+       The following external fact(s) are STALE (expired TTL or ttl_ms=0):
+         • pitot_pressure_pa
+         • airspeed_ms
+
+       Refusing to settle a decision on expired inputs.
+       Pass --allow-stale to explicitly override in non-production environments.
      ```
-   - Autonomous controllers shift to a safe `HOLD` state rather than actuating on invalid telemetry.
+   - The AERIC runtime (`aeric/`) reacts to the equivalent condition by latching a `HOLD` state and driving its configured fail-safe setpoints.
 
 ---
 
@@ -88,4 +92,4 @@ When running monitors or batch benchmarks (`overnight_monitor.py`, `stream_ringe
 }
 ```
 
-This log provides complete mathematical reproducibility for post-incident root-cause analysis, FAA/regulatory compliance, and insurance verification.
+These logs record every input and result of a run for later analysis. Unlike `--ledger` output they are not hash-chained, so they are not tamper-evident.

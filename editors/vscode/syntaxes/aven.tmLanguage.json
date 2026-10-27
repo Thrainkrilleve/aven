@@ -3,15 +3,33 @@
   "name": "Aven",
   "scopeName": "source.aven",
   "patterns": [
-    { "include": "#comments" },
-    { "include": "#strings" },
-    { "include": "#units" },
-    { "include": "#keywords" },
-    { "include": "#types" },
-    { "include": "#builtins" },
-    { "include": "#numbers" },
-    { "include": "#operators" },
-    { "include": "#identifiers" }
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#units"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#builtins"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#identifiers"
+    }
   ],
   "repository": {
     "comments": {
@@ -45,8 +63,31 @@
     "units": {
       "patterns": [
         {
-          "name": "support.type.unit.aven",
-          "match": "\\[([a-zA-Z0-9_\\*\\/\\^%]+)\\]"
+          "comment": "signal <name> : <unit>",
+          "match": "\\b(signal)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(:)\\s*([A-Za-z$][A-Za-z0-9_$]*(?:[/*\\^][A-Za-z0-9_$]+)*)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.aven"
+            },
+            "2": {
+              "name": "variable.other.aven"
+            },
+            "3": {
+              "name": "punctuation.separator.aven"
+            },
+            "4": {
+              "name": "support.type.unit.aven"
+            }
+          }
+        },
+        {
+          "comment": "a unit written after a number on a solve-block line: 250 km/h",
+          "match": "(?<=[0-9.])\\s+([A-Za-z$][A-Za-z0-9_$]*(?:[/*\\^][A-Za-z0-9_$]+)*)\\s*(?=$|//)",
+          "captures": {
+            "1": {
+              "name": "support.type.unit.aven"
+            }
+          }
         }
       ]
     },
@@ -54,15 +95,15 @@
       "patterns": [
         {
           "name": "keyword.control.aven",
-          "match": "\\b(relation|solve|with|forward|external|using|model|constraint|solver|objective|input|output|schema)\\b"
+          "match": "\\b(relation|forward|solve|with|using|signal|unit|import)\\b"
         },
         {
           "name": "keyword.operator.optimization.aven",
-          "match": "\\b(minimize|maximize|in)\\b"
+          "match": "\\b(minimize|maximize)\\b"
         },
         {
-          "name": "keyword.other.ipc.aven",
-          "match": "\\b(ipc)\\b"
+          "name": "support.function.backend.aven",
+          "match": "\\b(external|ipc|shm|native)\\b"
         }
       ]
     },
@@ -70,7 +111,7 @@
       "patterns": [
         {
           "name": "storage.type.aven",
-          "match": "\\b(int|integer|float|float32|float64|int32|int64|const|var|let)\\b"
+          "match": "\\b(int|integer)\\b"
         }
       ]
     },
@@ -78,7 +119,11 @@
       "patterns": [
         {
           "name": "support.function.builtin.aven",
-          "match": "\\b(abs|ceil|floor|round|sqrt|exp|log|ln|sin|cos|tan|pow|min|max)\\b"
+          "match": "\\b(abs|ceil|floor|round|sign|sqrt|exp|log|ln|sin|cos|tan)\\b"
+        },
+        {
+          "name": "constant.language.aven",
+          "match": "\\b(pi|PI|e|E|tau|TAU)\\b"
         }
       ]
     },
@@ -102,11 +147,11 @@
         },
         {
           "name": "keyword.operator.assignment.aven",
-          "match": "(=|<-)"
+          "match": "(=)"
         },
         {
           "name": "keyword.operator.arithmetic.aven",
-          "match": "(\\+|-|\\*|/|\\^|%)"
+          "match": "(\\+|-|\\*|/|\\^)"
         }
       ]
     },

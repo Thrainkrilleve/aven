@@ -19,7 +19,7 @@ python evaluations/possible/dc_bridge.py --port 8765               # then open h
 | Workload | Real hourly English-Wikipedia pageviews from the Wikimedia REST API (last 72 hours), replayed one hour per tick. `cluster_util = 0.9 × views / window peak` |
 | IPC stream | A direct query to the live daemon each tick: the exact JSON sent and received, and the round-trip time |
 | Relation sandbox | `avenc run --json` solving `temp = base + load·heat_factor − cooling·cooling_factor` for cooling (backward Newton) or temperature (forward); `cooling >= 0` is enforced, so an impossible target is reported as a constraint violation |
-| Pareto frontier | `avenc pareto dc_fleet.aven cluster_util 0.05 0.95 --steps 18` with the live outside temperature and CRAC state; the knee comes from avenc; "now" is the current tick |
+| Trade-off sweep | `avenc pareto dc_fleet.aven cluster_util 0.05 0.95 --steps 18` with the live outside temperature and CRAC state; the knee comes from avenc; "now" is the current tick |
 | Fact ledger | The tick's real `--ledger` audit log, checked with `avenc verify-ledger`; facility-level facts with their chain hashes, origins and the daemon's TTLs |
 
 When a source fails (daemon down, API unreachable, stale data, a constraint violated) the

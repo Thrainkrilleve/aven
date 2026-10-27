@@ -1,0 +1,5 @@
+avenc bench 'evaluations/flight_mesh/flight_mesh_ipc.aven' — 2000 iterations
+  stage                              min µs    median µs       p95 µs
+  lex + parse                          48.6         53.5         94.0
+  solve (incl. external/IPC)          736.9       1414.9       2120.8
+  sequential throughput: 664.3 solves/sec (one client, 2000 solves)

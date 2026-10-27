@@ -44,7 +44,7 @@ Unlike traditional imperative languages where functions require hardcoded input/
 │         Relational Solver Engine          │     │        C99 Emitter (avenc emit-c)         │
 │  • Omnidirectional equation solving       │     │  • Pure forward evaluation                │
 │  • Guarded Newton-Raphson relaxation      │     │  • Branchless, zero-solver C code         │
-│  • Inequality & domain bound enforcement  │     │  • Embedded & hard real-time ready        │
+│  • Inequality & domain bound enforcement  │     │  • Straight-line, fixed-cost C99 code     │
 └────────────────────┬──────────────────────┘     └───────────────────────────────────────────┘
                      │
                      ▼
@@ -52,15 +52,15 @@ Unlike traditional imperative languages where functions require hardcoded input/
 │        Telemetry Ingestion & IPC          │
 │  • Subprocess: using external(...)        │
 │  • Persistent Daemon: using ipc(...)      │
-│  • Settle Latency: < 3 ms (352 solves/s)  │
+│  • IPC: 9.7 ms median, 352.9 solves/s     │
 └────────────────────┬──────────────────────┘
                      │
                      ▼
 ┌───────────────────────────────────────────┐
 │     Cryptographic Audit Ledger            │
 │  • Append-only fact log                   │
-│  • SHA-256 provenance integrity hashing   │
-│  • TTL staleness protection (HOLD status) │
+│  • SHA-256 hash chain, optional HMAC      │
+│  • TTL staleness protection (exit 3)      │
 └───────────────────────────────────────────┘
 ```
 
@@ -68,8 +68,8 @@ Unlike traditional imperative languages where functions require hardcoded input/
 
 ## Key Benchmarks at a Glance
 
-| Benchmark Environment | Evaluation Model | Median Settle Latency | Peak Throughput | Verification |
+| Benchmark Environment | Evaluation Model | Median / Mean Latency | Throughput | Source |
 | :--- | :--- | :--- | :--- | :--- |
-| **Persistent Loopback IPC** | `flight_mesh_ipc.aven` | **`9.7 ms`** | **`352.9 solves/sec`** | Verified |
-| **Optimized Subprocess** | `flight_mesh.aven` | `71.5 ms` | $54.1\,\text{solves/sec}$ | Verified |
-| **8-Hour Weather Audit** | `atmospheric_dynamics.aven` | `316.0 ms` | $486\,\text{cycles}$ | Verified |
+| **Persistent Loopback IPC** | `flight_mesh_ipc.aven` | `9.7 ms` median | `352.9 solves/sec` | `evaluations/flight_mesh/flight_mesh_summary_report.md` (Windows) |
+| **Optimized Subprocess** | `flight_mesh.aven` | `71.5 ms` median | 54.1 solves/sec | Windows run; no log in the repository |
+| **8-Hour Weather Audit** | `atmospheric_dynamics.aven` | `316.0 ms` mean | 486 cycles in 8 h | `evaluations/weather/overnight_summary_report.md` and its log |

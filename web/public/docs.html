@@ -26,6 +26,7 @@
       </button>
       <ul class="nav-links" id="nav-links">
         <li><a href="/#playground">Playground</a></li>
+        <li><a href="/weather">Live weather</a></li>
         <li><a href="/docs.html" aria-current="page">Docs</a></li>
         <li><a href="/registry.html">Packages</a></li>
         <li><a href="https://github.com/Thrainkrilleve/aven" rel="noopener">GitHub</a></li>
@@ -240,6 +241,7 @@ Settled Environment:
   total_cores      = 112.0000
   total_cost_monthly = 1015.0000
   total_ram_gb     = 448.0000</pre></div>
+          <p>Without an objective, bounds only check values: every variable a bound mentions must be given or derived, or the model is reported as under-determined.</p>
           <p>A result is reported as <em>proven optimal</em> only when the bound and duality gap certify it. To explore a trade-off instead of a single optimum, sweep one variable with <code>avenc pareto &lt;file&gt; &lt;var&gt; &lt;min&gt; &lt;max&gt;</code>.</p>
         </section>
 
@@ -277,6 +279,15 @@ relation FlightAtmosphericDynamics using ipc("127.0.0.1:9090") {
     mach_number = velocity_ms / speed_of_sound_ms
 }</pre></div>
           <p>Two more backends exist for low-latency use: <code>shm("name")</code> reads a shared-memory ring buffer, and <code>native("lib.so")</code> calls a C or Rust dynamic library in process.</p>
+          <h3>Supervising a live feed</h3>
+          <p><code>avenc stream</code> reads one JSON object per line from stdin and solves each as a cycle. <a href="https://github.com/Thrainkrilleve/aven/blob/main/examples/stream/openplc_supervisor.aven" rel="noopener"><code>examples/stream/openplc_supervisor.aven</code></a> checks PLC readings against limits; feed it the OpenPLC Modbus poller:</p>
+          <div class="code"><pre>python evaluations/tests/PLC-test/openplc_poller.py --host &lt;plc-address&gt; \
+  | avenc stream examples/stream/openplc_supervisor.aven</pre></div>
+          <div class="code output"><pre>#1      | a7c77c66d26612c6 | SETTLED
+        power_margin_w = 39.0000, quality_margin = 3.7000, scan_margin_ms = 8.8000, thermal_margin_c = 11.9000
+#2      | c553b51e377de931 | ALARM: Constraint violation in 'thermal_margin_c &gt;= 0': thermal_margin_c = -6.0000 violates bound 0.0000
+#3      | 429fb659cb5aa557 | UNSOLVED: System is under-determined (3 degree(s) of freedom):</pre></div>
+          <p>A reading that leaves the model under-determined, such as one missing a field, is reported as <code>UNSOLVED</code>; it is never filled in. The limits in the example are placeholders to set for your own line.</p>
           <p>Facts can carry a time-to-live. If a decision depends on a fact older than its TTL, <code>avenc run</code> prints <code>DECISION BLOCKED</code> and exits with code 3 unless you pass <code>--allow-stale</code>.</p>
         </section>
 
@@ -291,7 +302,7 @@ relation FlightAtmosphericDynamics using ipc("127.0.0.1:9090") {
                 <tr><td><code>avenc check &lt;file&gt;</code></td><td>Validate syntax, units and degrees of freedom.</td></tr>
                 <tr><td><code>avenc why &lt;file&gt; &lt;var&gt;</code></td><td>Print the derivation tree of a value.</td></tr>
                 <tr><td><code>avenc pareto &lt;file&gt; [var] [min] [max]</code></td><td>Sweep a variable, print the Pareto frontier and its knee point.</td></tr>
-                <tr><td><code>avenc stream &lt;file&gt;</code></td><td>Read JSON facts from stdin and re-settle as they arrive.</td></tr>
+                <tr><td><code>avenc stream &lt;file&gt;</code></td><td>Read one JSON object of facts per line from stdin and solve each line: <code>SETTLED</code>, <code>ALARM</code> (a bound is broken) or <code>UNSOLVED</code>.</td></tr>
                 <tr><td><code>avenc emit-c &lt;file&gt; [-o out.c]</code></td><td>Compile the forward block to standalone C. <code>build --aeric-shim --out-dir</code> emits an AERIC deployment bundle.</td></tr>
                 <tr><td><code>avenc emit-wasm &lt;file&gt; [-o out.wasm] [--wat]</code></td><td>Compile the forward block to WebAssembly 1.0.</td></tr>
                 <tr><td><code>avenc emit-smt &lt;file&gt; [--prove]</code></td><td>Translate to SMT-LIB2 for Z3 or CVC5. <code>verify-smt</code> runs the solver.</td></tr>
@@ -327,12 +338,12 @@ cc -O2 capacity.c -lm -o capacity &amp;&amp; ./capacity</pre></div>
           <div class="code"><pre>avenc emit-wasm examples/server_capacity.aven -o capacity.wasm
 avenc emit-wasm examples/server_capacity.aven --wat</pre></div>
           <p>The WebAssembly module exports <code>memory</code>, a function named after the block that takes each input as a parameter, and <code>aven_solve(in_ptr, out_ptr)</code>, which reads inputs as consecutive <code>f64</code> values in alphabetical order of name and writes outputs in evaluation order:</p>
-          <div class="code"><pre>const { instance } = await WebAssembly.instantiate(bytes);
+          <div class="code"><pre>const { instance } = await WebAssembly.instantiate(bytes);  // no imports: server_capacity uses none
 const mem = new Float64Array(instance.exports.memory.buffer);
 mem.set([20, 64, 1.04, 4096, 16, 50000, 4, 0.7], 0);  // inputs, sorted by name
 instance.exports.aven_solve(0, 1024);
 console.log(mem.slice(128, 133));  // raw_workers, allocated_workers, ...</pre></div>
-          <p>WebAssembly has no power instruction, so <code>x ^ n</code> compiles only when <code>n</code> is an integer constant (|n| ≤ 64) or <code>0.5</code>; other exponents are rejected at compile time. The playground on the homepage runs modules produced this way.</p>
+          <p><code>floor</code>, <code>ceil</code>, <code>round</code> and <code>sign</code> compile into the module and match <code>avenc run</code> exactly. WebAssembly has no exponential, logarithm, trigonometric or general power instruction, so a model that uses <code>exp</code>, <code>ln</code>, <code>sin</code>, <code>cos</code>, <code>tan</code> or a <code>^</code> other than an integer constant or <code>0.5</code> imports them from the host as module <code>"math"</code>; pass <a href="/aven_math.js"><code>aven_math.js</code></a> as the import object. Those results come from the host's math library and agree with <code>avenc run</code> to within a few units in the last place. The playground on the homepage and the <a href="/weather">live weather page</a> run modules produced this way.</p>
         </section>
 
         <section id="ledger">
@@ -389,7 +400,7 @@ avenc pkg list</pre></div>
   <footer class="footer">
     <div class="container">
       <div class="footer-bottom" style="margin-top:0;border-top:none;padding-top:0">
-        <span>&copy; 2026 Aven contributors &middot; MIT License</span>
+        <span>&copy; 2026 Austin Thompson &middot; <a href="https://github.com/Thrainkrilleve/aven/blob/main/LICENSE" rel="noopener">MIT License</a></span>
         <span><a href="https://github.com/Thrainkrilleve/aven/tree/main/web/public/docs.html" rel="noopener">Edit this page</a></span>
       </div>
     </div>

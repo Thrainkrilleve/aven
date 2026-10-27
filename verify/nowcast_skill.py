@@ -37,20 +37,21 @@ LEADS = (15, 30, 60)
 RAIN_DBZ = 20.0
 
 
-def find_echo_sites(n):
-    """Scan a coarse CONUS grid for echoes of at least 25 dBZ; keep sites spread apart."""
+def find_echo_sites(n, min_dbz):
+    """Scan a coarse CONUS grid for echoes of at least min_dbz; keep sites spread apart."""
     from concurrent.futures import ThreadPoolExecutor
 
     grid = [(lat / 2, -lon / 2) for lat in range(52, 96, 3) for lon in range(140, 246, 3)]
+    image_ms = wa.radar_times()[-1]
 
     def probe(pt):
         try:
-            return wa.radar_dbz(*pt)[0], pt[0], pt[1]
+            return wa.radar_dbz(*pt, image_ms)[0], pt[0], pt[1]
         except Exception:  # noqa: BLE001 - outside coverage
             return None
 
     with ThreadPoolExecutor(12) as pool:
-        hits = [h for h in pool.map(probe, grid) if h and h[0] >= 25]
+        hits = [h for h in pool.map(probe, grid) if h and h[0] >= min_dbz]
     hits.sort(reverse=True)
     chosen = []
     for dbz, lat, lon in hits:
@@ -82,6 +83,9 @@ def log(rec):
 
 
 def summarize():
+    if not RESULTS.exists():
+        print("\nno results yet")
+        return
     recs = [json.loads(l) for l in RESULTS.read_text(encoding="utf-8").splitlines() if l.strip()]
     obs = [r for r in recs if r.get("type") == "verification"]
     print(f"\n{len(obs)} verified forecasts")
@@ -110,6 +114,7 @@ def main():
     ap.add_argument("--sites", type=int, default=8)
     ap.add_argument("--cycles", type=int, default=3)
     ap.add_argument("--interval-min", type=float, default=20)
+    ap.add_argument("--min-dbz", type=float, default=25, help="echo strength a site needs to be chosen")
     ap.add_argument("--summary", action="store_true", help="only print the summary of past results")
     args = ap.parse_args()
     if args.summary:
@@ -118,11 +123,13 @@ def main():
 
     pending = []  # (valid_ms, issue record, lead)
     for cycle in range(args.cycles):
-        sites = find_echo_sites(args.sites)
+        sites = find_echo_sites(args.sites, args.min_dbz)
         print(f"[cycle {cycle}] {len(sites)} echo sites: {sites}", flush=True)
         for lat, lon in sites:
             env, err = forecast(lat, lon)
-            issued = time.time() * 1000
+            # The image the adapter read: the latest one when it ran (a new image can appear
+            # during a run, so this is right to within one image interval, about 4 minutes)
+            issued = wa.radar_times()[-1]
             if env is None:
                 print(f"  {lat},{lon}: no forecast ({err})", flush=True)
                 log({"type": "error", "issued_ms": issued, "lat": lat, "lon": lon, "error": err})
@@ -142,14 +149,24 @@ def main():
             due, rec, lead = pending.pop(0)
             time.sleep(max(0.0, due / 1000 - time.time()))
             try:
-                observed, radar_ms = wa.radar_dbz(rec["lat"], rec["lon"])
+                # Score against the archived image nearest the valid time (within 3 minutes),
+                # waiting for it to be published if need be
+                times = wa.radar_times()
+                while times[-1] < due - 180_000:
+                    time.sleep(60)
+                    times = wa.radar_times()
+                image = min(times, key=lambda t: abs(t - due))
+                if abs(image - due) > 180_000:
+                    raise RuntimeError(f"no radar image within 3 minutes of {due}")
+                observed, radar_ms = wa.radar_dbz(rec["lat"], rec["lon"], image)
             except Exception as e:  # noqa: BLE001 - recorded, not invented
                 log({"type": "error", "lat": rec["lat"], "lon": rec["lon"], "error": str(e)})
                 continue
             log({"type": "verification", "lat": rec["lat"], "lon": rec["lon"], "lead_min": lead,
                  "issued_ms": rec["issued_ms"], "radar_ms": radar_ms, "observed_dbz": observed,
                  "nowcast_dbz": rec[f"nowcast_dbz_{lead}"], "persistence_dbz": rec["now_dbz"]})
-        time.sleep(max(0.0, next_cycle - time.time()))
+        if cycle < args.cycles - 1:
+            time.sleep(max(0.0, next_cycle - time.time()))
     summarize()
 
 

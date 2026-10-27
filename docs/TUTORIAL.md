@@ -287,6 +287,8 @@ Run in Node.js with zero dependencies:
 const fs = require('fs');
 const wasmBuffer = fs.readFileSync('governor.wasm');
 
+// A model that uses exp, ln, trig or a fractional ^ also needs the host math imports:
+// WebAssembly.instantiate(wasmBuffer, { math: { exp: Math.exp, ln: Math.log, sin: Math.sin, cos: Math.cos, tan: Math.tan, pow: Math.pow } })
 WebAssembly.instantiate(wasmBuffer).then(({ instance }) => {
     // Direct execution export (parameters sorted alphabetically):
     // ThrottleGovernor(base_throttle, current_rpm, kp, target_rpm)
@@ -318,6 +320,42 @@ relation Turbine using ipc("127.0.0.1:9090") {
 See `examples/flame.aven` and `evaluations/flight_mesh/flight_mesh_ipc.aven` for complete, runnable models.
 
 Every fact from an adapter records the SHA-256 of the adapter's raw output in the fact ledger. Adapters send and receive values in each variable's declared unit.
+
+### Supervising a live feed with `avenc stream`
+
+`avenc stream` reads one JSON object per line from stdin, adds its fields to the model's facts and solves each line as one cycle. Every cycle ends in one of three states:
+
+- `SETTLED`: the model solved and every bound held; the derived values are printed.
+- `ALARM`: the model solved but a bound is broken; the line names the bound and the value.
+- `UNSOLVED`: the reading does not determine the model (for example, a field is missing) or the solve failed. A missing reading is never filled in.
+
+[`examples/stream/openplc_supervisor.aven`](../examples/stream/openplc_supervisor.aven) checks PLC readings (`scan_ms`, `temp_c`, `power_w`, `quality_pct`) against limits. Three readings, the last one incomplete:
+
+```bash
+printf '%s\n' \
+  '{"scan_ms": 9.2, "power_w": 211, "temp_c": 43.1, "quality_pct": 98.7}' \
+  '{"scan_ms": 9.4, "power_w": 215, "temp_c": 61.0, "quality_pct": 98.5}' \
+  '{"scan_ms": 9.3}' \
+  | avenc stream examples/stream/openplc_supervisor.aven
+```
+
+```text
+#1      | a7c77c66d26612c6 | SETTLED
+        power_margin_w = 39.0000, quality_margin = 3.7000, scan_margin_ms = 8.8000, thermal_margin_c = 11.9000
+#2      | c553b51e377de931 | ALARM: Constraint violation in 'thermal_margin_c >= 0': thermal_margin_c = -6.0000 violates bound 0.0000
+#3      | 429fb659cb5aa557 | UNSOLVED: System is under-determined (3 degree(s) of freedom):
+...
+Stream completed: 3 cycle(s), 1 settled, 1 alarm(s), 1 unsolved.
+```
+
+To supervise a running OpenPLC controller, pipe in the Modbus TCP poller, which reads the controller's holding registers once a second (the register map is at the top of the script; `pip install pymodbus`):
+
+```bash
+python evaluations/tests/PLC-test/openplc_poller.py --host <plc-address> --port 502 \
+  | avenc stream examples/stream/openplc_supervisor.aven
+```
+
+The limits in the example (18 ms scan deadline, 55 °C enclosure, 250 W supply, 95 % quality floor) are placeholders: set them for your own controller and line.
 
 ---
 

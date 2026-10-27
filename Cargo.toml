@@ -2,6 +2,8 @@
 name = "avenc"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+authors = ["Austin Thompson"]
 default-run = "avenc"
 
 [dependencies]

@@ -1,0 +1,139 @@
+// examples/weather_nowcast.aven — Live weather cell and radar nowcast, as a forward block
+//
+// The physics of evaluations/possible/weather-predict.aven written in evaluation order so it
+// compiles to C and WebAssembly. avenc.dev/weather runs the WebAssembly build of this file
+// every few minutes on live U.S. government data. verify/weather_reference.py checks that
+// it agrees with the relational model, MetPy and NumPy.
+//
+// The solve block below is one live reading, so the file runs on its own: the scheduled
+// job's run for HGX storm cell S5 near Freeport, TX at 17:30 UTC on 2026-10-27 (radar
+// image 17:23:48 UTC; METAR KBQX and the KBQX-KBYY-KGVW triangle; winds aloft from PSX).
+//   avenc run examples/weather_nowcast.aven
+
+forward WeatherNowcast {
+    // ----------------------------------------------------
+    // 1. Moisture: saturation vapor pressure over liquid water, Ambaum (2020) Eq. 13
+    // ----------------------------------------------------
+    temp_k = temp_c + 273.15
+    dewpoint_k = dewpoint_c + 273.15
+    latent_heat_t = 2500840.0 - (4219.4 - 1860.078011865639) * (temp_k - 273.16)
+    latent_heat_td = 2500840.0 - (4219.4 - 1860.078011865639) * (dewpoint_k - 273.16)
+    e_sat_hpa = 6.112 * (273.16 / temp_k) ^ ((4219.4 - 1860.078011865639) / 461.52311572606084) * exp((2500840.0 / 273.16 - latent_heat_t / temp_k) / 461.52311572606084)
+    vapor_pressure_hpa = 6.112 * (273.16 / dewpoint_k) ^ ((4219.4 - 1860.078011865639) / 461.52311572606084) * exp((2500840.0 / 273.16 - latent_heat_td / dewpoint_k) / 461.52311572606084)
+    relative_humidity = 100.0 * vapor_pressure_hpa / e_sat_hpa
+
+    // Recomputed RH vs the RH the station reported
+    rh_residual = abs(relative_humidity - rh_reported)
+    dewpoint_depression_c = temp_c - dewpoint_c
+    specific_humidity = 0.6219569100577033 * vapor_pressure_hpa / (pressure_hpa - (1.0 - 0.6219569100577033) * vapor_pressure_hpa)
+
+    // ----------------------------------------------------
+    // 2. Hydrostatic balance with virtual temperature
+    // ----------------------------------------------------
+    virtual_temp_k = temp_k * (1.0 - specific_humidity + specific_humidity / 0.6219569100577033)
+    air_density_kg_m3 = 100.0 * pressure_hpa / (287.04749097718457 * virtual_temp_k)
+    dp_dz_pa_per_m = -air_density_kg_m3 * 9.80665
+
+    // Station pressure two ways: NWS's reported value and the METAR altimeter setting
+    // reduced to the station's elevation (standard atmosphere)
+    metar_station_pressure_hpa = metar_altimeter_hpa * ((288.15 - 0.0065 * station_elev_m) / 288.15) ^ 5.2561
+    pressure_residual_hpa = abs(nws_pressure_hpa - metar_station_pressure_hpa)
+
+    // ----------------------------------------------------
+    // 3. Surface kinematics: the plane through three stations' winds (Cramer's rule)
+    // ----------------------------------------------------
+    tri_det = (x2 - x1) * (y3 - y1) - (x3 - x1) * (y2 - y1)
+    du_dx = ((u2 - u1) * (y3 - y1) - (u3 - u1) * (y2 - y1)) / tri_det
+    du_dy = ((x2 - x1) * (u3 - u1) - (x3 - x1) * (u2 - u1)) / tri_det
+    dv_dx = ((v2 - v1) * (y3 - y1) - (v3 - v1) * (y2 - y1)) / tri_det
+    dv_dy = ((x2 - x1) * (v3 - v1) - (x3 - x1) * (v2 - v1)) / tri_det
+    u0 = u1 - du_dx * x1 - du_dy * y1
+    v0 = v1 - dv_dx * x1 - dv_dy * y1
+
+    divergence_per_s = du_dx + dv_dy
+    vorticity_per_s = dv_dx - du_dy
+    deformation_per_s = sqrt((du_dx - dv_dy) ^ 2 + (dv_dx + du_dy) ^ 2)
+    vertical_velocity_ms = -divergence_per_s * layer_depth_m
+
+    // ----------------------------------------------------
+    // 4. Vertical shear and steering flow (NOAA winds aloft) vs radar-tracked storm motion
+    // ----------------------------------------------------
+    vertical_shear_ms_per_km = 1000.0 * sqrt(((aloft_u - wind_u) / aloft_height_m) ^ 2 + ((aloft_v - wind_v) / aloft_height_m) ^ 2)
+    steering_speed_ms = sqrt(steer_u ^ 2 + steer_v ^ 2)
+    cell_speed_ms = sqrt(cell_u ^ 2 + cell_v ^ 2)
+    steering_vs_cell_ms = sqrt((steer_u - cell_u) ^ 2 + (steer_v - cell_v) ^ 2)
+
+    // ----------------------------------------------------
+    // 5. Radar: Marshall-Palmer Z = 200 R^1.6 inverted for the rain rate; no rain below 10 dBZ
+    // ----------------------------------------------------
+    mp_rain_mmh = (10.0 ^ (radar_dbz / 10.0) / 200.0) ^ (1.0 / 1.6)
+    echo_sign = sign(floor(radar_dbz / 10.0))
+    radar_rain_mmh = (echo_sign + abs(echo_sign)) / 2.0 * mp_rain_mmh
+    radar_minus_gauge_mmh = gauge_available * (radar_rain_mmh - gauge_rate_mmh)
+
+    // ----------------------------------------------------
+    // 6. Nowcast: Lagrangian persistence. The echo now upstream by (motion x lead) arrives at
+    //    the site at that lead; upstream_* follow the steering wind, cell_upstream_* the
+    //    radar-tracked storm motion.
+    // ----------------------------------------------------
+    mp_rain_15_mmh = (10.0 ^ (upstream_dbz_15 / 10.0) / 200.0) ^ (1.0 / 1.6)
+    mp_rain_30_mmh = (10.0 ^ (upstream_dbz_30 / 10.0) / 200.0) ^ (1.0 / 1.6)
+    mp_rain_60_mmh = (10.0 ^ (upstream_dbz_60 / 10.0) / 200.0) ^ (1.0 / 1.6)
+    sign_15 = sign(floor(upstream_dbz_15 / 10.0))
+    sign_30 = sign(floor(upstream_dbz_30 / 10.0))
+    sign_60 = sign(floor(upstream_dbz_60 / 10.0))
+    nowcast_rain_15_mmh = (sign_15 + abs(sign_15)) / 2.0 * mp_rain_15_mmh
+    nowcast_rain_30_mmh = (sign_30 + abs(sign_30)) / 2.0 * mp_rain_30_mmh
+    nowcast_rain_60_mmh = (sign_60 + abs(sign_60)) / 2.0 * mp_rain_60_mmh
+
+    cell_mp_rain_15_mmh = (10.0 ^ (cell_upstream_dbz_15 / 10.0) / 200.0) ^ (1.0 / 1.6)
+    cell_mp_rain_30_mmh = (10.0 ^ (cell_upstream_dbz_30 / 10.0) / 200.0) ^ (1.0 / 1.6)
+    cell_mp_rain_60_mmh = (10.0 ^ (cell_upstream_dbz_60 / 10.0) / 200.0) ^ (1.0 / 1.6)
+    cell_sign_15 = sign(floor(cell_upstream_dbz_15 / 10.0))
+    cell_sign_30 = sign(floor(cell_upstream_dbz_30 / 10.0))
+    cell_sign_60 = sign(floor(cell_upstream_dbz_60 / 10.0))
+    cell_nowcast_rain_15_mmh = (cell_sign_15 + abs(cell_sign_15)) / 2.0 * cell_mp_rain_15_mmh
+    cell_nowcast_rain_30_mmh = (cell_sign_30 + abs(cell_sign_30)) / 2.0 * cell_mp_rain_30_mmh
+    cell_nowcast_rain_60_mmh = (cell_sign_60 + abs(cell_sign_60)) / 2.0 * cell_mp_rain_60_mmh
+}
+
+solve WeatherNowcast with {
+    temp_c = 27
+    dewpoint_c = 19
+    rh_reported = 61.613746674378
+    pressure_hpa = 1022.7
+    nws_pressure_hpa = 1022.7
+    metar_altimeter_hpa = 1022.8
+    station_elev_m = 34
+    layer_depth_m = 1000
+    wind_u = 0
+    wind_v = 0
+    x1 = -42561.156011995816
+    y1 = -11165.39600000008
+    u1 = 0
+    v1 = 0
+    x2 = -65902.72397440573
+    y2 = 62049.76799999974
+    u2 = -2.900515383645515
+    v2 = -1.0557012636781822
+    x3 = 62534.64537580244
+    y3 = 79705.11999999972
+    u3 = 0
+    v3 = 0
+    aloft_u = -7.71666
+    aloft_v = -4.725091484554207e-16
+    aloft_height_m = 880.4000000000001
+    steer_u = -1.1352716725287442
+    steer_v = 9.600152245821814
+    cell_u = -1.002517667216751
+    cell_v = 0.2314494404017504
+    radar_dbz = 38
+    gauge_available = 0
+    gauge_rate_mmh = 0
+    upstream_dbz_15 = 0
+    upstream_dbz_30 = 0
+    upstream_dbz_60 = 0
+    cell_upstream_dbz_15 = 40
+    cell_upstream_dbz_30 = 43
+    cell_upstream_dbz_60 = 34
+}

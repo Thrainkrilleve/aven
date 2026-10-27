@@ -1,13 +1,14 @@
 # Aven Orchestrator (Tauri)
 
-Desktop app skeleton that matches the mockup layout.
+Desktop app (Tauri v2) for exploring Aven models. The backend links the `avenc` crate directly (`src-tauri/src/main.rs`), so it uses the same parser, solver, unit conversion and ledger as the CLI.
 
 ## Structure
 ```
 aven-orchestrator/
 ├── package.json
 ├── src-tauri/
-│   └── tauri.conf.json
+│   ├── tauri.conf.json
+│   └── src/main.rs         ← Tauri commands backed by the avenc crate
 └── dist/
     └── index.html          ← UI (open this directly in a browser to preview)
 ```
@@ -29,9 +30,8 @@ npx tauri init                 # if needed
 npx tauri dev
 ```
 
-## Next steps to make it real
-1. Add a Tauri command in `src-tauri/src/main.rs` that shells out to `flame_eval.py` (or your Rust ExternalEvaluator).
-2. Replace the placeholder `testBackend` / `solve` / `pareto` JS functions with `invoke("your_command", { vars })`.
-3. Pipe the returned diagnostics into the bottom bar.
+## Tauri commands
 
-The HTML/CSS already follows the mockup’s dark panel layout, so once the Tauri commands are wired you have a native app that looks like the design.
+`src-tauri/src/main.rs` exposes these commands to the UI: `list_backends`, `test_backend`, `solve_point`, `solve_pareto`, `validate_model`, `get_sample_models`, `get_live_telemetry`, `call_flame`, `explain_why` and `solve_k8s_hpa`.
+
+Building on Linux needs the WebKitGTK and GTK 3 development packages (e.g. `libwebkit2gtk-4.1-dev libgtk-3-dev`); `cargo check` in `src-tauri/` then succeeds.

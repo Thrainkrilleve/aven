@@ -197,8 +197,10 @@ impl SolverEngine {
 
         self.solve_pure_equalities(&pure_eqs, &mut env)?;
 
-        // 2. If constraints or objectives exist, run optimization
-        if !self.constraints.is_empty() || !self.objectives.is_empty() {
+        // 2. With an objective, the optimizer chooses the remaining unknowns. Without one,
+        //    bounds only check values that are determined: picking an arbitrary feasible point
+        //    would report values nothing in the model or its inputs fixed.
+        if !self.objectives.is_empty() {
             self.solve_with_optimization(&mut env)?;
         }
 
@@ -251,7 +253,8 @@ impl SolverEngine {
             }
         }
 
-        // 5. Check if any unknowns remain unconstrained
+        // 5. Check if any unknowns remain undetermined, including variables a bound refers
+        //    to (a bound cannot be checked on a value nobody supplied)
         let mut all_vars = BTreeSet::new();
         for eq in &self.relations {
             all_vars.insert(eq.lhs.clone());
@@ -259,6 +262,11 @@ impl SolverEngine {
                 all_vars.insert(v);
             }
         }
+        for c in &self.constraints {
+            all_vars.insert(c.lhs.clone());
+            all_vars.extend(c.rhs.vars());
+        }
+        all_vars.retain(|v| !crate::ast::is_builtin_constant(v));
         let remaining_unknowns: Vec<String> = all_vars
             .into_iter()
             .filter(|v| !env.contains_key(v))

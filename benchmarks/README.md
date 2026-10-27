@@ -2,7 +2,7 @@
 
 Proves AVEN's compiled output is both **correct** (agrees to the bit with
 independent implementations and a high-precision oracle) and **fast** (as fast as
-hand-written C++), on a brutal adversarial battery — not a happy-path demo.
+hand-written C++ with MSVC, within about 10% with gcc; see RESULTS.md §2a), on a brutal adversarial battery — not a happy-path demo.
 
 See **[RESULTS.md](RESULTS.md)** for the measured proof.
 
@@ -21,11 +21,16 @@ See **[RESULTS.md](RESULTS.md)** for the measured proof.
 | `backend_*.{c,cpp,py}`, `../src/bin/bench_aven.rs` | the four backends; each writes `out_<name>.txt` (IEEE bits) + prints timing JSON |
 | `compare.py` | cross-backend bit identity + error vs oracle, with finite/non-finite and ≤2⁵³ classification |
 | `run_all.ps1` | one-shot build+run+compare (Windows/MSVC) |
+| `run_all.sh` | one-shot build+run+compare (Linux/macOS, gcc/clang) |
 
 ## Run
 From the repo root, in an MSVC x64 environment (the script will locate vcvars):
 ```
 powershell -File benchmarks\run_all.ps1 C:\path\to\scratch
+```
+or on Linux/macOS (needs numpy):
+```
+sh benchmarks/run_all.sh /path/to/scratch
 ```
 Large data files (`battery.txt`, `oracle.txt`, `out_*.txt`) are written to the
 scratch dir, not the repo.

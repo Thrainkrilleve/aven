@@ -165,11 +165,13 @@ Fusing transponder data from the **OpenSky Network**, surface weather from the *
 | **Lazy-Import Subprocess** | `71.5 ms` | 54.1 solves/sec | `stream_ringer.py`, multi-worker |
 | **Persistent IPC Daemon (`using ipc(...)`)** | `9.7 ms` | 352.9 solves/sec | `stream_ringer.py`, multi-worker |
 | **`avenc bench`, live IPC daemon (one client)** | `0.56 ms` (p95 `0.71 ms`) | 1,720 solves/sec | 8-core Windows workstation, 2026-10-25 |
-| **`avenc bench`, same model** | `1.26 ms` (p95 `1.76 ms`) | 775 solves/sec | 4-vCPU Linux container (Xeon 2.1 GHz), 2026-10-27 |
+| **`avenc bench`, same model** | `1.41 ms` (p95 `2.12 ms`) | 664 solves/sec | 4-vCPU Linux container (Xeon 2.1 GHz), 2026-10-27, live feeds |
+| **Subprocess, `stream_ringer.py`, 50 live flights** | `70.8 ms` | 51.4 solves/sec | Same container and date |
+| **IPC daemon, `stream_ringer.py`, 50 live flights** | `6.2 ms` | 570.9 solves/sec | Same container and date |
 
-The `stream_ringer.py` rows include the harness's own process and worker overhead. The `avenc bench` rows are the complete solve (TCP round trip to the daemon plus the relational solve of `flight_mesh_ipc.aven`), measured with `avenc bench evaluations/flight_mesh/flight_mesh_ipc.aven --iterations 2000` against `evaluations/flight_mesh/flight_mesh_daemon.py`. The Windows figures are the median of three runs (0.561–0.566 ms, 1,700–1,734 solves/sec).
+The `stream_ringer.py` rows include the harness's own process and worker overhead. The `avenc bench` rows are the complete solve (TCP round trip to the daemon plus the relational solve of `flight_mesh_ipc.aven`), measured with `avenc bench evaluations/flight_mesh/flight_mesh_ipc.aven --iterations 2000` against `evaluations/flight_mesh/flight_mesh_daemon.py`. The Windows figures are the median of three runs (0.561–0.566 ms, 1,700–1,734 solves/sec); the subprocess rows from that machine have no log in the repository. The 2026-10-27 Linux runs, with their logs and reports, are in `evaluations/flight_mesh/runs/2026-10-27-linux/`.
 
-- **Standard Atmosphere Verified:** Temperature, pressure and Mach number match an independent ISA computation for all 150 live aircraft checked, including 30 cruising above the 11 km tropopause (up to 43,000 ft); see `verify/live_atmosphere.py`. (An earlier model extended the tropospheric lapse rate above the tropopause and reported spurious −80 °C bound violations at cruise altitude; that model error is fixed. `evaluations/flight_mesh/flight_mesh_audit_ledger.jsonl` is a run log from before the fix.)
+- **Standard Atmosphere Verified:** Temperature, pressure and Mach number match an independent ISA computation for all 150 live aircraft checked, including 30 cruising above the 11 km tropopause (up to 43,000 ft); see `verify/live_atmosphere.py`. Re-run on 2026-10-27: 150 aircraft, 32 above the tropopause (up to 45,000 ft), 0 mismatches (`evaluations/flight_mesh/runs/2026-10-27-linux/live_atmosphere.txt`). (An earlier model extended the tropospheric lapse rate above the tropopause and reported spurious −80 °C bound violations at cruise altitude; that model error is fixed. `evaluations/flight_mesh/flight_mesh_audit_ledger.jsonl` is a run log from before the fix.)
 
 ### 8-Hour Overnight Weather Operations Monitor
 `evaluations/weather/overnight_monitor.py` polled the National Weather Service for 5 airports (KDEN, KDFW, KJFK, KORD, KSEA) on 2026-10-25. Its per-cycle log, `evaluations/weather/weather_audit_ledger.jsonl`, records:
@@ -178,6 +180,9 @@ The `stream_ringer.py` rows include the harness's own process and worker overhea
 - **76 cycles held** on expired sensor TTLs (`DECISION BLOCKED`).
 
 Both `*_audit_ledger.jsonl` files are the harnesses' per-cycle logs, not `avenc` hash-chained ledgers, so `avenc verify-ledger` does not apply to them.
+
+### Live Radar Nowcast ([avenc.dev/weather](https://avenc.dev/weather))
+Every five minutes the website's scheduled job picks the strongest storm cells tracked by the NEXRAD radar network, gathers data for each from NOAA (nowCOAST radar mosaic, METAR, winds aloft), the NWS (observations, alerts, hourly forecast) and USGS (rain gauges), and runs [`examples/weather_nowcast.aven`](examples/weather_nowcast.aven) compiled to WebAssembly. Its forecasts of radar reflectivity 15, 30 and 60 minutes ahead (along the steering wind, along the radar-measured storm motion, and persistence as the baseline) are scored against the archived radar image nearest each valid time, and the page shows every input, request, cross-check and score. Any stored run can be re-run in the browser from the same module. `verify/weather_reference.py` checks the model against its relational form, MetPy and NumPy (150 random states, 0 failures). The job and page are in `web/src/weather/` and `web/public/weather.*`; `web/scripts/weather-local.mjs` runs them locally.
 
 ---
 
@@ -287,4 +292,4 @@ The SMT and safety-case tests need `z3` (or `cvc5`) on `PATH`; CI installs it. `
 
 ## License
 
-This project is licensed under the MIT License — see the repository for details.
+Aven is released under the [MIT License](LICENSE). Copyright © 2026 Austin Thompson.

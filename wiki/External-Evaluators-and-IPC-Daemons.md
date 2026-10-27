@@ -77,7 +77,7 @@ Client Solver (avenc)                       Persistent Daemon (Python/RAM)
 
 ## 3. Empirical Performance Comparison
 
-Windows workstation, earlier flight model (see [[Multi-Stream Physics Benchmarks|Multi-Stream-Physics-Benchmarks]] §4 for sources and a Linux re-run). Only the IPC row has a report in the repository (`flight_mesh_summary_report.md`):
+Windows workstation, earlier flight model. Only the IPC row has a report in the repository (`flight_mesh_summary_report.md`). A 2026-10-27 Linux re-run on 50 live flights measured 70.8 ms (subprocess) against 6.2 ms (IPC), with logs in `evaluations/flight_mesh/runs/2026-10-27-linux/`; see [[Multi-Stream Physics Benchmarks|Multi-Stream-Physics-Benchmarks]] §4:
 
 | Metric | Subprocess (`using external`) | Persistent Daemon (`using ipc`) | Improvement |
 | :--- | :--- | :--- | :--- |

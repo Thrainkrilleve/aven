@@ -231,7 +231,10 @@ fn pareto_range_is_in_the_declared_unit_and_required() {
 }
 
 fn stream(model: &str, lines: &[&str]) -> String {
-    let path = write_model(model);
+    stream_file(&write_model(model), lines)
+}
+
+fn stream_file(path: &std::path::Path, lines: &[&str]) -> String {
     let mut child = Command::new(env!("CARGO_BIN_EXE_avenc"))
         .args(["stream", path.to_str().unwrap()])
         .stdin(std::process::Stdio::piped())
@@ -258,7 +261,7 @@ fn stream_converts_input_and_reports_derived_values() {
     // 72 km/h = 20 m/s
     assert!(out.contains("SETTLED"), "{}", out);
     assert!(out.contains("speed_ms = 20.0000 m·s^-1"), "{}", out);
-    assert!(out.contains("1 settled, 0 unsolved"), "{}", out);
+    assert!(out.contains("1 settled, 0 alarm(s), 0 unsolved"), "{}", out);
 }
 
 #[test]
@@ -305,4 +308,29 @@ fn fractional_powers_have_the_right_dimension_or_are_refused() {
     let run = run_file(&bad, &[]);
     assert_eq!(run.code, 1, "stdout: {}", run.stdout);
     assert!(run.stderr.contains("power"), "{}", run.stderr);
+}
+
+#[test]
+fn stream_reports_broken_limits_as_alarms() {
+    let out = stream(
+        "relation S {\n    margin = limit - reading\n}\nsolve S with {\n    limit = 18\n    margin >= 0\n}\n",
+        &["{\"reading\": 21}", "{\"reading\": 9}"],
+    );
+    assert!(out.contains("ALARM"), "{}", out);
+    assert!(out.contains("1 settled, 1 alarm(s), 0 unsolved"), "{}", out);
+}
+
+#[test]
+fn openplc_supervisor_example_alarms_and_never_fills_in_missing_readings() {
+    let model = std::path::Path::new("examples/stream/openplc_supervisor.aven");
+    let out = stream_file(
+        model,
+        &[
+            "{\"scan_ms\": 9.2, \"power_w\": 211, \"temp_c\": 43.1, \"quality_pct\": 98.7}",
+            "{\"scan_ms\": 9.4, \"power_w\": 215, \"temp_c\": 61.0, \"quality_pct\": 98.5}",
+            // a reading without the fields the limits need is not a pass
+            "{\"scan_ms\": 9.3}",
+        ],
+    );
+    assert!(out.contains("3 cycle(s), 1 settled, 1 alarm(s), 1 unsolved"), "{}", out);
 }

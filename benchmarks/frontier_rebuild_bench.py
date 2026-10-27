@@ -17,7 +17,7 @@ import subprocess
 import sys
 import time
 
-AVENC_BIN = os.path.abspath(os.path.join(os.path.dirname(__file__), "../target/release/avenc.exe"))
+AVENC_BIN = os.environ.get("AVENC_BIN") or os.path.abspath(os.path.join(os.path.dirname(__file__), "../target/release", "avenc.exe" if os.name == "nt" else "avenc"))
 MODEL_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../evaluations/tests/kube/cluster_capacity.aven"))
 
 ITERATIONS = 50

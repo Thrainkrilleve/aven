@@ -524,8 +524,11 @@ fn test_wasm_pow_matches_native_evaluation() {
     let bundle = WasmTranspiler::transpile(&module).expect("integer and 0.5 exponents compile");
     assert!(!bundle.wat.contains("approximation"));
 
-    let fractional = parse_module_from_str("forward Bad {\n y = x ^ 1.5\n}\n", "bad");
-    assert!(WasmTranspiler::transpile(&fractional).is_err(), "non-integer exponents must be rejected");
+    assert!(!bundle.wat.contains("(import"), "integer and 0.5 exponents need no host math");
+
+    let fractional = parse_module_from_str("forward Frac {\n y = x ^ 1.5\n}\n", "frac");
+    let frac = WasmTranspiler::transpile(&fractional).expect("other exponents call the host's pow");
+    assert!(frac.wat.contains("(import \"math\" \"pow\""), "{}", frac.wat);
 
     if Command::new("node").arg("--version").output().is_err() {
         return;
@@ -595,4 +598,75 @@ fn test_pkg_install_then_import_from_another_project() {
 
     let _ = fs::remove_dir_all(&lib_dir);
     let _ = fs::remove_dir_all(&app_dir);
+}
+
+// ---------------------------------------------------------------------------
+// floor/ceil/round/sign compile to helpers that match the evaluator exactly
+// (including its 1e-9 snap); exp/ln/trig come from the host and agree closely
+// ---------------------------------------------------------------------------
+#[test]
+fn test_wasm_builtins_match_avenc_run() {
+    if Command::new("node").arg("--version").output().is_err() {
+        return;
+    }
+    let src = "forward Fns {\n\
+                   f = floor(x)\n\
+                   c = ceil(x)\n\
+                   r = round(x)\n\
+                   s = sign(x)\n\
+                   snapped = ceil(x * 3 / 3)\n\
+                   ex = exp(x / 10)\n\
+                   lg = ln(abs(x) + 1)\n\
+                   tr = sin(x) + cos(x) + tan(x / 7)\n\
+                   pw = (abs(x) + 1) ^ 1.6\n\
+               }\n";
+    let module = parse_module_from_str(src, "fns");
+    let bundle = WasmTranspiler::transpile(&module).expect("all builtins compile");
+    let dir = create_temp_dir("wasm_builtins");
+    let wasm_path = dir.join("fns.wasm");
+    fs::write(&wasm_path, &bundle.wasm_bytes).unwrap();
+    let inputs = [2.5, -2.5, 0.5, -0.5, 1.0000000000000002, 2.9999999999, -0.0, 0.49999999999999994, 4.5, -3.7, 123.456];
+    let node_code = format!(
+        "const bytes = require('fs').readFileSync('{file}');\n\
+         const math = {{ exp: Math.exp, ln: Math.log, sin: Math.sin, cos: Math.cos, tan: Math.tan, pow: Math.pow }};\n\
+         WebAssembly.instantiate(bytes, {{ math }}).then(({{ instance }}) => {{\n\
+             const rows = [];\n\
+             for (const x of [{xs}]) {{\n\
+                 const mem = new Float64Array(instance.exports.memory.buffer);\n\
+                 mem[0] = x;\n\
+                 instance.exports.aven_solve(0, 1024);\n\
+                 rows.push(Array.from(mem.slice(128, 128 + {n})).join(','));\n\
+             }}\n\
+             console.log(rows.join(';'));\n\
+         }}).catch(e => {{ console.error(e); process.exit(1); }});",
+        file = wasm_path.to_str().unwrap().replace('\\', "/"),
+        xs = inputs.iter().map(|x| format!("{:?}", x)).collect::<Vec<_>>().join(","),
+        n = bundle.output_names.len()
+    );
+    let out = Command::new("node").args(["-e", &node_code]).output().unwrap();
+    assert!(out.status.success(), "node wasm execution failed: {}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    for (row, &x) in stdout.trim().split(';').zip(inputs.iter()) {
+        let got: Vec<f64> = row.split(',').map(|v| v.parse().unwrap()).collect();
+        let model = format!("{}\nsolve Fns with {{\n    x = {:?}\n}}\n", src, x);
+        let path = dir.join("run.aven");
+        fs::write(&path, model).unwrap();
+        let native = Command::new(env!("CARGO_BIN_EXE_avenc")).args(["run", path.to_str().unwrap(), "--json"]).output().unwrap();
+        let text = String::from_utf8_lossy(&native.stdout);
+        let line = text.trim().lines().last().unwrap().to_string();
+        for (i, name) in bundle.output_names.iter().enumerate() {
+            let key = format!("\"{}\":", name);
+            let start = line.find(&key).unwrap_or_else(|| panic!("{} missing in {}", name, line)) + key.len();
+            let rest = &line[start..];
+            let end = rest.find(|c| c == ',' || c == '}').unwrap();
+            let want: f64 = rest[..end].trim().parse().unwrap();
+            if ["f", "c", "r", "s", "snapped"].contains(&name.as_str()) {
+                assert_eq!(got[i], want, "{}({}): wasm {} vs avenc run {}", name, x, got[i], want);
+            } else {
+                let rel = (got[i] - want).abs() / want.abs().max(1e-300);
+                assert!(rel < 1e-14, "{}({}): wasm {} vs avenc run {}", name, x, got[i], want);
+            }
+        }
+    }
+    let _ = fs::remove_dir_all(&dir);
 }

@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aven Live Radar Nowcast</title>
+  <meta name="description" content="An Aven model compiled to WebAssembly, run every five minutes on live NOAA, NWS and USGS data, with every forecast scored against the radar.">
+  <meta name="theme-color" content="#070a10">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+  <nav class="nav" aria-label="Main">
+    <div class="container">
+      <a href="/" class="brand" aria-label="Aven home">
+        <img src="/favicon.svg" alt="" class="brand-mark">
+        AVEN
+        <span class="brand-version">v0.6.0</span>
+      </a>
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" aria-label="Menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <ul class="nav-links" id="nav-links">
+        <li><a href="/#playground">Playground</a></li>
+        <li><a href="/weather" aria-current="page">Live weather</a></li>
+        <li><a href="/docs.html">Docs</a></li>
+        <li><a href="/registry.html">Packages</a></li>
+        <li><a href="https://github.com/Thrainkrilleve/aven" rel="noopener">GitHub</a></li>
+      </ul>
+      <div class="nav-actions">
+        <a href="/docs.html#install" class="btn btn-primary btn-sm">Install</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container">
+    <header class="page-head">
+      <span class="eyebrow"><span class="wx-live" id="wx-live-dot"></span> Live</span>
+      <h1>Radar nowcast on live data</h1>
+      <p>Every five minutes a scheduled job finds the strongest storm cells the NEXRAD radar network is tracking, gathers observations for each from NOAA, NWS and USGS, and runs an Aven model compiled to WebAssembly on them. Each forecast is scored against the radar once its time arrives.</p>
+      <div class="wx-status" id="wx-status" aria-live="polite">Loading…</div>
+    </header>
+
+    <section class="wx-section" aria-labelledby="score-h">
+      <div class="wx-section-head">
+        <h2 id="score-h">Scoreboard</h2>
+        <div class="wx-seg" role="tablist" aria-label="Sites">
+          <button type="button" role="tab" data-kind="storm_cell" aria-selected="true">Storm cells</button>
+          <button type="button" role="tab" data-kind="anchor" aria-selected="false">Fixed airports</button>
+          <button type="button" role="tab" data-kind="all" aria-selected="false">All</button>
+        </div>
+      </div>
+      <p class="wx-note">Three ways to predict the radar echo at a site 15, 30 and 60 minutes ahead. <b>Persistence</b> assumes the echo stays as it is, the standard baseline; the other two carry the echo now upstream along the steering wind (NOAA winds aloft) or along the storm motion the radar network measured. A method shows skill only where it beats persistence. MAE is the mean absolute error in dBZ (lower is better); CSI is the critical success index for rain at 20 dBZ or more (higher is better).</p>
+      <div class="table-wrap">
+        <table class="wx-score">
+          <thead>
+            <tr><th>Lead</th><th>Method</th><th class="num">Scored</th><th class="num">MAE (dBZ)</th><th class="num">Bias (dBZ)</th><th class="num">CSI</th><th class="num">Hits · misses · false alarms</th></tr>
+          </thead>
+          <tbody id="wx-score"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+      <p class="wx-note" id="wx-score-foot"></p>
+    </section>
+
+    <section class="wx-section" aria-labelledby="runs-h">
+      <div class="wx-section-head">
+        <h2 id="runs-h">Latest runs</h2>
+        <button type="button" class="btn btn-ghost btn-sm" id="wx-refresh">Refresh</button>
+      </div>
+      <div id="wx-runs" class="wx-runs"><div class="empty">Loading…</div></div>
+    </section>
+
+    <section class="wx-section" aria-labelledby="ver-h">
+      <h2 id="ver-h">Recent scores</h2>
+      <p class="wx-note">Each forecast is compared with the radar image nearest its valid time (within 3 minutes), at the forecast point.</p>
+      <div class="table-wrap">
+        <table class="wx-ver">
+          <thead><tr><th>Valid (UTC)</th><th>Site</th><th class="num">Lead</th><th>Method</th><th class="num">Predicted</th><th class="num">Observed</th><th class="num">Error</th></tr></thead>
+          <tbody id="wx-ver"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="wx-section prose" aria-labelledby="how-h">
+      <h2 id="how-h">How it works</h2>
+      <p>The model is <a href="https://github.com/Thrainkrilleve/aven/blob/main/examples/weather_nowcast.aven" rel="noopener"><code>examples/weather_nowcast.aven</code></a>: moisture (Ambaum 2020 saturation curve), hydrostatic density with virtual temperature, a plane fit through three stations' winds for divergence, vorticity and deformation, vertical shear, Marshall-Palmer rain rates, and the nowcasts. <code>avenc emit-wasm</code> compiles it to a 4 KB module, <a href="/models/weather.wasm"><code>weather.wasm</code></a>, which the job runs and which your browser can re-run from any stored inputs with the button on each run. Its <code>exp</code> and fractional powers come from the JavaScript host (<a href="/aven_math.js"><code>aven_math.js</code></a>).</p>
+      <p><a href="https://github.com/Thrainkrilleve/aven/blob/main/verify/weather_reference.py" rel="noopener"><code>verify/weather_reference.py</code></a> checks the same model on 150 random atmospheric states against the relational version (<code>evaluations/possible/weather-predict.aven</code>, solved by <code>avenc</code>), MetPy, NumPy and the closed-form formulas; every output agrees within 1e-9 relative.</p>
+      <h3>Sources, per site and run</h3>
+      <div class="table-wrap">
+        <table class="wx-src-table">
+          <thead><tr><th>Source</th><th>What it supplies</th></tr></thead>
+          <tbody>
+            <tr><td>NEXRAD storm tracking (NWS Level III, via Iowa Environmental Mesonet)</td><td>Where storm cells are, their peak reflectivity and measured motion: picks the sites and gives the storm-motion nowcast</td></tr>
+            <tr><td>NOAA nowCOAST radar mosaic</td><td>Base reflectivity at the site and upstream, in a named image; the archive of images scores each forecast</td></tr>
+            <tr><td>NOAA Aviation Weather Center METAR</td><td>Temperature, dewpoint, wind and altimeter at every airport near the site</td></tr>
+            <tr><td>NWS observations (api.weather.gov)</td><td>The same station through the NWS pipeline: reported humidity and station pressure</td></tr>
+            <tr><td>NOAA Aviation Weather Center winds aloft</td><td>Winds at 3,000 to 18,000 ft: vertical shear and the steering flow</td></tr>
+            <tr><td>USGS rain gauges</td><td>Measured rain rate within 25 km, an independent check on the radar estimate (few sites have one)</td></tr>
+            <tr><td>NWS alerts and hourly forecast</td><td>Active warnings and the official precipitation probability, shown for comparison</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>What the checks do and don't show</h3>
+      <ul>
+        <li>The data-quality gate is the bounds in <code>weather-predict.aven</code>; a run that breaks one is stored but issues no forecast.</li>
+        <li>Humidity and pressure compare two processing pipelines for the same station's sensors, so they catch decoding and reduction errors, not a faulty sensor. Radar against a rain gauge, and steering wind against radar-tracked storm motion, compare independent measurements.</li>
+        <li>Scores are for single points in the base reflectivity mosaic. Storm-cell sites are chosen where echoes are strong, which favours forecasts of rain; the fixed airports are a control.</li>
+        <li>Lagrangian persistence is a baseline nowcast, not a weather model: it moves today's echoes and cannot grow or decay them.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-bottom" style="margin-top:0;border-top:none;padding-top:0">
+        <span>&copy; 2026 Austin Thompson &middot; <a href="https://github.com/Thrainkrilleve/aven/blob/main/LICENSE" rel="noopener">MIT License</a></span>
+        <span>Data: NOAA, NWS, USGS, Iowa Environmental Mesonet</span>
+      </div>
+    </div>
+  </footer>
+
+  <script type="module" src="/site.js"></script>
+  <script type="module" src="/weather.js"></script>
+</body>
+</html>

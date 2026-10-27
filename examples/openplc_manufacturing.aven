@@ -1,0 +1,19 @@
+// examples/openplc_manufacturing.aven — what-if model of a PLC-controlled line
+//
+// Estimates scan time, power, enclosure temperature, throughput and quality from I/O count,
+// CPU load and target rate. The coefficients are illustrative, not measured on any
+// controller: fit them to your own line before relying on the numbers. For checking live
+// readings against limits, see examples/stream/openplc_supervisor.aven.
+relation OpenPLCSupervisor {
+    scan_ms = 7.5 + (cpu_load_pct * 0.04) + (io_points * 0.08)
+    power_w = 120.0 + (io_points * 2.8) + (cpu_load_pct * 0.75)
+    temp_c = 25.0 + (power_w * 0.085)
+    throughput_pph = target_rate - (scan_ms * 1.85)
+    quality_pct = 99.9 - (scan_ms * 0.065) - ((temp_c - 25.0) * 0.04)
+}
+
+solve OpenPLCSupervisor with {
+    io_points = 28.0
+    cpu_load_pct = 35.0
+    target_rate = 180.0
+}
