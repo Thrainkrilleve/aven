@@ -138,9 +138,13 @@ Remaining: only RT-grade (sub-ms) jitter, which is the Level 2/3 track.
 ### Level 2 — Control runtime  *(makes it genuinely capable)*
 
 **Capabilities**
-- **Statefulness** — a persistent state vector carried tick→tick and fed back as
-  inputs (`x[t+1] = f(x[t], sensors)`). Unlocks PID, filters, estimators
-  (Kalman). *Architecturally the most important extension on the whole roadmap.*
+- **Statefulness** ✅ — a persistent state vector carried tick→tick and fed back
+  as inputs (`x[t+1] = f(x[t], sensors)`). Unlocks PID, filters, estimators.
+  *Done:* schema gains `n_state`; the caller supplies only sensors and AERIC
+  appends `x[t]` as `[sensors | state]`, publishes the leading setpoints, and
+  advances `x[t+1]` from the trailing outputs on a live tick (frozen on HOLD).
+  Backward-compatible (`n_state = 0` is the old behavior). The daemon carries it
+  through config + wire framing.
 - **Graded safety envelope** — per-output min/max **clamp**, setpoint **rate
   limiting**, a **fault taxonomy** (sensor / solver / deadline / transport) each
   with its own policy, and a **hardware watchdog kick**. HOLD remains the floor.
@@ -156,8 +160,11 @@ Remaining: only RT-grade (sub-ms) jitter, which is the Level 2/3 track.
   zero-copy path.
 
 **Definition of Done**
-- [ ] A PID or first-order filter runs statefully and matches a Python/numpy
-      reference to a stated tolerance over a recorded trace.
+- [x] A PID controller runs statefully and matches a Python reference **exactly**
+      over a trace: the integral ramps (memory), a HOLD tick freezes the state and
+      publishes fail-safe, and the controller resumes from the frozen integral
+      (`examples/pi_controller.aven`, `test_state.c`, `pi_check.py`). The stateful
+      daemon's ledger passes `avenc verify-ledger`; the stateless path is unchanged.
 - [ ] Clamp and rate-limit each have a test proving the bound holds under an
       out-of-range solve.
 - [ ] Each fault class has an injection test and a distinct recorded response.
@@ -255,6 +262,8 @@ evidence.
 | Clean under gcc/clang `-Wpedantic` | ✅ verified | gcc 14.2 + clang 19.1, zero diagnostics (portable `AVEN_EXPORT`) |
 | Forgery-resistant seal (AERIC) | ✅ verified | HMAC-SHA256 keyed; matches Python `hmac` ref + Rust `hmac_sha256_hex` construction; key-dependent |
 | Host verifies edge-signed ledger (JSONL interop) | ✅ verified | `avenc verify-ledger` accepts the daemon ledger (600 facts, all sigs valid); wrong key / tamper rejected |
+| Stateful models (state fed back tick→tick) | ✅ verified | PI controller matches Python reference exactly; integral ramps; HOLD freezes & resumes (`pi_check.py`) |
+| Stateful daemon end-to-end | ✅ verified | PI daemon (`n_state=1`) ledger passes `avenc verify-ledger`; stateless path unchanged |
 | "MISRA-grade" | ⬜ **unfounded** | static-analysis track |
 | SHM end-to-end cycle time | ⬜ unverified | measure on real loop (not guessed) |
 

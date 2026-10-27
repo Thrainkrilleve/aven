@@ -169,3 +169,37 @@ clang 19.1; a gcc-built daemon's ledger verifies identically.
 **Honest limits.** Jitter is bounded by `deadline_ms`, not sub-ms — true
 worst-case/RT timing (SCHED_FIFO, busy-spin) is the Level-2/3 track. Single
 client, one transport (TCP) — more drivers (Modbus/MQTT/OPC-UA/CAN) are Level-2.
+
+## Level-2: stateful models
+
+Controllers have memory (a PID's integral, a filter's history), so AERIC supports
+a persistent **state vector** carried tick→tick. The schema gains `n_state`:
+
+- inputs  = `[ sensors (n_sensors) | state (n_state) ]`
+- outputs = `[ setpoints (n_setpoints) | state' (n_state) ]`
+
+The caller supplies **only the sensors**; AERIC appends `x[t]` internally, solves,
+publishes the leading setpoints, and on a **live** tick advances `x[t+1]` from the
+trailing outputs. On HOLD the state is **frozen** and fail-safe setpoints are
+published. `n_state = 0` is the original stateless behavior (unchanged). The shim
+maps AERIC's `[sensors|state]` convention to the model's alphabetical arg order.
+
+`examples/pi_controller.aven` is a discrete PI controller (Kp=0.5, Ki·dt=0.1);
+`model_pi_controller.*` + `aven_shim_pi.c` wire it in. `test_state.c` drives a unit
+step and `pi_check.py` checks it against an independent Python reference:
+
+```
+cl /O2 test_state.c aeric.c aven_shim_pi.c model_pi_controller.c /Fe:test_state.exe
+python pi_check.py test_state.exe
+```
+
+**Verified:** the integral ramps `0.1 → 0.6` (memory — a stateless model would
+repeat one value), tick 7 induces a HOLD that **freezes** the state at `0.6` and
+publishes the fail-safe `u=0`, then the controller **resumes** `0.7 → 1.0` — all
+matching the Python PI reference exactly. A daemon built with the PI shim
+(`n_state=1`) produces a ledger that `avenc verify-ledger` accepts, and the
+stateless `server_capacity` daemon still verifies unchanged. Clean at `-Wpedantic`
+on MSVC, gcc 14.2, clang 19.1.
+
+**Still Level-2:** the graded safety envelope (clamp / rate-limit / fault
+taxonomy), the RT+telemetry concurrency split, and SHM interop with the Rust daemon.

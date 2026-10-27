@@ -118,7 +118,7 @@ static void *arena_alloc(aeric_arena_t *a, size_t bytes) {
 static void ledger_record(aeric_runtime_t *rt, int status) {
     arena_reset(&rt->arena);
 
-    size_t out_bytes = rt->schema.n_outputs * sizeof(double);
+    size_t out_bytes = rt->n_setpoints * sizeof(double);
     size_t rec_len = sizeof(uint64_t)   /* tick_index */
                    + sizeof(uint64_t)   /* prev hash  */
                    + sizeof(int32_t)    /* status     */
@@ -148,19 +148,31 @@ static void ledger_record(aeric_runtime_t *rt, int status) {
 bool AERIC_Init(aeric_runtime_t *rt,
                 const tick_schema_t *schema,
                 const double *safe_setpoints,
+                const double *initial_state,
                 const uint8_t *seal_key, size_t seal_key_len) {
     if (!rt || !schema || !safe_setpoints) return false;
     if (!seal_key || seal_key_len == 0) return false;   /* keyed seal is mandatory */
     if (schema->n_inputs  > AERIC_MAX_INPUTS)  return false;
     if (schema->n_outputs > AERIC_MAX_OUTPUTS) return false;
-    for (size_t i = 0; i < schema->n_outputs; ++i)
+    if (schema->n_state   > AERIC_MAX_STATE)   return false;
+    if (schema->n_state   > schema->n_inputs)  return false;
+    if (schema->n_state   > schema->n_outputs) return false;
+    if (schema->n_state > 0 && !initial_state) return false;
+
+    size_t n_setpoints = schema->n_outputs - schema->n_state;
+    for (size_t i = 0; i < n_setpoints; ++i)
         if (!isfinite(safe_setpoints[i])) return false;
+    for (size_t i = 0; i < schema->n_state; ++i)
+        if (!isfinite(initial_state[i])) return false;
 
     memset(rt, 0, sizeof *rt);
     rt->schema = *schema;
-    memcpy(rt->safe, safe_setpoints, schema->n_outputs * sizeof(double));
-    /* Start in the fail-safe state until the first clean solve publishes. */
-    memcpy(rt->outputs, safe_setpoints, schema->n_outputs * sizeof(double));
+    rt->n_sensors   = schema->n_inputs  - schema->n_state;
+    rt->n_setpoints = n_setpoints;
+    memcpy(rt->safe, safe_setpoints, n_setpoints * sizeof(double));
+    /* Start publishing the fail-safe state until the first clean solve. */
+    memcpy(rt->outputs, safe_setpoints, n_setpoints * sizeof(double));
+    for (size_t i = 0; i < schema->n_state; ++i) rt->state[i] = initial_state[i];
     rt->hold_mode = false;
     rt->last_tick_hash = FNV_OFFSET;
 
@@ -187,27 +199,30 @@ bool AERIC_Init(aeric_runtime_t *rt,
     return true;
 }
 
-int AERIC_Tick(aeric_runtime_t *rt, const double *inputs, size_t n_inputs) {
-    if (!rt || !inputs) return AERIC_BADCALL;
+int AERIC_Tick(aeric_runtime_t *rt, const double *sensors, size_t n_sensors) {
+    if (!rt || !sensors) return AERIC_BADCALL;
 
     rt->tick_index++;
 
-    /* 1. Strict ingress: exact arity and finite sensor values. */
-    bool ingress_ok = (n_inputs == rt->schema.n_inputs);
-    for (size_t i = 0; ingress_ok && i < n_inputs; ++i)
-        if (!isfinite(inputs[i])) ingress_ok = false;
+    /* 1. Strict ingress: exact sensor arity and finite values. */
+    bool ingress_ok = (n_sensors == rt->n_sensors);
+    for (size_t i = 0; ingress_ok && i < n_sensors; ++i)
+        if (!isfinite(sensors[i])) ingress_ok = false;
 
     if (!ingress_ok) {
         rt->fault_count++;
         rt->consecutive_ok = 0;
         rt->hold_mode = true;
-        memcpy(rt->outputs, rt->safe, rt->schema.n_outputs * sizeof(double));
-        ledger_record(rt, AERIC_HOLD);
+        memcpy(rt->outputs, rt->safe, rt->n_setpoints * sizeof(double));
+        ledger_record(rt, AERIC_HOLD);        /* state frozen */
         return AERIC_HOLD;
     }
 
-    /* 2. Staging copy (the solver reads our buffer, never the caller's). */
-    memcpy(rt->inputs, inputs, n_inputs * sizeof(double));
+    /* 2. Build the canonical solver input [sensors | state]; the caller never
+     *    supplies the state. */
+    memcpy(rt->inputs, sensors, n_sensors * sizeof(double));
+    for (size_t i = 0; i < rt->schema.n_state; ++i)
+        rt->inputs[n_sensors + i] = rt->state[i];
 
     /* 3. Run the AVEN solver via the stable shim. */
     double tmp[AERIC_MAX_OUTPUTS];
@@ -217,18 +232,18 @@ int AERIC_Tick(aeric_runtime_t *rt, const double *inputs, size_t n_inputs) {
     for (size_t j = 0; solved && j < rt->schema.n_outputs; ++j)
         if (!isfinite(tmp[j])) solved = false;   /* belt-and-braces vs the shim */
 
-    /* 4. Fault -> latch HOLD, publish fail-safe. */
+    /* 4. Fault -> latch HOLD, publish fail-safe, freeze state. */
     if (!solved) {
         rt->fault_count++;
         rt->consecutive_ok = 0;
         rt->hold_mode = true;
-        memcpy(rt->outputs, rt->safe, rt->schema.n_outputs * sizeof(double));
+        memcpy(rt->outputs, rt->safe, rt->n_setpoints * sizeof(double));
         ledger_record(rt, AERIC_HOLD);
         return AERIC_HOLD;
     }
 
-    /* 5. Clean solve. If latched, count toward auto-recovery but keep holding
-     *    until the stability threshold is met (or an operator clears it). */
+    /* 5. Clean solve while latched: count toward recovery but keep holding
+     *    (fail-safe out, state frozen) until the threshold or an operator clear. */
     if (rt->hold_mode) {
         rt->consecutive_ok++;
         if (rt->schema.recover_ticks != 0 &&
@@ -236,15 +251,18 @@ int AERIC_Tick(aeric_runtime_t *rt, const double *inputs, size_t n_inputs) {
             rt->hold_mode = false;
         }
         if (rt->hold_mode) {
-            memcpy(rt->outputs, rt->safe, rt->schema.n_outputs * sizeof(double));
+            memcpy(rt->outputs, rt->safe, rt->n_setpoints * sizeof(double));
             ledger_record(rt, AERIC_HOLD);
             return AERIC_HOLD;
         }
     }
 
-    /* 6. Normal operation: publish live setpoints. */
+    /* 6. Live: publish setpoints and advance x[t+1] from the trailing n_state
+     *    outputs. State advances only on a fully live tick. */
     rt->consecutive_ok++;
-    memcpy(rt->outputs, tmp, rt->schema.n_outputs * sizeof(double));
+    memcpy(rt->outputs, tmp, rt->n_setpoints * sizeof(double));
+    for (size_t i = 0; i < rt->schema.n_state; ++i)
+        rt->state[i] = tmp[rt->n_setpoints + i];
     ledger_record(rt, AERIC_OK);
     return AERIC_OK;
 }
@@ -257,6 +275,10 @@ void AERIC_ClearFault(aeric_runtime_t *rt) {
 
 const double *AERIC_Setpoints(const aeric_runtime_t *rt) {
     return rt ? rt->outputs : NULL;
+}
+
+const double *AERIC_State(const aeric_runtime_t *rt) {
+    return rt ? rt->state : NULL;
 }
 
 void AERIC_Seal(aeric_runtime_t *rt, uint8_t out_digest[32]) {

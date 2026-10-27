@@ -35,6 +35,7 @@ int main(void) {
     schema.version       = 1;
     schema.n_inputs      = 8;
     schema.n_outputs     = 5;
+    schema.n_state       = 0;   /* stateless model */
     schema.recover_ticks = 3;   /* 3 clean solves to leave HOLD automatically */
 
     /* Fail-safe setpoints driven while HOLD: 1 worker, base kernel RAM, no net. */
@@ -44,7 +45,7 @@ int main(void) {
     const uint8_t seal_key[] = "aven-aeric-demo-key-v1";
 
     aeric_runtime_t rt;
-    if (!AERIC_Init(&rt, &schema, safe, seal_key, sizeof(seal_key) - 1)) {
+    if (!AERIC_Init(&rt, &schema, safe, NULL, seal_key, sizeof(seal_key) - 1)) {
         fprintf(stderr, "AERIC_Init failed\n");
         return 1;
     }

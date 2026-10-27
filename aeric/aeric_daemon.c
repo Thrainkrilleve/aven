@@ -81,8 +81,11 @@ typedef struct {
     char     ledger[512];
     char     seal_key[256];      /* literal key (demo); real use: seal_key_env */
     char     seal_key_env[128];
+    size_t   n_state;                     /* persistent state vars (0 = stateless) */
     double   safe[AERIC_MAX_OUTPUTS];
     size_t   n_safe;
+    double   init_state[AERIC_MAX_STATE]; /* initial state vector */
+    size_t   n_init;
 } daemon_cfg;
 
 static char *trim(char *s){ while(*s==' '||*s=='\t')s++; char*e=s+strlen(s); while(e>s&&(e[-1]=='\n'||e[-1]=='\r'||e[-1]==' '||e[-1]=='\t'))*--e=0; return s; }
@@ -106,6 +109,7 @@ static int load_cfg(const char *path, daemon_cfg *c){
         else if(!strcmp(k,"deadline_ms")) c->deadline_ms=(int)strtol(v,0,10);
         else if(!strcmp(k,"tcp_port")) c->tcp_port=(int)strtol(v,0,10);
         else if(!strcmp(k,"max_ticks")) c->max_ticks=(unsigned)strtoul(v,0,10);
+        else if(!strcmp(k,"n_state")) c->n_state=(size_t)strtoul(v,0,10);
         else if(!strcmp(k,"ledger")) { strncpy(c->ledger,v,sizeof c->ledger-1); }
         else if(!strcmp(k,"seal_key")) { strncpy(c->seal_key,v,sizeof c->seal_key-1); }
         else if(!strcmp(k,"seal_key_env")) { strncpy(c->seal_key_env,v,sizeof c->seal_key_env-1); }
@@ -113,10 +117,17 @@ static int load_cfg(const char *path, daemon_cfg *c){
             c->n_safe=0; char *p=v;
             while(*p && c->n_safe<AERIC_MAX_OUTPUTS){ c->safe[c->n_safe++]=strtod(p,&p); if(*p==',')p++; }
         }
+        else if(!strcmp(k,"state0")) {
+            c->n_init=0; char *p=v;
+            while(*p && c->n_init<AERIC_MAX_STATE){ c->init_state[c->n_init++]=strtod(p,&p); if(*p==',')p++; }
+        }
     }
     fclose(f);
     if(c->n_inputs==0||c->n_outputs==0){ fprintf(stderr,"config: n_inputs/n_outputs required\n"); return 0; }
-    if(c->n_safe!=c->n_outputs){ fprintf(stderr,"config: 'safe' needs %zu values, got %zu\n",c->n_outputs,c->n_safe); return 0; }
+    if(c->n_state>c->n_inputs||c->n_state>c->n_outputs){ fprintf(stderr,"config: n_state too large\n"); return 0; }
+    size_t n_setpoints=c->n_outputs-c->n_state;
+    if(c->n_safe!=n_setpoints){ fprintf(stderr,"config: 'safe' needs %zu values (n_outputs-n_state), got %zu\n",n_setpoints,c->n_safe); return 0; }
+    if(c->n_init!=c->n_state){ fprintf(stderr,"config: 'state0' needs %zu values, got %zu\n",c->n_state,c->n_init); return 0; }
     return 1;
 }
 
@@ -193,9 +204,12 @@ int main(int argc, char **argv){
     if(!key[0]){ fprintf(stderr,"no seal key (set 'seal_key' or 'seal_key_env')\n"); return 1; }
 
     tick_schema_t schema; schema.version=1; schema.n_inputs=cfg.n_inputs;
-    schema.n_outputs=cfg.n_outputs; schema.recover_ticks=cfg.recover_ticks;
+    schema.n_outputs=cfg.n_outputs; schema.n_state=cfg.n_state; schema.recover_ticks=cfg.recover_ticks;
+    const double *state0 = cfg.n_state ? cfg.init_state : NULL;
     aeric_runtime_t rt;
-    if(!AERIC_Init(&rt,&schema,cfg.safe,(const uint8_t*)key,strlen(key))){ fprintf(stderr,"AERIC_Init failed\n"); return 1; }
+    if(!AERIC_Init(&rt,&schema,cfg.safe,state0,(const uint8_t*)key,strlen(key))){ fprintf(stderr,"AERIC_Init failed\n"); return 1; }
+    const size_t n_sensors = cfg.n_inputs - cfg.n_state;      /* wire: peer -> daemon */
+    const size_t n_setpoints = cfg.n_outputs - cfg.n_state;   /* wire: daemon -> peer */
 
     FILE *lf=fopen(cfg.ledger,"w"); if(!lf){ fprintf(stderr,"cannot open ledger '%s'\n",cfg.ledger); return 1; }
 
@@ -229,10 +243,10 @@ int main(int argc, char **argv){
             status=AERIC_Tick(&rt,&dummy,0);            /* no peer -> HOLD tick */
         } else {
             double inb[AERIC_MAX_INPUTS];
-            int fr=read_frame(cli,inb,cfg.n_inputs);
+            int fr=read_frame(cli,inb,n_sensors);
             if(fr==0){
-                status=AERIC_Tick(&rt,inb,cfg.n_inputs); /* live solve */
-                if(write_frame(cli,AERIC_Setpoints(&rt),cfg.n_outputs)){ closesock(cli); cli=BAD_SOCK; }
+                status=AERIC_Tick(&rt,inb,n_sensors);    /* live solve (state fed back internally) */
+                if(write_frame(cli,AERIC_Setpoints(&rt),n_setpoints)){ closesock(cli); cli=BAD_SOCK; }
             } else {
                 status=AERIC_Tick(&rt,&dummy,0);          /* deadline miss / schema fault -> HOLD, no reply */
                 if(fr<0){ closesock(cli); cli=BAD_SOCK; } /* peer gone */
@@ -240,7 +254,7 @@ int main(int argc, char **argv){
         }
         tick++; if(status==AERIC_OK) live++; else held++;
         { const double *sp=AERIC_Setpoints(&rt); char nm[32];
-          for(size_t i=0;i<cfg.n_outputs;i++){ snprintf(nm,sizeof nm,"sp%zu",i); write_fact(lf,key,strlen(key),prev,&seq,tick,nm,sp[i]); } }
+          for(size_t i=0;i<n_setpoints;i++){ snprintf(nm,sizeof nm,"sp%zu",i); write_fact(lf,key,strlen(key),prev,&seq,tick,nm,sp[i]); } }
 
         double t=now_s(); double jit=(t-last)-period; if(tick>1 && jit>max_jit) max_jit=jit; last=t;
         next+=period; sleep_s(next-now_s());

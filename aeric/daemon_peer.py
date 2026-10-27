@@ -14,6 +14,7 @@ port = int(sys.argv[1]) if len(sys.argv) > 1 else 5555
 N_IN = int(sys.argv[2]) if len(sys.argv) > 2 else 8
 N_OUT = int(sys.argv[3]) if len(sys.argv) > 3 else 5
 NOMINAL = [20.0, 64.0, 1.04, 4096.0, 16.0, 50000.0, 4.0, 0.70]
+SENSORS = (NOMINAL * ((N_IN + len(NOMINAL) - 1) // len(NOMINAL)))[:N_IN]  # length n_sensors
 
 def recv_all(s, n):
     b = b""
@@ -44,14 +45,14 @@ def main():
     sent = 0; last = None
     # 1. happy path
     for _ in range(40):
-        last = exchange(s, NOMINAL); sent += 1; time.sleep(0.015)
-    print(f"happy: sent {sent} frames, last setpoints alloc={last[1]:.0f} ram={last[2]:.0f}")
+        last = exchange(s, SENSORS); sent += 1; time.sleep(0.015)
+    print(f"happy: sent {sent} frames, last setpoint[0]={last[0]:.4g}")
     # 2. deadline miss: go quiet past the deadline
     time.sleep(0.25)
     print("paused 250 ms (expect daemon HOLD ticks)")
     # 3. resume briefly, then disconnect
     for _ in range(20):
-        last = exchange(s, NOMINAL); sent += 1; time.sleep(0.015)
+        last = exchange(s, SENSORS); sent += 1; time.sleep(0.015)
     s.close()
     print(f"resumed + disconnected: total {sent} live exchanges")
     return 0

@@ -27,6 +27,7 @@
 /* Compile-time bounds. Raise if a model needs more; they size the runtime. */
 #define AERIC_MAX_INPUTS     32
 #define AERIC_MAX_OUTPUTS    16
+#define AERIC_MAX_STATE      16
 #define AERIC_ARENA_CAPACITY 2048
 
 /* ===== Stable solver ABI (provided by a per-model shim, e.g. aven_shim.c) =====
@@ -47,9 +48,10 @@ int aven_solve(const double *in, size_t n_in, double *out, size_t n_out);
 
 /* ===== Tick schema ===== */
 typedef struct {
-    uint32_t version;        /* schema version for .aer evolution           */
-    size_t   n_inputs;       /* count of double sensor inputs per tick       */
-    size_t   n_outputs;      /* count of double setpoints per tick           */
+    uint32_t version;        /* schema version for .aer evolution                */
+    size_t   n_inputs;       /* full solver input arity  = n_sensors + n_state   */
+    size_t   n_outputs;      /* full solver output arity = n_setpoints + n_state  */
+    size_t   n_state;        /* persistent state vars fed back each tick (0 = stateless) */
     uint32_t recover_ticks;  /* clean solves needed to auto-exit HOLD;
                               * 0 => HOLD is manual-clear only (ClearFault)  */
 } tick_schema_t;
@@ -73,9 +75,12 @@ typedef struct {
     tick_schema_t  schema;
     aeric_arena_t  arena;                        /* per-tick ledger record scratch */
 
-    double inputs[AERIC_MAX_INPUTS];             /* validated staging copy          */
+    size_t n_sensors;                            /* n_inputs  - n_state (caller supplies these)  */
+    size_t n_setpoints;                          /* n_outputs - n_state (published to the plant) */
+    double inputs[AERIC_MAX_INPUTS];             /* staging: [sensors | state] in canonical order */
     double outputs[AERIC_MAX_OUTPUTS];           /* published setpoints (safe in HOLD) */
     double safe[AERIC_MAX_OUTPUTS];              /* configured fail-safe setpoints   */
+    double state[AERIC_MAX_STATE];               /* persistent x[t]; advanced only on a live tick */
 
     bool     hold_mode;                          /* latched on fault                */
     uint32_t fault_count;                        /* lifetime fault count            */
@@ -94,28 +99,34 @@ typedef struct {
 
 /* ===== Public API ===== */
 
-/* Initialise the runtime. `safe_setpoints` is n_outputs doubles describing the
- * state to drive while in HOLD (required; must be finite). `seal_key` /
- * `seal_key_len` key the HMAC-SHA256 provenance seal (required, len > 0): the
- * seal is forgery-resistant only to someone without the key. The construction
- * matches the Rust ledger's hmac_sha256_hex (key > 64 bytes is SHA-256'd, then
- * zero-padded to 64). Returns false if the schema exceeds the compile-time caps,
- * any safe setpoint is non-finite, or no key is given. */
+/* Initialise the runtime. `safe_setpoints` is n_setpoints doubles describing the
+ * state to drive while in HOLD (required; must be finite). `initial_state` is
+ * n_state doubles for the initial state vector (may be NULL when n_state == 0;
+ * must be finite otherwise). `seal_key` / `seal_key_len` key the HMAC-SHA256
+ * provenance seal (required, len > 0); construction matches the Rust ledger's
+ * hmac_sha256_hex. Returns false if the schema exceeds the compile-time caps,
+ * n_state > n_inputs/n_outputs, any value is non-finite, or no key is given. */
 bool AERIC_Init(aeric_runtime_t *rt,
                 const tick_schema_t *schema,
                 const double *safe_setpoints,
+                const double *initial_state,
                 const uint8_t *seal_key, size_t seal_key_len);
 
-/* Run one control cycle. `inputs` is n_inputs finite doubles. Publishes either
- * live or fail-safe setpoints (read with AERIC_Setpoints) and advances the
- * ledger. Returns AERIC_OK / AERIC_HOLD / AERIC_BADCALL. */
-int AERIC_Tick(aeric_runtime_t *rt, const double *inputs, size_t n_inputs);
+/* Run one control cycle. `sensors` is n_sensors finite doubles (the caller never
+ * supplies the state — AERIC appends x[t] internally as [sensors | state], solves,
+ * publishes the first n_setpoints outputs, and on a LIVE tick advances x[t+1] from
+ * the trailing n_state outputs; on HOLD the state is frozen and fail-safe setpoints
+ * are published). Returns AERIC_OK / AERIC_HOLD / AERIC_BADCALL. */
+int AERIC_Tick(aeric_runtime_t *rt, const double *sensors, size_t n_sensors);
 
 /* Force-clear a latched HOLD (operator acknowledgement). */
 void AERIC_ClearFault(aeric_runtime_t *rt);
 
-/* Current published setpoints (n_outputs doubles). Fail-safe values in HOLD. */
+/* Current published setpoints (n_setpoints doubles). Fail-safe values in HOLD. */
 const double *AERIC_Setpoints(const aeric_runtime_t *rt);
+
+/* Current persistent state vector x[t] (n_state doubles; NULL-safe). */
+const double *AERIC_State(const aeric_runtime_t *rt);
 
 /* Finalise a snapshot of the HMAC-SHA256 provenance seal into out_digest[32].
  * The running inner context is cloned, so AERIC_Seal may be called repeatedly
