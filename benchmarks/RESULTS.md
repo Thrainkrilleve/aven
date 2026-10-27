@@ -83,8 +83,8 @@ it is amortized throughput, not worst-case single-tick latency.
 | Rust — **AVEN evaluator (interpreter)** | 729 | 1,370,000 | 0.0075× |
 | Python — pure (scalar loop) | 1,271 | 787,000 | 0.0043× |
 
-**Headlines:**
-- **AVEN's generated C matches hand-written C++ to within ~3%** (5.49 vs 5.67
+**Headlines (MSVC run above; see §2a for gcc):**
+- **With MSVC, AVEN's generated C matches hand-written C++ to within ~3%** (5.49 vs 5.67
   ns) — i.e. the compiler adds *no* computational overhead. The separate-TU
   number (8.69 ns) is pure cross-translation-unit call cost; whole-program
   optimization (`/GL /LTCG`) lets the generated function inline and it closes the
@@ -92,6 +92,24 @@ it is amortized throughput, not worst-case single-tick latency.
 - **Compiled AVEN is ~133× the AVEN interpreter and ~230× pure Python.** This is
   the concrete value of `emit-c`: the same model that the Rust evaluator runs at
   ~730 ns/solve runs at ~5.5 ns/solve once compiled.
+
+### 2a. Linux / gcc reproduction (2026-10-27)
+
+`sh benchmarks/run_all.sh <scratch>` on a 4-vCPU Linux container (Intel Xeon @ 2.10 GHz),
+gcc/g++ 13.3 at `-O2`, Aven-C with `-flto`:
+
+- **Correctness reproduces exactly**: all four backends are bit-identical on all 260,085
+  finite rows, 259,468 / 260,077 `allocated_workers` exact, 3 / 6 beyond 2⁵³, and
+  `compare.py` confirms that all 609 differing rows lie in the ceil-boundary sweep and that
+  pure arithmetic is within 5.1 × 10⁻¹⁶ of the oracle on normal results. This extends the
+  bit-identity result from MSVC to gcc.
+- **Performance** (ns / solve, three runs): hand-written C++ 11.1–12.4; Aven-C 15.1–16.0 as
+  benchmarked (`--traceable` output); Aven-C 12.1–12.9 when the same function body may be
+  inlined; AVEN evaluator 732; numpy 52; pure Python 1,751.
+- The difference from MSVC is the `AVEN_EXPORT` attribute that `--traceable` adds so tracing
+  tools can hook the function: gcc honours `noipa`/`noinline` and cannot inline it, while
+  MSVC's build compiles the attribute away. Without it, generated C is within about 10% of
+  hand-written C++ under gcc.
 
 ---
 
@@ -105,13 +123,14 @@ it is amortized throughput, not worst-case single-tick latency.
 - AVEN's arithmetic is correctly-rounded against a 50-digit reference (~2 ULP)
   wherever float64 can represent the answer.
 - The `ceil` 1e-9 snap is consistent across the interpreter and the generated C.
-- Generated C is as fast as hand C++ and ~100–230× faster than interpreted paths.
+- Generated C is as fast as hand C++ under MSVC, within about 10% under gcc when it may be
+  inlined, and ~50–230× faster than interpreted paths.
 
 **Does not prove (future work, per the roadmap):**
 - Worst-case single-tick latency or jitter (these are amortized throughput on one
   machine/compiler). A dedicated timing harness with p99/max is tracked separately.
-- Cross-platform / cross-compiler bit-reproducibility (only MSVC here; gcc/clang
-  determinism is a roadmap track).
+- Bit-reproducibility beyond the two toolchains tested (MSVC on Windows, gcc 13 on Linux);
+  clang and other architectures are untested.
 - Anything about I/O, transport, or the full control loop.
 
 ---
@@ -135,4 +154,5 @@ python benchmarks/backend_python.py <scratch>
 python benchmarks/compare.py <scratch>
 ```
 
-`run_all.ps1 <scratch>` does all of the above on Windows/MSVC.
+`run_all.ps1 <scratch>` does all of the above on Windows/MSVC, and `run_all.sh <scratch>`
+on Linux/macOS (gcc or clang).

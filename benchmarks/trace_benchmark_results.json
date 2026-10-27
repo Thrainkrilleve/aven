@@ -3,12 +3,15 @@
   "total_steps": 40,
   "actionable_count": 39,
   "blocked_count": 1,
+  "failed_count": 0,
+  "avenc_version": "avenc 0.6.0",
+  "platform": "linux",
   "min_reqs_per_second": 7100.0,
   "max_reqs_per_second": 98200.0,
   "min_pods": 2.0,
   "max_pods": 80.0,
-  "median_ms": 47.72349999984726,
-  "p95_ms": 56.50370000512339,
+  "median_ms": 32.7819450003517,
+  "p95_ms": 43.03493299994443,
   "results": [
     {
       "step": 0,
@@ -18,10 +21,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 2.0,
       "allocated_workers": 167.0,
       "wire_rate_gbps": 3.3062,
-      "elapsed_ms": 51.23010000534123
+      "elapsed_ms": 35.022057999867684
     },
     {
       "step": 1,
@@ -31,10 +35,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 2.0,
       "allocated_workers": 194.0,
       "wire_rate_gbps": 3.8046,
-      "elapsed_ms": 48.21339999762131
+      "elapsed_ms": 30.523936999998114
     },
     {
       "step": 2,
@@ -44,10 +49,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 3.0,
       "allocated_workers": 255.0,
       "wire_rate_gbps": 4.8838,
-      "elapsed_ms": 46.37599999841768
+      "elapsed_ms": 32.18686999980491
     },
     {
       "step": 3,
@@ -57,10 +63,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 4.0,
       "allocated_workers": 335.0,
       "wire_rate_gbps": 6.2503,
-      "elapsed_ms": 49.837999998999294
+      "elapsed_ms": 38.09259900026518
     },
     {
       "step": 4,
@@ -70,10 +77,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 5.0,
       "allocated_workers": 481.0,
       "wire_rate_gbps": 8.3605,
-      "elapsed_ms": 49.30410000088159
+      "elapsed_ms": 40.79202599996279
     },
     {
       "step": 5,
@@ -83,10 +91,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 7.0,
       "allocated_workers": 613.0,
       "wire_rate_gbps": 10.2102,
-      "elapsed_ms": 49.148499994771555
+      "elapsed_ms": 31.613190999905783
     },
     {
       "step": 6,
@@ -96,10 +105,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 9.0,
       "allocated_workers": 804.0,
       "wire_rate_gbps": 12.7193,
-      "elapsed_ms": 46.78509999939706
+      "elapsed_ms": 32.92938499998854
     },
     {
       "step": 7,
@@ -109,10 +119,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 11.0,
       "allocated_workers": 1026.0,
       "wire_rate_gbps": 15.1351,
-      "elapsed_ms": 56.61549999786075
+      "elapsed_ms": 31.96648200037089
     },
     {
       "step": 8,
@@ -122,10 +133,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 13.0,
       "allocated_workers": 1267.0,
       "wire_rate_gbps": 17.6366,
-      "elapsed_ms": 51.93310000322526
+      "elapsed_ms": 41.7292710003494
     },
     {
       "step": 9,
@@ -135,10 +147,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 16.0,
       "allocated_workers": 1565.0,
       "wire_rate_gbps": 20.8565,
-      "elapsed_ms": 53.71259999810718
+      "elapsed_ms": 36.21521000013672
     },
     {
       "step": 10,
@@ -148,10 +161,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 20.0,
       "allocated_workers": 1955.0,
       "wire_rate_gbps": 24.5952,
-      "elapsed_ms": 49.8239000007743
+      "elapsed_ms": 32.7819450003517
     },
     {
       "step": 11,
@@ -161,10 +175,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 25.0,
       "allocated_workers": 2401.0,
       "wire_rate_gbps": 28.455,
-      "elapsed_ms": 50.18520000157878
+      "elapsed_ms": 39.613887000086834
     },
     {
       "step": 12,
@@ -174,10 +189,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 31.0,
       "allocated_workers": 3005.0,
       "wire_rate_gbps": 33.0624,
-      "elapsed_ms": 49.30190000595758
+      "elapsed_ms": 35.46009399997274
     },
     {
       "step": 13,
@@ -187,10 +203,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 42.0,
       "allocated_workers": 4108.0,
       "wire_rate_gbps": 40.8495,
-      "elapsed_ms": 46.419199999945704
+      "elapsed_ms": 30.316840000068623
     },
     {
       "step": 14,
@@ -200,10 +217,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 59.0,
       "allocated_workers": 5802.0,
       "wire_rate_gbps": 51.1661,
-      "elapsed_ms": 45.60009999840986
+      "elapsed_ms": 30.182031000094867
     },
     {
       "step": 15,
@@ -213,10 +231,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 72.0,
       "allocated_workers": 7128.0,
       "wire_rate_gbps": 57.1536,
-      "elapsed_ms": 48.753999995824415
+      "elapsed_ms": 30.23514200003774
     },
     {
       "step": 16,
@@ -226,10 +245,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 80.0,
       "allocated_workers": 7913.0,
       "wire_rate_gbps": 61.2061,
-      "elapsed_ms": 47.47190000489354
+      "elapsed_ms": 29.47766600027535
     },
     {
       "step": 17,
@@ -239,10 +259,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 63.0,
       "allocated_workers": 6230.0,
       "wire_rate_gbps": 53.0796,
-      "elapsed_ms": 47.08350000146311
+      "elapsed_ms": 33.85994100017342
     },
     {
       "step": 18,
@@ -252,10 +273,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 47.0,
       "allocated_workers": 4656.0,
       "wire_rate_gbps": 44.4709,
-      "elapsed_ms": 45.87590000301134
+      "elapsed_ms": 43.03493299994443
     },
     {
       "step": 19,
@@ -265,10 +287,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 37.0,
       "allocated_workers": 3654.0,
       "wire_rate_gbps": 37.2372,
-      "elapsed_ms": 49.66960000456311
+      "elapsed_ms": 34.07534600000872
     },
     {
       "step": 20,
@@ -278,10 +301,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 31.0,
       "allocated_workers": 3012.0,
       "wire_rate_gbps": 33.227,
-      "elapsed_ms": 49.3962000036845
+      "elapsed_ms": 33.58387699972809
     },
     {
       "step": 21,
@@ -291,10 +315,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 27.0,
       "allocated_workers": 2691.0,
       "wire_rate_gbps": 30.4668,
-      "elapsed_ms": 46.48610000003828
+      "elapsed_ms": 31.935964999775024
     },
     {
       "step": 22,
@@ -304,10 +329,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 25.0,
       "allocated_workers": 2420.0,
       "wire_rate_gbps": 28.2744,
-      "elapsed_ms": 47.10250000061933
+      "elapsed_ms": 34.07613599983961
     },
     {
       "step": 23,
@@ -317,10 +343,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 22.0,
       "allocated_workers": 2158.0,
       "wire_rate_gbps": 26.0198,
-      "elapsed_ms": 45.835600001737475
+      "elapsed_ms": 32.08491499981392
     },
     {
       "step": 24,
@@ -330,10 +357,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 20.0,
       "allocated_workers": 1920.0,
       "wire_rate_gbps": 24.1114,
-      "elapsed_ms": 46.67379999591503
+      "elapsed_ms": 32.889798000269366
     },
     {
       "step": 25,
@@ -341,12 +369,13 @@
       "reqs_per_second": 45500.0,
       "avg_latency_ms": 27.2,
       "expected_ttl": 0,
-      "exit_code": 1,
+      "exit_code": 3,
       "is_blocked": true,
+      "failed": false,
       "target_pods": null,
       "allocated_workers": null,
       "wire_rate_gbps": null,
-      "elapsed_ms": 47.72349999984726
+      "elapsed_ms": 30.562339999960386
     },
     {
       "step": 26,
@@ -356,10 +385,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 17.0,
       "allocated_workers": 1605.0,
       "wire_rate_gbps": 21.1922,
-      "elapsed_ms": 47.53139999957057
+      "elapsed_ms": 30.911859000298136
     },
     {
       "step": 27,
@@ -369,10 +399,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 15.0,
       "allocated_workers": 1411.0,
       "wire_rate_gbps": 19.2234,
-      "elapsed_ms": 46.365499998501036
+      "elapsed_ms": 32.20331900001838
     },
     {
       "step": 28,
@@ -382,10 +413,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 12.0,
       "allocated_workers": 1174.0,
       "wire_rate_gbps": 16.6522,
-      "elapsed_ms": 47.57480000262149
+      "elapsed_ms": 30.901256000106514
     },
     {
       "step": 29,
@@ -395,10 +427,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 10.0,
       "allocated_workers": 957.0,
       "wire_rate_gbps": 14.2699,
-      "elapsed_ms": 48.77769999438897
+      "elapsed_ms": 30.505608999646938
     },
     {
       "step": 30,
@@ -408,10 +441,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 8.0,
       "allocated_workers": 782.0,
       "wire_rate_gbps": 12.2237,
-      "elapsed_ms": 56.50370000512339
+      "elapsed_ms": 30.215334999866172
     },
     {
       "step": 31,
@@ -421,10 +455,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 7.0,
       "allocated_workers": 635.0,
       "wire_rate_gbps": 10.3043,
-      "elapsed_ms": 49.38120000588242
+      "elapsed_ms": 31.556226999782666
     },
     {
       "step": 32,
@@ -434,10 +469,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 5.0,
       "allocated_workers": 495.0,
       "wire_rate_gbps": 8.4823,
-      "elapsed_ms": 48.344200004066806
+      "elapsed_ms": 31.961709999904997
     },
     {
       "step": 33,
@@ -447,10 +483,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 4.0,
       "allocated_workers": 375.0,
       "wire_rate_gbps": 6.804,
-      "elapsed_ms": 47.67520000314107
+      "elapsed_ms": 47.81482899988987
     },
     {
       "step": 34,
@@ -460,10 +497,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 3.0,
       "allocated_workers": 296.0,
       "wire_rate_gbps": 5.5566,
-      "elapsed_ms": 47.13310000079218
+      "elapsed_ms": 33.66636100008691
     },
     {
       "step": 35,
@@ -473,10 +511,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 3.0,
       "allocated_workers": 230.0,
       "wire_rate_gbps": 4.4537,
-      "elapsed_ms": 47.35700000310317
+      "elapsed_ms": 31.48537800007034
     },
     {
       "step": 36,
@@ -486,10 +525,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 2.0,
       "allocated_workers": 191.0,
       "wire_rate_gbps": 3.7743,
-      "elapsed_ms": 46.92049999721348
+      "elapsed_ms": 30.91842899993935
     },
     {
       "step": 37,
@@ -499,10 +539,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 2.0,
       "allocated_workers": 165.0,
       "wire_rate_gbps": 3.2908,
-      "elapsed_ms": 48.38140000356361
+      "elapsed_ms": 39.25369199987472
     },
     {
       "step": 38,
@@ -512,10 +553,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 2.0,
       "allocated_workers": 149.0,
       "wire_rate_gbps": 2.9877,
-      "elapsed_ms": 45.26299999997718
+      "elapsed_ms": 34.09595999983139
     },
     {
       "step": 39,
@@ -525,10 +567,11 @@
       "expected_ttl": 30000,
       "exit_code": 0,
       "is_blocked": false,
+      "failed": false,
       "target_pods": 2.0,
       "allocated_workers": 137.0,
       "wire_rate_gbps": 2.7733,
-      "elapsed_ms": 47.41199999989476
+      "elapsed_ms": 33.89042700018763
     }
   ]
 }

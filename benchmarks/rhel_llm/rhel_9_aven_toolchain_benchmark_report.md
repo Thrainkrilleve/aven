@@ -5,6 +5,8 @@
 **Compiler / Toolchain Under Test:** Aven Relational Language Toolchain (`avenc build --emit-c`)  
 **Benchmark Scope:** Systems Architecture, C99 Security Auditing, Linear & Non-Linear Solver Diagnostics, Ansible Automation, and Kernel/eBPF Observability
 
+> **Note (2026-10-27):** `server_capacity.c` is kept exactly as evaluated: the 2026-10-24 output of `avenc emit-c server_capacity.aven --checked-c --traceable`. The current emitter differs in two ways: `ceil` now snaps values within 1e-9 of an integer (matching the interpreter), and clang gets `noinline, used` instead of GCC's `noipa`. Re-running today confirms the model results quoted below: `storage_cluster.aven` reports Jacobian rank 3 of 6 (nullity 3), and `cpu_dvfs.aven` solves to f = 3.0 GHz.
+
 ---
 
 ## 1. Executive Summary

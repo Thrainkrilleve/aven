@@ -80,10 +80,10 @@ Executed using `python evaluations/flight_mesh/stream_ringer.py --count 50 --con
 | **1. Uncached Subprocess** | `125.1 ms` | 7.4 solves/sec | Windows run; no log in the repository |
 | **2. Lazy-Import Subprocess** | `71.5 ms` | 54.1 solves/sec | Windows run; no log in the repository |
 | **3. Persistent IPC Daemon** | `9.7 ms` | 352.9 solves/sec | Windows run; `flight_mesh_summary_report.md` |
-| Subprocess (`flight_mesh.aven`), re-run | `34.5 ms` | 107.2 solves/sec | 4-vCPU Linux container, 2026-10-27, 20 vectors |
-| IPC daemon (`flight_mesh_ipc.aven`), re-run | `5.8 ms` | 561.0 solves/sec | Same container and date |
+| Subprocess (`flight_mesh.aven`), re-run | `70.8 ms` | 51.4 solves/sec | 4-vCPU Linux container, 2026-10-27, 50 live flights |
+| IPC daemon (`flight_mesh_ipc.aven`), re-run | `6.2 ms` | 570.9 solves/sec | Same container and date, 50 live flights |
 
-The 2026-10-27 re-runs had no access to the live feeds, so the harness used its synthetic cruise vector; they measure pipeline overhead, not live data. Process start-up is much cheaper on Linux than on Windows, which narrows the subprocess/IPC gap (6× here against 13× on Windows).
+The 2026-10-27 re-runs used live feeds (4,513 cruising flights at the first refresh); their logs and reports are in `evaluations/flight_mesh/runs/2026-10-27-linux/`. Both solved 50/50 flights with **0 bound violations**: the current model no longer produces the §5 error.
 
 ---
 

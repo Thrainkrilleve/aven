@@ -25,9 +25,10 @@ from datetime import datetime, timezone
 
 NAMESPACE = os.environ.get("AVEN_NAMESPACE", "aven-system")
 DEPLOYMENT_NAME = os.environ.get("AVEN_DEPLOYMENT", "aven-workload")
-AVENC_BIN = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../target/release/avenc.exe"))
+_EXE = "avenc.exe" if os.name == "nt" else "avenc"
+AVENC_BIN = os.environ.get("AVENC_BIN") or os.path.abspath(os.path.join(os.path.dirname(__file__), "../../target/release", _EXE))
 if not os.path.exists(AVENC_BIN):
-    AVENC_BIN = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../target/debug/avenc.exe"))
+    AVENC_BIN = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../target/debug", _EXE))
 
 MODEL_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "hpa_scaling.aven"))
 

@@ -5,13 +5,13 @@ Official language support for **Aven** (`.aven`), the coupled continuous-discret
 ## Features
 
 - **Syntax Highlighting**:
-  - Highlights physical relation blocks (`relation`, `forward`, `solve with`, `external using ipc`).
-  - Native visual distinction for compile-time physical units: `[s]`, `[ms]`, `[m]`, `[kW]`, `[TB]`, `[Gbps]`, `[iops]`, etc.
-  - Builtin functions (`ceil`, `floor`, `round`, `abs`, `sqrt`, `exp`, `log`, `sin`, `cos`).
+  - Highlights blocks and declarations (`relation`, `forward`, `solve … with`, `signal`, `unit`, `import`) and backends (`using external(…)`, `ipc(…)`, `shm(…)`, `native(…)`).
+  - Highlights units where Aven allows them: after a number in a `solve` block (`250 km/h`) and in `signal` declarations (`signal velocity : km/h`).
+  - Builtin functions (`abs`, `ceil`, `floor`, `round`, `sign`, `sqrt`, `exp`, `ln`/`log`, `sin`, `cos`, `tan`) and constants (`pi`, `e`, `tau`).
   - Discrete integer optimization keywords (`int`, `minimize`, `maximize`).
 - **Live Diagnostics (Red Squigglies)**:
   - Validates models on save using `avenc check`.
-  - Flags syntax errors, dimensional unit mismatches, and rank-deficient / under-determined systems directly on the offending line and column.
+  - Flags syntax and type errors (including dimensional mismatches) on the offending line and column. Under-determined systems show as a warning on the first line of the file.
 - **Commands & Context Menus**:
   - Right-click any `.aven` file to:
     - **Aven: Run / Solve Model** (`avenc run`)
@@ -20,11 +20,12 @@ Official language support for **Aven** (`.aven`), the coupled continuous-discret
     - **Aven: Transpile to C99** (`avenc build --emit-c`)
 - **Productivity Snippets**:
   - `relation`: Standard physical relation block.
-  - `relation-ipc`: Live sensor streaming relation via TCP socket / IPC daemon.
+  - `relation-ipc`: Relation whose facts come from a TCP daemon (`using ipc(...)`).
   - `solve`: Continuous non-linear coupled solve block.
   - `solve-opt`: Mixed-integer branch-and-bound optimization block.
   - `forward`: Directed acyclic compute block.
-  - `unit`: Custom extensible unit declaration.
+  - `signal`: Declare the unit a variable is read and shown in.
+  - `unit`: Declare units of a new dimension.
 
 ## Installation
 
@@ -35,5 +36,5 @@ Official language support for **Aven** (`.aven`), the coupled continuous-discret
    npx @vscode/vsce package
    ```
 2. Or install directly to your local extensions folder:
-   - Windows: `%USERPROFILE%\.vscode\extensions\aven-lang-0.1.0`
-   - Linux / macOS: `~/.vscode/extensions/aven-lang-0.1.0`
+   - Windows: `%USERPROFILE%\.vscode\extensions\aven-lang-0.1.1`
+   - Linux / macOS: `~/.vscode/extensions/aven-lang-0.1.1`

@@ -62,14 +62,16 @@ function updateDiagnostics(document, diagnosticCollection, outputChannel) {
         const fullOutput = stdout + '\n' + stderr;
 
         if (code !== 0) {
-            // Match "line X, col Y" patterns from parser and dimensional checker
-            // Example: "✗ Syntax error at line 6, col 5: expected expression"
-            // Example: "Dimensional mismatch: line 6, col 5: cannot add [Gbps] to [MB]"
-            const posRegex = /(?:line\s+(\d+),\s*col\s+(\d+)|at\s+line\s+(\d+),\s*col\s+(\d+))/gi;
-            let match;
+            // avenc reports positions as "at line L, col C" (type errors) or "at L:C" (lexer and
+            // parser errors), e.g. "Type Error at line 5, col 5: ..." / "Parse error at 2:7: ..."
+            const posRegex = /line\s+(\d+),\s*col\s+(\d+)|\bat\s+(\d+):(\d+)/i;
             let foundPos = false;
 
-            while ((match = posRegex.exec(fullOutput)) !== null) {
+            for (const rawLine of fullOutput.split('\n')) {
+                const match = posRegex.exec(rawLine);
+                if (!match) {
+                    continue;
+                }
                 foundPos = true;
                 const lineNum = parseInt(match[1] || match[3], 10);
                 const colNum = parseInt(match[2] || match[4], 10);
@@ -90,19 +92,9 @@ function updateDiagnostics(document, diagnosticCollection, outputChannel) {
                     Math.max(colIndex + 1, lineLength)
                 );
 
-                // Extract brief message summary
-                const lines = fullOutput.split('\n');
-                let msg = 'Aven compilation error';
-                for (const l of lines) {
-                    if (l.includes('line ' + lineNum) || l.includes('Error') || l.includes('✗')) {
-                        msg = l.trim();
-                        break;
-                    }
-                }
-
                 const diagnostic = new vscode.Diagnostic(
                     range,
-                    msg,
+                    rawLine.replace(/^\s*✗\s*/, '').trim(),
                     vscode.DiagnosticSeverity.Error
                 );
                 diagnostic.source = 'avenc';

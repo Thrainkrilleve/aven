@@ -937,7 +937,11 @@ fn explain_why(
 
     if let Ok(tokens) = lexer.tokenize() {
         let mut parser = Parser::new(tokens);
-        if let Ok(module) = parser.parse_module("why_eval") {
+        if let Ok(mut module) = parser.parse_module("why_eval") {
+            // Same unit handling as the CLI: bindings in base units (see avenc::units::UnitScale)
+            if let Err(e) = avenc::units::normalize_bindings(&mut module) {
+                warnings.push(e.to_string());
+            }
             let mut env = HashMap::new();
             let mut seq = 0;
             for solve in &module.solves {

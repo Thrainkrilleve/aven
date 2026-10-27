@@ -1,6 +1,6 @@
 # Aven Language Specification
 
-This document provides the formal syntax, grammar, and semantic specification for the **Aven** relational language (v0.4+).
+This document provides the formal syntax, grammar, and semantic specification for the **Aven** relational language as implemented by `avenc` v0.6.0.
 
 ---
 
@@ -9,7 +9,7 @@ This document provides the formal syntax, grammar, and semantic specification fo
 ### 1.1 Identifiers & Keywords
 - **Identifiers:** Start with an ASCII letter or underscore `[a-zA-Z_]`, followed by alphanumeric characters or underscores `[a-zA-Z0-9_]*`.
 - **Reserved Keywords:**
-  `relation`, `forward`, `solve`, `with`, `using`, `external`, `ipc`, `unit`, `signal`, `minimize`, `maximize`, `int`, `integer`.
+  `relation`, `forward`, `solve`, `with`, `using`, `external`, `ipc`, `shm`, `native`, `unit`, `signal`, `minimize`, `maximize`, `int`, `integer`. Lines of the form `import <name>;` are resolved before parsing (see [`docs/PACKAGE_SPEC.md`](https://github.com/Thrainkrilleve/aven/blob/main/docs/PACKAGE_SPEC.md)).
 
 ### 1.2 Comments
 - **Line Comments:** Begin with `//` and extend to the end of the line.
@@ -38,11 +38,15 @@ Operators follow standard mathematical precedence (highest to lowest):
 Aven supports unary function calls over expressions:
 - `sqrt(expr)`: Principal square root
 - `abs(expr)`: Absolute value
-- `ceil(expr)`: Smallest integer $\ge \text{expr}$
-- `floor(expr)`: Largest integer $\le \text{expr}$
+- `ceil(expr)`: Smallest integer $\ge \text{expr}$ (values within $10^{-9}$ of an integer snap to it)
+- `floor(expr)`: Largest integer $\le \text{expr}$ (same snap)
+- `round(expr)`: Nearest integer
+- `sign(expr)`: $-1$, $0$ or $+1$
 - `sin(expr)`, `cos(expr)`, `tan(expr)`: Standard trigonometric functions (radians)
-- `ln(expr)`: Natural logarithm (base $e$)
+- `ln(expr)` / `log(expr)`: Natural logarithm (base $e$)
 - `exp(expr)`: Exponential function ($e^{\text{expr}}$)
+
+Undefined operations (division by zero, `sqrt` of a negative, `ln` of a non-positive value, `tan` at its poles) and non-finite results are evaluation errors.
 
 ---
 
@@ -82,6 +86,17 @@ Relations may delegate telemetry ingestion or evaluation to external or persiste
        terrain_clearance_m = baro_altitude_m - gauge_elevation_m
    }
    ```
+3. **Shared-Memory Ring** (`using shm("name")`) and **In-Process Native Library** (`using native("lib.so")`), for low-latency local sources.
+
+### 3.4 Units (`signal`, `unit`)
+```aven
+signal velocity : km/h
+unit velocity_unit : knots, mach
+```
+- `signal <name> : <unit>` declares the unit a variable's bare numbers are read and shown in.
+- A number in a `solve` block may be followed by a unit: `velocity = 250 km/h`.
+- `unit <dimension> : <a>, <b>` declares units of a new dimension, which convert only among themselves.
+- Every equation is dimension-checked before anything runs, and values are converted to base units (SI, plus bit, radian, transaction and US dollar) before solving. See [`docs/CHEAT_SHEET.md`](https://github.com/Thrainkrilleve/aven/blob/main/docs/CHEAT_SHEET.md) for the unit table.
 
 ---
 
@@ -104,6 +119,8 @@ solve FlightMesh with {
     terrain_clearance_m >= -100.0
 }
 ```
+
+Inequalities may also appear inside a `relation` block, where they constrain every solve of it. All `solve` blocks in a file contribute to one settled state.
 
 ### 4.2 Supported Comparison Operators
 - Equality: `=` or `==`
