@@ -15,7 +15,7 @@ ABI defects (see "What was wrong before").
 | File | Role |
 |------|------|
 | `aeric.h` | Runtime type, the stable `aven_solve` ABI, public API |
-| `aeric.c` | Orchestrator: ingress validation, HOLD latch + recovery, chained FNV-1a heartbeat, streaming SHA-256 provenance seal |
+| `aeric.c` | Orchestrator: ingress validation, HOLD latch + recovery, chained FNV-1a heartbeat, keyed HMAC-SHA256 provenance seal |
 | `model_server_capacity.h/.c` | The AVEN-generated solver (`aven_ProductionProfile`) for `examples/server_capacity.aven`, as a linkable unit |
 | `aven_shim.c` | The one model-specific adapter: maps the stable ABI to the generated function and rejects non-finite results |
 | `main.c` | Compilable demo driver (nominal, domain fault, bad arity, recovery) |
@@ -38,8 +38,8 @@ build.bat
 Expected output: two nominal ticks solve to `alloc_workers=1429`,
 `ram_mb=32676` (matching `avenc run`), a `target_utilization=0` tick and a
 wrong-arity tick drop to fail-safe HOLD, and the loop auto-recovers after 3
-clean solves. Every tick prints a distinct chained hash, and a SHA-256 seal is
-printed at the end.
+clean solves. Every tick prints a distinct chained hash, and an HMAC-SHA256 seal
+is printed at the end.
 
 ## The AVEN ABI (why the shim exists)
 
@@ -98,10 +98,12 @@ return-valued rejection (see `aven_shim.c`), not as a process abort.
 - **Faults never crash the loop.** The solver reports errors by return value;
   the shim converts `NaN`/`Inf` into a nonzero return.
 - **Tamper-evident ledger.** Each tick's record folds in the previous hash
-  (chained FNV-1a heartbeat), and a streaming **SHA-256** seal covers every
-  record for cryptographic provenance. `AERIC_Seal` snapshots the digest
-  without disturbing the ongoing chain. (The SHA-256 is verified against the
-  FIPS-180-4 `abc` and empty-string vectors.)
+  (chained FNV-1a heartbeat), and a keyed streaming **HMAC-SHA256** seal (keyed
+  via `AERIC_Init`, construction matching the Rust ledger's `hmac_sha256_hex`)
+  covers every record for forgery-resistant provenance. `AERIC_Seal` snapshots
+  the digest without disturbing the ongoing chain. (The SHA-256 core is verified
+  against the FIPS-180-4 `abc`/empty vectors; the HMAC seal is verified end-to-end
+  against Python's reference `hmac` — identical digest, key-dependent.)
 
 ## What was wrong before (`engine-old.aer`)
 
@@ -118,4 +120,4 @@ return-valued rejection (see `aven_shim.c`), not as a process abort.
 5. **HOLD did nothing** — the flag was set but never read. Here it is enforced
    at tick entry with a defined recovery policy.
 6. **Ledger wasn't a ledger** — independent, non-chained FNV-1a. Here it is a
-   real chain plus a SHA-256 seal.
+   real chain plus a keyed HMAC-SHA256 seal.

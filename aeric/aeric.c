@@ -147,8 +147,10 @@ static void ledger_record(aeric_runtime_t *rt, int status) {
 
 bool AERIC_Init(aeric_runtime_t *rt,
                 const tick_schema_t *schema,
-                const double *safe_setpoints) {
+                const double *safe_setpoints,
+                const uint8_t *seal_key, size_t seal_key_len) {
     if (!rt || !schema || !safe_setpoints) return false;
+    if (!seal_key || seal_key_len == 0) return false;   /* keyed seal is mandatory */
     if (schema->n_inputs  > AERIC_MAX_INPUTS)  return false;
     if (schema->n_outputs > AERIC_MAX_OUTPUTS) return false;
     for (size_t i = 0; i < schema->n_outputs; ++i)
@@ -161,7 +163,27 @@ bool AERIC_Init(aeric_runtime_t *rt,
     memcpy(rt->outputs, safe_setpoints, schema->n_outputs * sizeof(double));
     rt->hold_mode = false;
     rt->last_tick_hash = FNV_OFFSET;
+
+    /* HMAC-SHA256 key schedule (matches ledger.rs hmac_sha256_hex): a key longer
+     * than the 64-byte block is SHA-256'd first, then zero-padded to 64 bytes. */
+    uint8_t kblock[64];
+    memset(kblock, 0, sizeof kblock);
+    if (seal_key_len > 64) {
+        uint8_t kd[32];
+        aeric_sha256_t ks; sha_init(&ks);
+        sha_update(&ks, seal_key, seal_key_len);
+        sha_final_snapshot(&ks, kd);
+        memcpy(kblock, kd, 32);
+    } else {
+        memcpy(kblock, seal_key, seal_key_len);
+    }
+    uint8_t k_ipad[64];
+    for (int i = 0; i < 64; ++i) {
+        k_ipad[i]        = (uint8_t)(kblock[i] ^ 0x36);
+        rt->seal_opad[i] = (uint8_t)(kblock[i] ^ 0x5c);
+    }
     sha_init(&rt->seal);
+    sha_update(&rt->seal, k_ipad, 64);   /* inner = SHA256(K^ipad || records...) */
     return true;
 }
 
@@ -239,5 +261,13 @@ const double *AERIC_Setpoints(const aeric_runtime_t *rt) {
 
 void AERIC_Seal(aeric_runtime_t *rt, uint8_t out_digest[32]) {
     if (!rt || !out_digest) return;
-    sha_final_snapshot(&rt->seal, out_digest);
+    /* HMAC finalise: outer = SHA256(K^opad || SHA256(K^ipad || records)).
+     * sha_final_snapshot clones the inner context, so streaming continues. */
+    uint8_t inner[32];
+    sha_final_snapshot(&rt->seal, inner);
+    aeric_sha256_t outer;
+    sha_init(&outer);
+    sha_update(&outer, rt->seal_opad, 64);
+    sha_update(&outer, inner, 32);
+    sha_final_snapshot(&outer, out_digest);
 }

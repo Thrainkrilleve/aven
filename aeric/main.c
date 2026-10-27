@@ -40,8 +40,11 @@ int main(void) {
     /* Fail-safe setpoints driven while HOLD: 1 worker, base kernel RAM, no net. */
     const double safe[5] = { 0.0, 1.0, 4096.0, 0.0, 0.0 };
 
+    /* HMAC seal key. In production this comes from secure storage, not source. */
+    const uint8_t seal_key[] = "aven-aeric-demo-key-v1";
+
     aeric_runtime_t rt;
-    if (!AERIC_Init(&rt, &schema, safe)) {
+    if (!AERIC_Init(&rt, &schema, safe, seal_key, sizeof(seal_key) - 1)) {
         fprintf(stderr, "AERIC_Init failed\n");
         return 1;
     }
@@ -78,7 +81,7 @@ int main(void) {
 
     uint8_t digest[32];
     AERIC_Seal(&rt, digest);
-    printf("SHA-256 seal: ");
+    printf("HMAC-SHA256 seal: ");
     for (int i = 0; i < 32; ++i) printf("%02x", digest[i]);
     printf("\n");
     return 0;

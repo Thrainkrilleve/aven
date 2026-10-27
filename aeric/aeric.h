@@ -83,7 +83,8 @@ typedef struct {
     uint64_t tick_index;                         /* monotonic tick counter          */
 
     uint64_t       last_tick_hash;               /* chained FNV-1a heartbeat        */
-    aeric_sha256_t seal;                         /* running SHA-256 over all records */
+    aeric_sha256_t seal;                         /* HMAC-SHA256 inner ctx (K^ipad + records) */
+    uint8_t        seal_opad[64];                /* K'^opad, kept for HMAC finalisation */
 } aeric_runtime_t;
 
 /* ===== Tick result codes ===== */
@@ -94,11 +95,16 @@ typedef struct {
 /* ===== Public API ===== */
 
 /* Initialise the runtime. `safe_setpoints` is n_outputs doubles describing the
- * state to drive while in HOLD (required; must be finite). Returns false if the
- * schema exceeds the compile-time caps or any safe setpoint is non-finite. */
+ * state to drive while in HOLD (required; must be finite). `seal_key` /
+ * `seal_key_len` key the HMAC-SHA256 provenance seal (required, len > 0): the
+ * seal is forgery-resistant only to someone without the key. The construction
+ * matches the Rust ledger's hmac_sha256_hex (key > 64 bytes is SHA-256'd, then
+ * zero-padded to 64). Returns false if the schema exceeds the compile-time caps,
+ * any safe setpoint is non-finite, or no key is given. */
 bool AERIC_Init(aeric_runtime_t *rt,
                 const tick_schema_t *schema,
-                const double *safe_setpoints);
+                const double *safe_setpoints,
+                const uint8_t *seal_key, size_t seal_key_len);
 
 /* Run one control cycle. `inputs` is n_inputs finite doubles. Publishes either
  * live or fail-safe setpoints (read with AERIC_Setpoints) and advances the
@@ -111,9 +117,10 @@ void AERIC_ClearFault(aeric_runtime_t *rt);
 /* Current published setpoints (n_outputs doubles). Fail-safe values in HOLD. */
 const double *AERIC_Setpoints(const aeric_runtime_t *rt);
 
-/* Finalise a snapshot of the provenance digest into out_digest[32]. The running
- * seal is cloned, so AERIC_Seal may be called repeatedly (e.g. at state
- * transitions or shutdown) without disturbing the ongoing chain. */
+/* Finalise a snapshot of the HMAC-SHA256 provenance seal into out_digest[32].
+ * The running inner context is cloned, so AERIC_Seal may be called repeatedly
+ * (e.g. at state transitions or shutdown) without disturbing the ongoing chain.
+ * Without the key the digest cannot be forged or recomputed. */
 void AERIC_Seal(aeric_runtime_t *rt, uint8_t out_digest[32]);
 
 #endif /* AERIC_H */

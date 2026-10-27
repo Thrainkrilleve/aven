@@ -240,7 +240,8 @@ evidence.
 | `avenc emit-c --aeric-shim` generator | ✅ verified | 6 tests in `tests/toolchain_aeric_shim.rs` |
 | Worst-case tick latency / jitter | ⬜ unverified | needs RT timing harness (p99/max); throughput ≠ worst case |
 | Clean under gcc/clang `-Wpedantic` | ✅ verified | gcc 14.2 + clang 19.1, zero diagnostics (portable `AVEN_EXPORT`) |
-| Tamper-evident / forgery-resistant ledger | ⬜ unverified | needs HMAC (Security track) |
+| Forgery-resistant seal (AERIC) | ✅ verified | HMAC-SHA256 keyed; matches Python `hmac` ref + Rust `hmac_sha256_hex` construction; key-dependent |
+| Host verifies edge-signed ledger (JSONL interop) | ⬜ unverified | needs ledger-to-disk in Rust JSONL format (Level-1) |
 | "MISRA-grade" | ⬜ **unfounded** | static-analysis track |
 | SHM end-to-end cycle time | ⬜ unverified | measure on real loop (not guessed) |
 
