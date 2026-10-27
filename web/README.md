@@ -1,13 +1,13 @@
-# Aven Scientific Website & Cloudflare Edge Services (`avenc.dev`)
+# Aven Scientific Web Platform & Distributed Edge Services (`avenc.dev`)
 
-High-performance, scientific-facing website, client-side WebAssembly solver playground, and Cloudflare D1-backed package registry for **Aven**.
+High-performance, scientific-facing website, client-side WebAssembly solver playground, and distributed SQL package registry for **Aven**.
 
 ---
 
 ## Architecture & Technology Stack
 
-- **Edge Runtime:** Cloudflare Workers (TypeScript) with Static Assets binding (`env.ASSETS`).
-- **Database:** Cloudflare D1 SQL database (`env.DB`) for package metadata, shared playground shortlinks, and solve telemetry logs.
+- **Edge Runtime:** Distributed Edge Worker (TypeScript) with Static Assets binding (`env.ASSETS`).
+- **Database:** Distributed SQL database (`env.DB`) for package metadata, shared playground shortlinks, and solve telemetry logs.
 - **Client-Side Solver Engine:** Pure standard library WebAssembly Core 1.0 (`.wasm`) compiled directly by `avenc emit-wasm`—runs Newton-Raphson relaxation client-side in the browser with sub-millisecond execution times and zero backend server costs.
 - **Frontend:** Vanilla HTML5 / modern CSS3 (obsidian scientific dark theme, glassmorphism, responsive grids) with Google Fonts (`Inter`, `Outfit`, `JetBrains Mono`).
 
@@ -17,7 +17,7 @@ High-performance, scientific-facing website, client-side WebAssembly solver play
 
 ```text
 web/
-├── wrangler.jsonc            # Cloudflare Worker configuration & D1 bindings
+├── wrangler.jsonc            # Worker configuration & database bindings
 ├── package.json              # NPM scripts and devDependencies (wrangler, typescript)
 ├── tsconfig.json             # TypeScript compiler settings
 ├── migrations/
@@ -50,7 +50,7 @@ npm install
 # 2. Apply initial D1 database schema to local SQLite simulator
 npm run db:migrate:local
 
-# 3. Start local Cloudflare edge development server
+# 3. Start local edge development server
 npm run dev
 ```
 
@@ -58,11 +58,11 @@ Visit `http://localhost:8787` to explore the website, manipulate the reactive WA
 
 ---
 
-## Production Cloudflare Deployment
+## Production Deployment
 
-Because you have the **Cloudflare Workers Paid** plan, you benefit from uncapped CPU execution, high-throughput D1 queries, and worldwide edge CDN caching.
+Production deployment benefits from high-throughput SQL queries, global edge CDN caching, and low latency.
 
-### Step 1: Create your Production D1 Database
+### Step 1: Create your Production Database
 
 ```bash
 npx wrangler d1 create avenc_db
@@ -89,24 +89,23 @@ Open `wrangler.jsonc` and replace the placeholder `database_id` with your real I
 ]
 ```
 
-### Step 3: Apply Database Migrations to Remote D1
+### Step 3: Apply Database Migrations to Remote Database
 
 ```bash
 npx wrangler d1 migrations apply avenc_db --remote
 ```
 
-### Step 4: Deploy to Cloudflare
+### Step 4: Deploy to Edge
 
 ```bash
 npm run deploy
 ```
 
-### Step 5: Bind Domain `avenc.dev`
+### Step 5: Bind Custom Domain `avenc.dev`
 
-1. Log into the Cloudflare Dashboard.
-2. Navigate to **Workers & Pages** &rarr; **avenc-web** &rarr; **Settings** &rarr; **Domains & Routes**.
-3. Click **Add Custom Domain** and enter `avenc.dev`.
-4. Cloudflare will automatically provision the DNS records and SSL/TLS certificates.
+1. In your edge dashboard, navigate to **Domains & Routes**.
+2. Add Custom Domain `avenc.dev`.
+3. Edge routing will automatically provision the DNS records and SSL/TLS certificates.
 
 ---
 

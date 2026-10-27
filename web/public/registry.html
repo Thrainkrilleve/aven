@@ -125,8 +125,8 @@
     <ul class="nav-links">
       <li><a href="/">Home</a></li>
       <li><a href="/#playground">Playground</a></li>
-      <li><a href="/docs.html">Documentation</a></li>
-      <li><a href="/registry.html" class="active">Packages</a></li>
+      <li><a href="/docs">Documentation</a></li>
+      <li><a href="/registry" class="active">Packages</a></li>
       <li><a href="https://github.com/Thrainkrilleve/aven" target="_blank" rel="noopener">GitHub</a></li>
     </ul>
     <div class="nav-actions">
@@ -138,7 +138,7 @@
     <section class="registry-hero">
       <h1>Unit-Verified Package Registry</h1>
       <p style="max-width: 650px; margin: 0.5rem auto 0; color: var(--text-muted);">
-        Every package is cryptographically sealed with SHA-256 and verified for physical dimensional homogeneity prior to publishing. Powered by Cloudflare D1.
+        Every package is cryptographically sealed with SHA-256 and verified for physical dimensional homogeneity prior to publishing.
       </p>
 
       <div class="search-box">
@@ -149,14 +149,49 @@
 
     <div class="package-grid" id="packages-list">
       <div style="grid-column: 1 / -1; text-align: center; color: var(--text-dim); padding: 3rem;">
-        Loading packages from Cloudflare D1 database...
+        Loading packages from registry...
       </div>
     </div>
   </main>
 
   <footer class="footer">
-    <div class="container" style="text-align: center;">
-      <p>&copy; 2026 Aven Contributors. Open source under MIT License &bull; avenc.dev</p>
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <div class="brand">▲ AVEN</div>
+          <p>Declarative invariant programming and relational multi-physics compiler. Built with 100% pure standard library Rust.</p>
+        </div>
+        <div class="footer-col">
+          <h4>Documentation</h4>
+          <ul>
+            <li><a href="/docs#quickstart">Getting Started</a></li>
+            <li><a href="/docs#cookbook">Cookbook by Example</a></li>
+            <li><a href="/docs#cheat-sheet">Quick Reference</a></li>
+            <li><a href="/docs#standards">Engineering Standards</a></li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h4>Ecosystem</h4>
+          <ul>
+            <li><a href="/registry">Package Registry</a></li>
+            <li><a href="/docs#package-spec">Package Specification</a></li>
+            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/RFC_PROCESS.md" target="_blank" rel="noopener">RFC Process</a></li>
+            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/CODE_OF_CONDUCT.md" target="_blank" rel="noopener">Code of Conduct</a></li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h4>Repository</h4>
+          <ul>
+            <li><a href="https://github.com/Thrainkrilleve/aven" target="_blank" rel="noopener">GitHub Repository</a></li>
+            <li><a href="https://github.com/Thrainkrilleve/aven/releases" target="_blank" rel="noopener">Binary Releases</a></li>
+            <li><a href="mailto:admin@avenc.dev">Contact</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <div>&copy; 2026 Aven Contributors. Open source under MIT License.</div>
+        <div>Global Distributed Edge Network &bull; avenc.dev</div>
+      </div>
     </div>
   </footer>
 
@@ -206,7 +241,7 @@
           listEl.appendChild(card);
         });
       } catch (err) {
-        listEl.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #ef4444; padding: 3rem;">Failed to load packages from D1 database.</div>`;
+        listEl.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #ef4444; padding: 3rem;">Failed to load packages from registry.</div>`;
       }
     }
 

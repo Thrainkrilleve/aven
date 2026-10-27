@@ -27,7 +27,7 @@ Aven replaces fragile imperative code with verified mathematical invariants and 
 
 ```bash
 # Clone the repository
-git clone https://git.thrainkrill.space/thrain/aven.git
+git clone https://github.com/Thrainkrilleve/aven.git
 cd aven
 
 # Check compilation

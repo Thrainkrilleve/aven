@@ -38,7 +38,7 @@ Aven's compiler:
 Aven is built with 100% pure standard library Rust (`std`) with zero external dependencies.
 
 ```bash
-git clone https://git.thrainkrill.space/thrain/aven.git
+git clone https://github.com/Thrainkrilleve/aven.git
 cd aven
 cargo install --path .
 ```

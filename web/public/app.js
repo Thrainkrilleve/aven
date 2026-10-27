@@ -330,7 +330,7 @@ function setupShareButton() {
   });
 }
 
-// Fetch Live Platform Statistics from Cloudflare D1
+// Fetch Live Platform Statistics
 async function loadLiveStats() {
   try {
     const res = await fetch('/api/v1/stats');

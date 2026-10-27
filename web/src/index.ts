@@ -24,7 +24,7 @@ export default {
       return handleApi(request, env, pathname);
     }
 
-    // 4. Static Assets with Cloudflare Edge Caching & Security Headers
+    // 4. Static Assets with Edge Caching & Security Headers
     try {
       const response = await env.ASSETS.fetch(request);
       if (response.status === 404 && !pathname.includes(".")) {

@@ -3,16 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Aven Documentation & Guides</title>
-  <meta name="description" content="Official documentation, getting started guides, language tutorials, and engineering standards for Aven.">
+  <title>Aven Documentation, Cookbook & Engineering Standards</title>
+  <meta name="description" content="Official documentation, interactive cookbook, language reference, and engineering standards for Aven.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
   <style>
+    html {
+      scroll-behavior: smooth;
+    }
     .docs-layout {
       display: grid;
-      grid-template-columns: 280px 1fr;
+      grid-template-columns: 290px 1fr;
       gap: 2.5rem;
       padding: 3rem 0;
       align-items: start;
@@ -24,70 +27,139 @@
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-lg);
       padding: 1.5rem;
+      max-height: calc(100vh - 7rem);
+      overflow-y: auto;
+    }
+    .docs-sidebar::-webkit-scrollbar {
+      width: 4px;
+    }
+    .docs-sidebar::-webkit-scrollbar-thumb {
+      background: var(--border-subtle);
+      border-radius: 4px;
     }
     .sidebar-section {
       margin-bottom: 1.5rem;
     }
+    .sidebar-section:last-child {
+      margin-bottom: 0;
+    }
     .sidebar-title {
-      font-size: 0.75rem;
+      font-size: 0.72rem;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.1em;
       color: var(--text-dim);
       margin-bottom: 0.75rem;
+      font-weight: 700;
     }
     .sidebar-menu {
       list-style: none;
       display: flex;
       flex-direction: column;
-      gap: 0.4rem;
+      gap: 0.35rem;
     }
     .sidebar-link {
       color: var(--text-muted);
-      font-size: 0.9rem;
+      font-size: 0.88rem;
       display: block;
-      padding: 0.35rem 0.6rem;
+      padding: 0.4rem 0.65rem;
       border-radius: var(--radius-sm);
       transition: var(--transition);
+      text-decoration: none;
+      line-height: 1.35;
     }
-    .sidebar-link:hover, .sidebar-link.active {
+    .sidebar-link:hover {
       color: #ffffff;
-      background: rgba(0, 242, 254, 0.1);
+      background: rgba(0, 242, 254, 0.08);
+    }
+    .sidebar-link.active {
       color: var(--accent-cyan);
+      background: rgba(0, 242, 254, 0.12);
+      font-weight: 600;
+      border-left: 3px solid var(--accent-cyan);
     }
     .docs-content {
       background: var(--bg-surface);
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-lg);
-      padding: 2.5rem;
+      padding: 2.75rem;
+      min-width: 0;
+    }
+    .docs-content section {
+      scroll-margin-top: 6rem;
+      margin-bottom: 3.5rem;
+    }
+    .docs-content section:last-child {
+      margin-bottom: 0;
+    }
+    .docs-content h1 {
+      font-size: 2.5rem;
+      line-height: 1.15;
+      margin-bottom: 1rem;
     }
     .docs-content h2 {
+      font-size: 1.75rem;
       margin-top: 2rem;
+      margin-bottom: 0.85rem;
       padding-top: 1.5rem;
       border-top: 1px solid var(--border-subtle);
+      color: #ffffff;
+      scroll-margin-top: 6rem;
     }
-    .docs-content h2:first-of-type {
+    .docs-content section > h2:first-of-type {
       margin-top: 0;
       padding-top: 0;
       border-top: none;
+    }
+    .docs-content h3 {
+      font-size: 1.25rem;
+      margin-top: 1.75rem;
+      margin-bottom: 0.65rem;
+      color: var(--accent-cyan);
+      scroll-margin-top: 6rem;
+    }
+    .docs-content h4 {
+      font-size: 1rem;
+      margin-top: 1.25rem;
+      margin-bottom: 0.5rem;
+      color: #ffffff;
+      font-family: var(--font-sans);
+      font-weight: 600;
+    }
+    .docs-content p {
+      font-size: 0.98rem;
+      color: var(--text-muted);
+      line-height: 1.7;
+      margin-bottom: 1rem;
     }
     .docs-content pre {
       background: var(--bg-code);
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-md);
-      padding: 1.25rem;
-      margin: 1.25rem 0;
+      padding: 1.25rem 1.5rem;
+      margin: 1.25rem 0 1.5rem;
       overflow-x: auto;
       font-size: 0.88rem;
-      line-height: 1.5;
+      line-height: 1.55;
+    }
+    .docs-content code {
+      font-family: var(--font-mono);
+      color: #e2e8f0;
+    }
+    p code, li code, td code {
+      background: rgba(255, 255, 255, 0.06);
+      padding: 0.15rem 0.4rem;
+      border-radius: var(--radius-sm);
+      font-size: 0.85em;
+      color: var(--accent-cyan);
     }
     .docs-content table {
       width: 100%;
       border-collapse: collapse;
-      margin: 1.5rem 0;
+      margin: 1.5rem 0 2rem;
       font-size: 0.9rem;
     }
     .docs-content th, .docs-content td {
-      padding: 0.75rem 1rem;
+      padding: 0.8rem 1rem;
       border: 1px solid var(--border-subtle);
       text-align: left;
     }
@@ -95,16 +167,62 @@
       background: var(--bg-surface-elevated);
       color: #ffffff;
       font-weight: 600;
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
     }
-    @media (max-width: 900px) {
+    .docs-content tr:nth-child(even) {
+      background: rgba(255, 255, 255, 0.015);
+    }
+    .callout {
+      border-left: 4px solid var(--accent-cyan);
+      background: rgba(0, 242, 254, 0.05);
+      border-radius: 0 var(--radius-md) var(--radius-md) 0;
+      padding: 1.15rem 1.35rem;
+      margin: 1.5rem 0;
+    }
+    .callout-title {
+      font-weight: 700;
+      color: var(--accent-cyan);
+      font-size: 0.9rem;
+      margin-bottom: 0.4rem;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .callout p {
+      margin-bottom: 0;
+      font-size: 0.92rem;
+      color: #cbd5e1;
+    }
+    .callout-warning {
+      border-left-color: var(--accent-amber);
+      background: rgba(245, 158, 11, 0.05);
+    }
+    .callout-warning .callout-title {
+      color: var(--accent-amber);
+    }
+    .standards-badge {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      background: rgba(16, 185, 129, 0.12);
+      color: var(--accent-emerald);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      padding: 0.2rem 0.55rem;
+      border-radius: var(--radius-sm);
+      margin-bottom: 0.75rem;
+    }
+    @media (max-width: 960px) {
       .docs-layout { grid-template-columns: 1fr; }
-      .docs-sidebar { position: static; }
+      .docs-sidebar { position: static; max-height: none; }
+      .docs-content { padding: 1.5rem; }
     }
   </style>
 </head>
 <body>
 
-  <!-- Navigation -->
+  <!-- Top Navigation Bar -->
   <nav class="navbar">
     <a href="/" class="brand">
       <span>▲ AVEN</span>
@@ -113,8 +231,8 @@
     <ul class="nav-links">
       <li><a href="/">Home</a></li>
       <li><a href="/#playground">Playground</a></li>
-      <li><a href="/docs.html" class="active">Documentation</a></li>
-      <li><a href="/registry.html">Packages</a></li>
+      <li><a href="/docs" class="active">Documentation</a></li>
+      <li><a href="/registry">Packages</a></li>
       <li><a href="https://github.com/Thrainkrilleve/aven" target="_blank" rel="noopener">GitHub</a></li>
     </ul>
     <div class="nav-actions">
@@ -124,7 +242,7 @@
 
   <main class="container">
     <div class="docs-layout">
-      <!-- Sidebar -->
+      <!-- Sidebar Navigation -->
       <aside class="docs-sidebar">
         <div class="sidebar-section">
           <div class="sidebar-title">Getting Started</div>
@@ -138,85 +256,177 @@
         <div class="sidebar-section">
           <div class="sidebar-title">Cookbook Recipes</div>
           <ul class="sidebar-menu">
+            <li><a href="#cookbook" class="sidebar-link">Cookbook Overview</a></li>
             <li><a href="#recipe-omnidirectional" class="sidebar-link">Omnidirectional Solving</a></li>
             <li><a href="#recipe-units" class="sidebar-link">Units & Dimensions</a></li>
             <li><a href="#recipe-optimization" class="sidebar-link">Mixed-Integer Optimization</a></li>
             <li><a href="#recipe-c-codegen" class="sidebar-link">C99 Code Generation</a></li>
             <li><a href="#recipe-wasm" class="sidebar-link">WebAssembly Emission</a></li>
+            <li><a href="#recipe-telemetry" class="sidebar-link">Real-Time Telemetry</a></li>
             <li><a href="#recipe-debugging" class="sidebar-link">Time-Travel Debugger</a></li>
           </ul>
         </div>
 
         <div class="sidebar-section">
-          <div class="sidebar-title">Reference & Specs</div>
+          <div class="sidebar-title">Standards & Reference</div>
           <ul class="sidebar-menu">
-            <li><a href="#cheat-sheet" class="sidebar-link">Syntax Cheat Sheet</a></li>
             <li><a href="#standards" class="sidebar-link">Engineering Standards</a></li>
+            <li><a href="#cheat-sheet" class="sidebar-link">Syntax Cheat Sheet</a></li>
             <li><a href="#package-spec" class="sidebar-link">Package Format (.avenpkg)</a></li>
+            <li><a href="#cli-reference" class="sidebar-link">CLI Commands Reference</a></li>
           </ul>
         </div>
       </aside>
 
-      <!-- Main Content Area -->
+      <!-- Main Documentation Article -->
       <article class="docs-content">
+        
+        <!-- SECTION 1: QUICKSTART -->
         <section id="quickstart">
-          <h1>Getting Started with Aven</h1>
-          <p style="font-size: 1.15rem; margin-top: 0.5rem; color: var(--text-muted);">
-            Aven is the non-procedural programming language that replaces fragile imperative scripts with unbreakable mathematical invariants and cryptographic audit trails.
+          <span class="standards-badge">GETTING STARTED &bull; 01</span>
+          <h1>15-Minute Quickstart</h1>
+          <p>
+            Aven is the non-procedural programming language that replaces fragile imperative scripts with unbreakable mathematical invariants, compile-time physical unit tensors, and cryptographic audit trails.
           </p>
 
-          <h2>1. Installation</h2>
-          <pre><code># Linux, macOS & BSD:
+          <h3>1. Installation</h3>
+          <p>Choose your platform installer or build from standard library Rust source with zero external dependencies:</p>
+          <pre><code># Linux, macOS & BSD (POSIX shell):
 curl -proto '=https' --tlsv1.2 -sSf https://avenc.dev/install.sh | sh
 
 # Windows (PowerShell):
 iwr -useb https://avenc.dev/install.ps1 | iex
 
-# Or build from pure-standard-library Rust source:
+# Or compile locally from pure-std Rust source (zero crates):
 cargo install --git https://github.com/Thrainkrilleve/aven.git</code></pre>
+
+          <h3>2. Verifying Installation</h3>
+          <p>Verify that the compiler is on your path:</p>
+          <pre><code>avenc --help</code></pre>
+
+          <div class="callout">
+            <div class="callout-title">💡 Pure Standard Library Guarantee</div>
+            <p>
+              <code>avenc</code> compiles with <strong>zero external crate dependencies</strong>. All lexing, AST lowering, symbolic differentiation, interval arithmetic, SMT transpilation, ANSI C emission, WebAssembly Core 1.0 emission, and package management run on 100% Rust <code>std</code>.
+            </p>
+          </div>
         </section>
 
+        <!-- SECTION 2: RELATIONAL MINDSET -->
         <section id="relational-mindset">
-          <h2>2. The Relational Mindset</h2>
-          <p>In procedural code, functions are one-way arrows:</p>
-          <pre><code># Procedural thinking (one function per unknown):
-def calc_force(mass, acceleration): return mass * acceleration
-def calc_mass(force, acceleration):  return force / acceleration</code></pre>
-          <p>In Aven, you declare physical invariants once:</p>
-          <pre><code>relation Dynamics {
-    force = mass * acceleration
-}</code></pre>
-          <p>Aven solves for <code>force</code>, <code>mass</code>, or <code>acceleration</code> dynamically using exact symbolic Jacobians and Newton-Raphson relaxation.</p>
-        </section>
+          <span class="standards-badge">CONCEPTS &bull; 02</span>
+          <h2>The Relational Mindset</h2>
+          <p>
+            In procedural programming languages (Python, C, Rust), functions are one-way arrows. Direction of calculation is frozen at authoring time:
+          </p>
+          <pre><code># Procedural thinking: You must implement a separate function for every unknown!
+def calc_force(mass, acceleration):
+    return mass * acceleration
 
-        <section id="recipe-omnidirectional">
-          <h2>3. Omnidirectional Solving Example</h2>
-          <pre><code>// dynamics.aven
+def calc_acceleration(force, mass):
+    return force / mass
+
+def calc_mass(force, acceleration):
+    return force / acceleration</code></pre>
+
+          <p>
+            If you have a coupled system with 10 variables, procedural code requires authoring and maintaining dozens of distinct functions.
+          </p>
+          <p>
+            In <strong>Aven</strong>, you state the physical law <em>once</em>. The compiler deduces which unknowns need to be calculated based on what you observe:
+          </p>
+          <pre><code>// The invariant law is declared once
 relation Dynamics {
     force = mass * acceleration
-}
-
-// Forward: Solve for force given mass and acceleration
-solve Dynamics with {
-    mass = 1200.0
-    acceleration = 3.5
-}
-
-// Backward: Solve for mass given target acceleration and available force
-solve Dynamics with {
-    force = 4200.0
-    acceleration = 5.0
 }</code></pre>
-          <p>Run the model:</p>
-          <pre><code>avenc run dynamics.aven</code></pre>
+          <p>
+            Aven dynamically calculates <code>force</code>, <code>mass</code>, or <code>acceleration</code> using exact symbolic Jacobians and Newton-Raphson relaxation.
+          </p>
         </section>
 
+        <!-- SECTION 3: YOUR FIRST RELATION -->
+        <section id="first-relation">
+          <span class="standards-badge">TUTORIAL &bull; 03</span>
+          <h2>Your First Relation</h2>
+          <p>
+            Let's model a harmonic physical pendulum where the oscillation period $T$ relates to rod length $L$ and gravitational acceleration $g$:
+          </p>
+          <p>
+            $$T = 2\pi\sqrt{\frac{L}{g}}$$
+          </p>
+          <p>Create a file named <code>pendulum.aven</code>:</p>
+          <pre><code>// pendulum.aven
+relation Pendulum {
+    period = 2.0 * 3.1415926535 * sqrt(length / gravity)
+}
+
+// Scenario 1: Forward calculation (earth gravity)
+solve Pendulum with {
+    length = 0.994
+    gravity = 9.80665
+}
+
+// Scenario 2: Inverted calculation (find length for a 2.0-second period)
+solve Pendulum with {
+    period = 2.0
+    gravity = 9.80665
+}</code></pre>
+          <p>Run the model using the native toolchain:</p>
+          <pre><code>avenc run pendulum.aven</code></pre>
+          <p>
+            In Scenario 2, Aven symbolically inverts the square root and calculates <code>length = 0.9936</code> automatically without any procedural reorganization.
+          </p>
+        </section>
+
+        <!-- SECTION 4: COOKBOOK OVERVIEW -->
+        <section id="cookbook">
+          <span class="standards-badge">RECIPES &bull; 04</span>
+          <h2>Cookbook Recipes by Example</h2>
+          <p>
+            Explore copy-pasteable, production-grade recipes demonstrating omnidirectional relaxation, compile-time unit tensors, branch-and-bound optimization, freestanding C codegen, and WebAssembly emission.
+          </p>
+        </section>
+
+        <!-- RECIPE 1: OMNIDIRECTIONAL SOLVING -->
+        <section id="recipe-omnidirectional">
+          <span class="standards-badge">RECIPE &bull; 05</span>
+          <h2>Omnidirectional Solving</h2>
+          <p>
+            When equations are non-linear or multi-variable coupled, Aven constructs exact analytical symbolic Jacobians and applies multidimensional Newton-Raphson relaxation until the Euclidean residual norm satisfies:
+          </p>
+          <p style="font-family: var(--font-mono); color: var(--accent-cyan); text-align: center; margin: 1rem 0;">
+            ||F(x)||_2 &le; 10^-6
+          </p>
+          <pre><code>relation RocketPropulsion {
+    thrust = mass_flow * exhaust_velocity + (exit_pressure - ambient_pressure) * exit_area
+    specific_impulse = thrust / (mass_flow * 9.80665)
+}
+
+// Solve for required mass flow to hit a target specific impulse and thrust
+solve RocketPropulsion with {
+    thrust = 220000.0
+    specific_impulse = 310.0
+    exit_pressure = 101325.0
+    ambient_pressure = 101325.0
+    exit_area = 0.85
+}</code></pre>
+          <pre><code>avenc run rocket.aven</code></pre>
+        </section>
+
+        <!-- RECIPE 2: UNITS & DIMENSIONS -->
         <section id="recipe-units">
-          <h2>4. Physical Units & 7-D Dimensional Tensors</h2>
-          <p>Aven validates physical dimensions at compile-time across SI base dimensions: Mass $[M]$, Length $[L]$, Time $[T]$, Current $[I]$, Temperature $[\Theta]$, Substance $[N]$, and Luminous Intensity $[J]$.</p>
+          <span class="standards-badge">RECIPE &bull; 06</span>
+          <h2>Units & Physical Dimensions</h2>
+          <p>
+            Aven enforces compile-time dimensional checking across the 7 SI base quantities:
+          </p>
+          <p style="font-family: var(--font-mono); color: var(--accent-emerald); text-align: center; margin: 0.75rem 0;">
+            [ Mass (kg), Length (m), Time (s), Current (A), Temperature (K), Substance (mol), Luminous Intensity (cd) ]
+          </p>
           <pre><code>signal speed : km/h
 signal time_elapsed : s
 signal distance_travelled : m
+signal mass : kg
 
 relation Kinematics {
     distance_travelled = speed * time_elapsed
@@ -229,95 +439,415 @@ solve Kinematics with {
     time_elapsed = 10 s
     mass = 1500 kg
 }</code></pre>
-          <p>If you accidentally add seconds to speed (<code>speed + 10 s</code>), Aven immediately rejects compilation before any code executes.</p>
+          <div class="callout callout-warning">
+            <div class="callout-title">⚠️ Compile-Time Dimensional Defense</div>
+            <p>
+              If you mistakenly write <code>distance_travelled = speed + time_elapsed</code>, <code>avenc</code> aborts compilation with a dimensional mismatch error (<code>[L T^-1] vs [T]</code>) before any runtime execution begins.
+            </p>
+          </div>
         </section>
 
+        <!-- RECIPE 3: MIXED-INTEGER OPTIMIZATION -->
         <section id="recipe-optimization">
-          <h2>5. Mixed-Integer Optimization & Constraints</h2>
-          <p>Physical systems require discrete integer decisions (e.g. integer servers, hard drives, gear teeth). Aven natively incorporates branch-and-bound mixed-integer simplex solving:</p>
-          <pre><code>relation ServerProvisioning {
-    int nodes
-    total_cores = nodes * cores_per_node
-    total_ram_gb = nodes * ram_per_node_gb
-    total_cost_monthly = nodes * node_monthly_cost
-    
-    // Invariant inequalities:
-    total_cores >= required_cores
-    total_ram_gb >= required_ram_gb
+          <span class="standards-badge">RECIPE &bull; 07</span>
+          <h2>Mixed-Integer Optimization</h2>
+          <p>
+            Physical architecture decisions often require discrete integer quantities (e.g. integer servers, hard drives, gear teeth). Aven includes a native branch-and-bound mixed-integer solver:
+          </p>
+          <pre><code>relation CloudCapacity {
+    int worker_nodes
+    total_cores = worker_nodes * cores_per_node
+    total_ram_gb = worker_nodes * ram_per_node_gb
+    monthly_budget = worker_nodes * node_cost_monthly
+
+    // Invariant capacity constraints
+    total_cores >= target_cores
+    total_ram_gb >= target_ram_gb
 }
 
-solve ServerProvisioning with {
+solve CloudCapacity with {
     cores_per_node = 16.0
     ram_per_node_gb = 64.0
-    node_monthly_cost = 145.0
-    required_cores = 100.0
-    required_ram_gb = 350.0
-    minimize(nodes)
+    node_cost_monthly = 145.0
+    target_cores = 100.0
+    target_ram_gb = 350.0
+    minimize(worker_nodes)
 }</code></pre>
         </section>
 
+        <!-- RECIPE 4: C99 CODE GENERATION -->
         <section id="recipe-c-codegen">
-          <h2>6. Compiling to Freestanding C99</h2>
-          <p>For embedded microcontrollers or automotive ECUs, <code>forward</code> blocks compile to branchless, solver-free ANSI C99:</p>
+          <span class="standards-badge">RECIPE &bull; 08</span>
+          <h2>C99 Code Generation</h2>
+          <p>
+            For safety-critical embedded targets (automotive ECUs, microcontrollers, bare-metal robotics), Aven compiles direction-pinned <code>forward</code> blocks directly into freestanding ANSI C99 with <strong>zero dynamic allocations</strong>:
+          </p>
+          <pre><code>// governor.aven
+forward ThrottleGovernor(target_rpm, current_rpm, kp, base_throttle) -> (throttle_output) {
+    error = target_rpm - current_rpm
+    adjustment = error * kp
+    throttle_output = base_throttle + adjustment
+}</code></pre>
+          <p>Emit freestanding C:</p>
           <pre><code>avenc emit-c governor.aven -o governor.c</code></pre>
+          <p>
+            The generated code compiles with <code>gcc -std=c99 -Wall -Werror -pedantic</code> and requires no external libraries beyond standard freestanding headers (<code>stdint.h</code>, <code>stdbool.h</code>, <code>math.h</code>).
+          </p>
         </section>
 
+        <!-- RECIPE 5: WEBASSEMBLY EMISSION -->
         <section id="recipe-wasm">
-          <h2>7. Compiling to WebAssembly</h2>
-          <pre><code># Emit standard binary WASM
+          <span class="standards-badge">RECIPE &bull; 09</span>
+          <h2>WebAssembly Core 1.0 Emission</h2>
+          <p>
+            Aven compiles relations to standard WebAssembly Core 1.0 binaries using standard LEB128 encoding:
+          </p>
+          <pre><code># Emit standard WebAssembly binary (.wasm)
 avenc emit-wasm governor.aven -o governor.wasm
 
-# Inspect WebAssembly Text format
+# Inspect human-readable WebAssembly Text (.wat)
 avenc emit-wasm governor.aven --wat</code></pre>
+          <p>Run natively in browser or Node.js:</p>
+          <pre><code>const fs = require('fs');
+const wasmBytes = fs.readFileSync('governor.wasm');
+
+WebAssembly.instantiate(wasmBytes).then(({ instance }) => {
+    // Direct exported function: ThrottleGovernor(base, current, kp, target)
+    const throttle = instance.exports.ThrottleGovernor(40.0, 2800.0, 0.25, 3000.0);
+    console.log("Settled Throttle %:", throttle); // 90.0
+});</code></pre>
         </section>
 
-        <section id="cheat-sheet">
-          <h2>8. Built-in Mathematical Functions</h2>
+        <!-- RECIPE 6: REAL-TIME TELEMETRY -->
+        <section id="recipe-telemetry">
+          <span class="standards-badge">RECIPE &bull; 10</span>
+          <h2>Real-Time Telemetry & Adapters</h2>
+          <p>
+            Aven connects to live sensors, message brokers, and telemetry streams via subprocesses, IPC sockets, or shared memory rings:
+          </p>
+          <pre><code>// Ingest from external Python simulator:
+using external("python", "sensor_stream.py") {
+    current_altitude_m
+    outside_temp_c
+}
+
+// Ingest from persistent local TCP daemon:
+using ipc("127.0.0.1:9090") {
+    turbine_vibration_g
+}
+
+// Ingest from low-latency POSIX shared memory ring buffer:
+using shm("/dev/shm/telemetry_ring") {
+    shaft_torque_nm
+}</code></pre>
+          <p>
+            Every external observation is hashed with SHA-256 and committed into the immutable append-only fact ledger (<code>.aven_ledger.jsonl</code>).
+          </p>
+        </section>
+
+        <!-- RECIPE 7: TIME-TRAVEL DEBUGGER -->
+        <section id="recipe-debugging">
+          <span class="standards-badge">RECIPE &bull; 11</span>
+          <h2>Time-Travel Debugger</h2>
+          <p>
+            Aven includes a first-class temporal debugger (<code>avenc debug</code>) that replays recorded telemetry ledgers:
+          </p>
+          <pre><code>avenc debug --ledger flight_ledger.jsonl</code></pre>
           <table>
             <thead>
               <tr>
-                <th>Function</th>
+                <th>Command</th>
+                <th>Action</th>
                 <th>Description</th>
-                <th>Valid Domain</th>
               </tr>
             </thead>
             <tbody>
-              <tr><td><code>sqrt(x)</code></td><td>Square root</td><td>$x \ge 0$</td></tr>
-              <tr><td><code>abs(x)</code></td><td>Absolute value</td><td>$\mathbb{R}$</td></tr>
-              <tr><td><code>ceil(x)</code></td><td>Ceiling integer step</td><td>$\mathbb{R}$</td></tr>
-              <tr><td><code>floor(x)</code></td><td>Floor integer step</td><td>$\mathbb{R}$</td></tr>
-              <tr><td><code>round(x)</code></td><td>Nearest integer rounding</td><td>$\mathbb{R}$</td></tr>
-              <tr><td><code>sign(x)</code></td><td>Signum (-1, 0, +1)</td><td>$\mathbb{R}$</td></tr>
-              <tr><td><code>ln(x)</code> / <code>log(x)</code></td><td>Natural logarithm</td><td>$x > 0$</td></tr>
-              <tr><td><code>exp(x)</code></td><td>Natural exponential ($e^x$)</td><td>$\mathbb{R}$</td></tr>
-              <tr><td><code>sin(x)</code>, <code>cos(x)</code>, <code>tan(x)</code></td><td>Trigonometry</td><td>$\mathbb{R}$ (dimensionless)</td></tr>
+              <tr><td><code>step</code></td><td>Step Forward</td><td>Advance replay by 1 logical cycle</td></tr>
+              <tr><td><code>prev</code></td><td>Step Backward</td><td>Rewind replay by 1 logical cycle</td></tr>
+              <tr><td><code>goto &lt;N&gt;</code></td><td>Timeline Scrub</td><td>Scrub directly to cycle $N$</td></tr>
+              <tr><td><code>why &lt;var&gt;</code></td><td>Causal Provenance</td><td>Renders ASCII DAG showing all ancestor equations that settled <code>&lt;var&gt;</code></td></tr>
+              <tr><td><code>what-if &lt;var&gt; = &lt;val&gt;</code></td><td>Counterfactual Branch</td><td>Fork a speculative alternate timeline to evaluate safety margins</td></tr>
+              <tr><td><code>diff</code></td><td>Timeline Diff</td><td>Side-by-side comparison of baseline vs counterfactual universes</td></tr>
             </tbody>
           </table>
         </section>
 
-        <section id="package-spec">
-          <h2>9. Package Registry & Commands</h2>
-          <pre><code># Initialize a new package with Aven.toml
-avenc pkg init my_physics_lib
+        <!-- SECTION 5: ENGINEERING STANDARDS -->
+        <section id="standards">
+          <span class="standards-badge">AUTHORITATIVE &bull; STANDARDS.md</span>
+          <h2>Aven Engineering & Mathematical Standards</h2>
+          <p>
+            This section defines the official engineering, numerical, cryptographic, and architectural standards for the Aven compiler (<code>avenc</code>), runtime targets, and ecosystem.
+          </p>
 
-# Pack into a cryptographic .avenpkg archive sealed with SHA-256
-avenc pkg pack
+          <h3>1. Architectural Separation ("Rust Compiles, C Runs")</h3>
+          <ul>
+            <li><strong>Compiler Layer (<code>avenc</code>):</strong> 100% pure standard library Rust (<code>std</code>). Zero third-party crate dependencies in <code>Cargo.toml</code>.</li>
+            <li><strong>Execution Runtime Layer (<code>aeric/</code>):</strong> Standard freestanding ANSI C99 (<code>-std=c99 -pedantic -Wall -Werror</code>). Zero dynamic heap allocations (<code>malloc</code>, <code>free</code>) during steady-state solving.</li>
+          </ul>
 
-# Install into local registry
-avenc pkg install my_physics_lib-0.1.0.avenpkg
+          <h3>2. Mathematical Rigor & Numerical Stability</h3>
+          <ul>
+            <li><strong>Precision:</strong> IEEE-754 double-precision 64-bit binary floating-point (<code>f64</code>).</li>
+            <li><strong>Domain Guards:</strong> Active bounds checking against division by zero ($|d| < 10^{-15}$), non-positive logarithms ($x \le 0$), and negative square roots ($x < 0$).</li>
+            <li><strong>Exact Jacobians:</strong> Coupled multidimensional relaxation must evaluate derivatives via exact symbolic differentiation; finite-difference approximations are strictly prohibited in core relaxation kernels.</li>
+            <li><strong>Convergence Metric:</strong> System settled if Euclidean residual norm satisfies $\|F(\mathbf{x})\|_2 = \sqrt{\sum_{i=1}^n f_i(\mathbf{x})^2} \le 10^{-6}$. Deterministic iteration ceiling: $N_{\max} = 100$.</li>
+          </ul>
 
-# List installed packages
-avenc pkg list</code></pre>
+          <h3>3. 7-Dimensional SI Base Tensor & Homogeneity</h3>
+          <p>
+            Aven enforces compile-time dimensional checking across the 7 fundamental SI base quantities $[M, L, T, I, \Theta, N, J]$:
+          </p>
+          <table>
+            <thead>
+              <tr><th>Symbol</th><th>Quantity</th><th>SI Base Unit</th><th>Aven Identifier</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><strong>M</strong></td><td>Mass</td><td>kilogram</td><td><code>kg</code></td></tr>
+              <tr><td><strong>L</strong></td><td>Length</td><td>meter</td><td><code>m</code></td></tr>
+              <tr><td><strong>T</strong></td><td>Time</td><td>second</td><td><code>s</code></td></tr>
+              <tr><td><strong>I</strong></td><td>Electric Current</td><td>ampere</td><td><code>A</code></td></tr>
+              <tr><td><strong>&Theta;</strong></td><td>Thermodynamic Temperature</td><td>kelvin</td><td><code>K</code></td></tr>
+              <tr><td><strong>N</strong></td><td>Amount of Substance</td><td>mole</td><td><code>mol</code></td></tr>
+              <tr><td><strong>J</strong></td><td>Luminous Intensity</td><td>candela</td><td><code>cd</code></td></tr>
+            </tbody>
+          </table>
+          <p>
+            Homogeneity rules dictate that in any equation $LHS = RHS$, $[d_{LHS}] == [d_{RHS}]$. Dimensional violations abort compilation prior to code generation.
+          </p>
+
+          <h3>4. Cryptographic Provenance & Fact Ledgers</h3>
+          <ul>
+            <li><strong>Hash Standard:</strong> All digests, model signatures, and seals use standard <strong>SHA-256</strong> (NIST FIPS 180-4).</li>
+            <li><strong>Append-Only Merkle Chain:</strong> Each fact recorded in <code>.aven_ledger.jsonl</code> chains to previous state via:
+              <br><code>H_k = SHA256(H_{k-1} || Payload_k)</code>
+            </li>
+            <li><strong>Tamper Detection:</strong> Segmented telemetry directories verify cryptographic continuity across every segment. Any altered entry immediately fails verification.</li>
+          </ul>
+
+          <h3>5. Temporal Streams & Signal Calculus</h3>
+          <ul>
+            <li><strong>Bounded Buffers:</strong> <code>stream&lt;T, N&gt;</code> allocations are bounded circular FIFO rings with compile-time $O(N)$ memory ceiling.</li>
+            <li><strong>Staleness & TTL:</strong> Ingested telemetry enforces Time-To-Live. Stale observations without valid fallback exit with Code 3.</li>
+            <li><strong>Committed Boundaries:</strong> Irreversible physical effects (e.g. valve opening, motor fire) cannot be rewound by time-travel debuggers without explicit <code>--force</code>.</li>
+          </ul>
+
+          <h3>6. Target Code Emission Standards</h3>
+          <ul>
+            <li><strong>ANSI C99:</strong> Direction-pinned <code>forward</code> blocks compile to freestanding C with topologically sorted execution order and zero dynamic memory allocations.</li>
+            <li><strong>WebAssembly Core 1.0:</strong> Binary output conforms to W3C recommendation with dual-ABI support (direct function exports & memory-mapped <code>aven_solve(in_ptr, out_ptr)</code>).</li>
+          </ul>
+
+          <h3>7. Deterministic CLI Exit Codes</h3>
+          <table>
+            <thead>
+              <tr><th>Exit Code</th><th>Identifier</th><th>Semantic Meaning</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><strong>0</strong></td><td><code>SUCCESS</code></td><td>Model converged, all equations and constraints satisfied.</td></tr>
+              <tr><td><strong>1</strong></td><td><code>SOLVE_ERROR</code></td><td>Singular Jacobian, division by zero, or compiler syntax error.</td></tr>
+              <tr><td><strong>2</strong></td><td><code>CONSTRAINT_VIOLATION</code></td><td>Equations converged, but user-defined inequalities failed.</td></tr>
+              <tr><td><strong>3</strong></td><td><code>STALE_INPUT</code></td><td>Telemetry fact exceeded its Time-To-Live (TTL) without fallback.</td></tr>
+            </tbody>
+          </table>
+
+          <h3>8. Testing & Quality Assurance Mandates</h3>
+          <ul>
+            <li><strong>Golden Tests:</strong> Verify known physical ground truths (atmosphere, orbital mechanics, Markowitz frontier).</li>
+            <li><strong>Randomized Stress Tests:</strong> OS-entropy-seeded property tests verifying numerical stability.</li>
+            <li><strong>Zero Warning Policy:</strong> Entire repository builds with zero warnings under <code>cargo test --release</code>.</li>
+          </ul>
         </section>
+
+        <!-- SECTION 6: SYNTAX CHEAT SHEET -->
+        <section id="cheat-sheet">
+          <span class="standards-badge">REFERENCE &bull; 12</span>
+          <h2>Syntax Cheat Sheet & Built-in Functions</h2>
+          
+          <h3>Language Grammar Keywords</h3>
+          <table>
+            <thead>
+              <tr><th>Keyword</th><th>Description</th><th>Example</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>relation</code></td><td>Declares a bidirectional invariant law</td><td><code>relation Dynamics { ... }</code></td></tr>
+              <tr><td><code>signal</code></td><td>Declares a typed physical quantity</td><td><code>signal speed : km/h</code></td></tr>
+              <tr><td><code>solve ... with</code></td><td>Binds observations & triggers relaxation</td><td><code>solve Dynamics with { mass = 1200 }</code></td></tr>
+              <tr><td><code>forward</code></td><td>Direction-pinned freestanding routine</td><td><code>forward Calc(a, b) -> (c) { c = a + b }</code></td></tr>
+              <tr><td><code>stream</code></td><td>Bounded circular FIFO temporal stream</td><td><code>stream&lt;f64, 100&gt; pressure</code></td></tr>
+              <tr><td><code>int</code></td><td>Discrete integer optimization variable</td><td><code>int node_count</code></td></tr>
+              <tr><td><code>minimize</code> / <code>maximize</code></td><td>Simplex optimization objective</td><td><code>minimize(cost)</code></td></tr>
+              <tr><td><code>using</code></td><td>Declares external telemetry ingestion</td><td><code>using shm("/dev/shm/ring") { ... }</code></td></tr>
+            </tbody>
+          </table>
+
+          <h3>Built-in Mathematical Functions</h3>
+          <table>
+            <thead>
+              <tr><th>Function</th><th>Description</th><th>Valid Domain</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>sqrt(x)</code></td><td>Square root</td><td>$x \ge 0$</td></tr>
+              <tr><td><code>abs(x)</code></td><td>Absolute value</td><td>$\mathbb{R}$</td></tr>
+              <tr><td><code>ceil(x)</code> / <code>floor(x)</code></td><td>Ceiling / floor integer steps</td><td>$\mathbb{R}$</td></tr>
+              <tr><td><code>round(x)</code></td><td>Nearest integer rounding</td><td>$\mathbb{R}$</td></tr>
+              <tr><td><code>sign(x)</code></td><td>Signum function (-1, 0, +1)</td><td>$\mathbb{R}$</td></tr>
+              <tr><td><code>ln(x)</code> / <code>log(x)</code></td><td>Natural logarithm</td><td>$x > 0$</td></tr>
+              <tr><td><code>exp(x)</code></td><td>Natural exponential ($e^x$)</td><td>$\mathbb{R}$</td></tr>
+              <tr><td><code>sin(x)</code>, <code>cos(x)</code>, <code>tan(x)</code></td><td>Trigonometric functions</td><td>$\mathbb{R}$ (dimensionless)</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <!-- SECTION 7: PACKAGE SPEC -->
+        <section id="package-spec">
+          <span class="standards-badge">PACKAGES &bull; 13</span>
+          <h2>Package Specification (.avenpkg)</h2>
+          <p>
+            Aven packages are distributed as standalone, cryptographically sealed <code>.avenpkg</code> binary archives:
+          </p>
+          <pre><code>// Aven.toml manifest
+[package]
+name = "std_aerodynamics"
+version = "0.2.1"
+entry = "lib.aven"
+authors = ["Aven Aeronautics WG &lt;admin@avenc.dev&gt;"]
+license = "MIT"
+description = "US Standard Atmosphere 1976 and Mach compressibility relations"
+
+[dependencies]
+std_thermodynamics = "0.1.4"</code></pre>
+
+          <h3>Archive Binary Layout</h3>
+          <table>
+            <thead>
+              <tr><th>Field</th><th>Format</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Magic Identifier</td><td><code>AVENPKG1\n</code></td><td>9-byte ASCII protocol header</td></tr>
+              <tr><td>Manifest Chunk</td><td><code>u32</code> + UTF-8</td><td>Length-prefixed <code>Aven.toml</code> payload</td></tr>
+              <tr><td>Source Files</td><td><code>u32</code> count + payloads</td><td>Length-prefixed file paths and raw byte payloads</td></tr>
+              <tr><td>SHA-256 Seal</td><td>64-char Hexadecimal</td><td>Cryptographic digest verifying entire preceding archive</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <!-- SECTION 8: CLI REFERENCE -->
+        <section id="cli-reference">
+          <span class="standards-badge">COMMANDS &bull; 14</span>
+          <h2>CLI Commands Reference</h2>
+          <table>
+            <thead>
+              <tr><th>Command</th><th>Usage</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>avenc run</code></td><td><code>avenc run model.aven</code></td><td>Solves relations and prints settled values to stdout</td></tr>
+              <tr><td><code>avenc emit-c</code></td><td><code>avenc emit-c model.aven -o out.c</code></td><td>Emits branchless, zero-allocation freestanding ANSI C99</td></tr>
+              <tr><td><code>avenc emit-wasm</code></td><td><code>avenc emit-wasm model.aven -o out.wasm</code></td><td>Compiles relation to WebAssembly Core 1.0 binary</td></tr>
+              <tr><td><code>avenc debug</code></td><td><code>avenc debug --ledger ledger.jsonl</code></td><td>Launches interactive time-travel REPL debugger</td></tr>
+              <tr><td><code>avenc pkg init</code></td><td><code>avenc pkg init &lt;name&gt;</code></td><td>Initializes a new package skeleton with <code>Aven.toml</code></td></tr>
+              <tr><td><code>avenc pkg pack</code></td><td><code>avenc pkg pack</code></td><td>Packs current directory into sealed <code>.avenpkg</code></td></tr>
+              <tr><td><code>avenc pkg install</code></td><td><code>avenc pkg install &lt;pkg&gt;</code></td><td>Verifies SHA-256 seal and installs into local registry</td></tr>
+              <tr><td><code>avenc pkg list</code></td><td><code>avenc pkg list</code></td><td>Lists all installed packages and physical unit tags</td></tr>
+            </tbody>
+          </table>
+        </section>
+
       </article>
     </div>
   </main>
 
+  <!-- Complete Standard Footer -->
   <footer class="footer">
-    <div class="container" style="text-align: center;">
-      <p>&copy; 2026 Aven Contributors. Open source under MIT License &bull; avenc.dev</p>
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <div class="brand">▲ AVEN</div>
+          <p>Declarative invariant programming and relational multi-physics compiler. Built with 100% pure standard library Rust.</p>
+        </div>
+        <div class="footer-col">
+          <h4>Documentation</h4>
+          <ul>
+            <li><a href="/docs#quickstart">Getting Started</a></li>
+            <li><a href="/docs#cookbook">Cookbook by Example</a></li>
+            <li><a href="/docs#cheat-sheet">Quick Reference</a></li>
+            <li><a href="/docs#standards">Engineering Standards</a></li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h4>Ecosystem</h4>
+          <ul>
+            <li><a href="/registry">Package Registry</a></li>
+            <li><a href="/docs#package-spec">Package Specification</a></li>
+            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/RFC_PROCESS.md" target="_blank" rel="noopener">RFC Process</a></li>
+            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/CODE_OF_CONDUCT.md" target="_blank" rel="noopener">Code of Conduct</a></li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h4>Repository</h4>
+          <ul>
+            <li><a href="https://github.com/Thrainkrilleve/aven" target="_blank" rel="noopener">GitHub Repository</a></li>
+            <li><a href="https://github.com/Thrainkrilleve/aven/releases" target="_blank" rel="noopener">Binary Releases</a></li>
+            <li><a href="mailto:admin@avenc.dev">Contact</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <div>&copy; 2026 Aven Contributors. Open source under MIT License.</div>
+        <div>Global Distributed Edge Network &bull; avenc.dev</div>
+      </div>
     </div>
   </footer>
 
+  <!-- ScrollSpy & Anchor Navigation Script -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const sidebarLinks = document.querySelectorAll('.docs-sidebar .sidebar-link');
+      const sections = document.querySelectorAll('.docs-content section');
+
+      function setActiveLink() {
+        let currentSectionId = '';
+        const scrollPosition = window.scrollY + 120;
+
+        sections.forEach(section => {
+          const sectionTop = section.offsetTop;
+          const sectionHeight = section.offsetHeight;
+          if (scrollPosition >= sectionTop && scrollPosition < sectionTop + sectionHeight) {
+            currentSectionId = section.getAttribute('id');
+          }
+        });
+
+        if (currentSectionId) {
+          sidebarLinks.forEach(link => {
+            const href = link.getAttribute('href');
+            if (href === '#' + currentSectionId) {
+              link.classList.add('active');
+            } else {
+              link.classList.remove('active');
+            }
+          });
+        }
+      }
+
+      window.addEventListener('scroll', setActiveLink, { passive: true });
+      setActiveLink();
+
+      sidebarLinks.forEach(link => {
+        link.addEventListener('click', (e) => {
+          const targetId = link.getAttribute('href');
+          if (targetId.startsWith('#')) {
+            const targetSection = document.querySelector(targetId);
+            if (targetSection) {
+              e.preventDefault();
+              targetSection.scrollIntoView({ behavior: 'smooth' });
+              history.pushState(null, null, targetId);
+              sidebarLinks.forEach(l => l.classList.remove('active'));
+              link.classList.add('active');
+            }
+          }
+        });
+      });
+    });
+  </script>
 </body>
 </html>
