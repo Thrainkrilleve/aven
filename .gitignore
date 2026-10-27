@@ -52,3 +52,6 @@ node_modules/
 verify/failures/
 verify/nowcast_results.jsonl
 .wrangler/
+
+# Per-run model copies written by verify/nowcast_skill.py
+evaluations/possible/_nowcast_*.aven
