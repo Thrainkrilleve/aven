@@ -69,6 +69,10 @@ fn print_usage() {
     println!("                                        Transpile relation/forward blocks to SMT-LIB2 format for Z3/CVC5");
     println!("  avenc verify-smt <file.aven> [--prove] [--solver <CMD>]");
     println!("                                        Formally verify safety invariants or check satisfiability via SMT");
+    println!("  avenc safety-case <file.aven> [-o report.md] [--format md|json] [--standard all|do178c|iso26262] [--invariant \"<expr>\"]");
+    println!("                                        Generate formal safety case report for DO-178C (Table A-5) & ISO 26262 ASIL-D");
+    println!("  avenc bench <file.aven> [--iterations N] [--latency-profile] [--target-hz HZ] [--compiled] [--json] [--markdown]");
+    println!("                                        Benchmark solve performance, WCET single-tick latency, and cycle jitter");
     println!(
         "  avenc check <file.aven>               Validate syntax, relations, and unit declarations"
     );
@@ -191,6 +195,43 @@ fn real_main() {
             };
             cmd_verify_smt(file, solver, &options);
         }
+        "safety-case" => {
+            let file_arg = args.iter().skip(2).find(|a| !a.starts_with('-'));
+            let Some(file) = file_arg else {
+                eprintln!("Error: missing file argument for 'safety-case': avenc safety-case <file.aven> [-o report.md]");
+                process::exit(1);
+            };
+            let out_file = args
+                .windows(2)
+                .find(|w| w[0] == "-o" || w[0] == "--out")
+                .map(|w| w[1].as_str());
+            let format = args
+                .windows(2)
+                .find(|w| w[0] == "--format")
+                .map(|w| w[1].as_str())
+                .unwrap_or("md");
+            let standard_str = args
+                .windows(2)
+                .find(|w| w[0] == "--standard")
+                .map(|w| w[1].as_str())
+                .unwrap_or("all");
+            let standard = match standard_str {
+                "do178c" => smt::SafetyStandard::Do178c,
+                "iso26262" => smt::SafetyStandard::Iso26262,
+                _ => smt::SafetyStandard::All,
+            };
+            let solver = args
+                .windows(2)
+                .find(|w| w[0] == "--solver")
+                .map(|w| w[1].as_str());
+            let mut invariants = Vec::new();
+            for w in args.windows(2) {
+                if w[0] == "--invariant" || w[0] == "--prove-invariant" {
+                    invariants.push(w[1].clone());
+                }
+            }
+            cmd_safety_case(file, out_file, format, standard, &invariants, solver);
+        }
         "bench" => {
             let file_arg = args.iter().skip(2).find(|a| !a.starts_with('-'));
             let Some(file) = file_arg else {
@@ -199,11 +240,24 @@ fn real_main() {
             };
             let iterations = args
                 .windows(2)
-                .find(|w| w[0] == "--iterations")
-                .and_then(|w| w[1].parse::<usize>().ok())
-                .unwrap_or(200)
-                .max(1);
-            cmd_bench(file, iterations);
+                .find(|w| w[0] == "--iterations" || w[0] == "-n")
+                .and_then(|w| w[1].parse::<usize>().ok());
+            let latency_profile = args.iter().any(|a| a == "--latency-profile" || a == "--profile");
+            let target_hz = args
+                .windows(2)
+                .find(|w| w[0] == "--target-hz" || w[0] == "--hz")
+                .and_then(|w| w[1].parse::<f64>().ok());
+            let compiled = args.iter().any(|a| a == "--compiled" || a == "--aot");
+            let json = args.iter().any(|a| a == "--json");
+            let markdown = args.iter().any(|a| a == "--markdown" || a == "--md");
+
+            if latency_profile {
+                let n = iterations.unwrap_or(10_000).max(10);
+                cmd_bench_latency_profile(file, n, target_hz, compiled, json, markdown);
+            } else {
+                let n = iterations.unwrap_or(200).max(1);
+                cmd_bench(file, n);
+            }
         }
         "run" => {
             let allow_stale = args.iter().any(|a| a == "--allow-stale");
@@ -728,6 +782,164 @@ fn cmd_bench(path: &str, iterations: usize) {
     }
 }
 
+fn cmd_bench_latency_profile(
+    path: &str,
+    iterations: usize,
+    target_hz: Option<f64>,
+    _bench_compiled: bool,
+    output_json: bool,
+    output_markdown: bool,
+) {
+    let module = parse_file(path);
+    let target_block = if let Some(fb) = module.blocks.iter().find(|b| b.kind == BlockKind::Forward) {
+        fb
+    } else if let Some(rb) = module.blocks.first() {
+        rb
+    } else {
+        eprintln!("Error: model '{}' has no relation or forward blocks to profile", path);
+        process::exit(1);
+    };
+
+    let order = match CTranspiler::topo_sort(target_block) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("Error topologically ordering equations: {}", e);
+            process::exit(1);
+        }
+    };
+
+    // Prepare input environment from solve block
+    let mut initial_env: HashMap<String, f64> = HashMap::new();
+    if let Some(s) = module.solves.iter().find(|s| s.target == target_block.name || s.targets.contains(&target_block.name)).or_else(|| module.solves.first()) {
+        for b in &s.bindings {
+            initial_env.insert(b.name.clone(), b.value);
+        }
+    }
+
+    // Warmup 100 ticks
+    let mut warm_env = initial_env.clone();
+    for _ in 0..100 {
+        for &idx in &order {
+            let eq = &target_block.equations[idx];
+            let val = diff::eval_expr(&eq.rhs, &warm_env).unwrap_or(0.0);
+            warm_env.insert(eq.lhs.clone(), val);
+        }
+    }
+
+    // Measurement loop
+    let mut durations_ns: Vec<u64> = Vec::with_capacity(iterations);
+    let mut env = initial_env.clone();
+    for _ in 0..iterations {
+        let t0 = std::time::Instant::now();
+        for &idx in &order {
+            let eq = &target_block.equations[idx];
+            let val = diff::eval_expr(&eq.rhs, &env).unwrap_or(0.0);
+            env.insert(eq.lhs.clone(), val);
+        }
+        let dt = t0.elapsed();
+        durations_ns.push(dt.as_nanos() as u64);
+    }
+
+    // Statistics calculation
+    let mut sorted = durations_ns.clone();
+    sorted.sort_unstable();
+
+    let n = sorted.len();
+    let min_ns = sorted[0];
+    let p50_ns = sorted[((n - 1) as f64 * 0.50).round() as usize];
+    let p90_ns = sorted[((n - 1) as f64 * 0.90).round() as usize];
+    let p95_ns = sorted[((n - 1) as f64 * 0.95).round() as usize];
+    let p99_ns = sorted[((n - 1) as f64 * 0.99).round() as usize];
+    let p99_9_ns = sorted[((n - 1) as f64 * 0.999).round() as usize];
+    let max_ns = sorted[n - 1]; // WCET
+
+    let sum_ns: u64 = sorted.iter().sum();
+    let mean_ns = sum_ns as f64 / n as f64;
+    let variance: f64 = sorted.iter().map(|&x| (x as f64 - mean_ns).powi(2)).sum::<f64>() / n as f64;
+    let std_dev_ns = variance.sqrt();
+    let jitter_range_ns = max_ns.saturating_sub(min_ns);
+
+    let target_deadline_ns = target_hz.map(|hz| (1e9 / hz).round() as u64);
+    let deadline_violations = target_deadline_ns.map(|d| sorted.iter().filter(|&&x| x > d).count());
+
+    if output_json {
+        println!("{{");
+        println!("  \"model\": \"{}\",", path.replace('\\', "/"));
+        println!("  \"iterations\": {},", n);
+        println!("  \"target_block\": \"{}\",", target_block.name);
+        println!("  \"min_ns\": {},", min_ns);
+        println!("  \"p50_ns\": {},", p50_ns);
+        println!("  \"p90_ns\": {},", p90_ns);
+        println!("  \"p95_ns\": {},", p95_ns);
+        println!("  \"p99_ns\": {},", p99_ns);
+        println!("  \"p99_9_ns\": {},", p99_9_ns);
+        println!("  \"max_ns\": {},", max_ns);
+        println!("  \"mean_ns\": {:.2},", mean_ns);
+        println!("  \"std_dev_ns\": {:.2},", std_dev_ns);
+        println!("  \"jitter_range_ns\": {},", jitter_range_ns);
+        if let Some(d) = target_deadline_ns {
+            println!("  \"target_deadline_ns\": {},", d);
+            println!("  \"deadline_violations\": {},", deadline_violations.unwrap_or(0));
+        }
+        println!("  \"throughput_solves_per_sec\": {:.0}", 1e9 / mean_ns);
+        println!("}}");
+        return;
+    }
+
+    if output_markdown {
+        println!("### Real-Time Tick Latency & Jitter Profile: `{}`", path);
+        println!("- **Iterations:** {} | **Target Block:** `{}`", n, target_block.name);
+        if let Some(hz) = target_hz {
+            println!("- **Target Control Rate:** {:.1} Hz (Deadline: {:.2} µs)", hz, 1e6 / hz);
+        }
+        println!("\n| Metric | Latency (ns) | Latency (µs) | Definition |");
+        println!("|---|---:|---:|---|");
+        println!("| **Min** | {} | {:.3} | Best-case single-tick execution time |", min_ns, min_ns as f64 / 1000.0);
+        println!("| **p50 (Median)** | {} | {:.3} | 50th percentile nominal cycle latency |", p50_ns, p50_ns as f64 / 1000.0);
+        println!("| **p90** | {} | {:.3} | 90th percentile upper boundary |", p90_ns, p90_ns as f64 / 1000.0);
+        println!("| **p95** | {} | {:.3} | 95th percentile upper boundary |", p95_ns, p95_ns as f64 / 1000.0);
+        println!("| **p99** | {} | {:.3} | 99th percentile real-time latency |", p99_ns, p99_ns as f64 / 1000.0);
+        println!("| **p99.9** | {} | {:.3} | 99.9th percentile tail latency |", p99_9_ns, p99_9_ns as f64 / 1000.0);
+        println!("| **Max (WCET)** | {} | {:.3} | Worst-Case Execution Time across battery |", max_ns, max_ns as f64 / 1000.0);
+        println!("| **Std Dev (σ)** | {:.1} | {:.3} | Latency dispersion / cycle jitter |", std_dev_ns, std_dev_ns / 1000.0);
+        println!("| **Jitter Range** | {} | {:.3} | Max − Min cycle variance |", jitter_range_ns, jitter_range_ns as f64 / 1000.0);
+        return;
+    }
+
+    // Default formatted console view
+    println!("============================================================");
+    println!(" Aven High-Resolution Real-Time Latency & Jitter Profiler");
+    println!(" Model: '{}' | Iterations: {}", path, n);
+    println!("============================================================");
+    println!(" Target Block: '{}' ({} equations)", target_block.name, target_block.equations.len());
+    if let Some(hz) = target_hz {
+        let deadline = target_deadline_ns.unwrap();
+        let violations = deadline_violations.unwrap();
+        println!(" Target Rate: {:.1} Hz | Deadline: {} ns ({:.2} µs)", hz, deadline, deadline as f64 / 1000.0);
+        if violations == 0 {
+            println!(" Deadline Adherence: ✓ 100.0% (0 / {} violations)", n);
+        } else {
+            println!(" Deadline Adherence: ✗ {:.2}% ({} / {} violations)", (1.0 - violations as f64 / n as f64) * 100.0, violations, n);
+        }
+    }
+    println!("------------------------------------------------------------");
+    println!(" {:<20} {:>14} {:>14}", "Quantile", "Latency (ns)", "Latency (µs)");
+    println!("------------------------------------------------------------");
+    println!(" {:<20} {:>14} {:>14.3}", "Min (Best Case)", min_ns, min_ns as f64 / 1000.0);
+    println!(" {:<20} {:>14} {:>14.3}", "p50 (Median)", p50_ns, p50_ns as f64 / 1000.0);
+    println!(" {:<20} {:>14} {:>14.3}", "p90", p90_ns, p90_ns as f64 / 1000.0);
+    println!(" {:<20} {:>14} {:>14.3}", "p95", p95_ns, p95_ns as f64 / 1000.0);
+    println!(" {:<20} {:>14} {:>14.3}", "p99", p99_ns, p99_ns as f64 / 1000.0);
+    println!(" {:<20} {:>14} {:>14.3}", "p99.9", p99_9_ns, p99_9_ns as f64 / 1000.0);
+    println!(" {:<20} {:>14} {:>14.3}", "Max (WCET)", max_ns, max_ns as f64 / 1000.0);
+    println!("------------------------------------------------------------");
+    println!(" Mean (µ):           {:>14.1} ns ({:.3} µs)", mean_ns, mean_ns / 1000.0);
+    println!(" Jitter (σ):         {:>14.1} ns ({:.3} µs)", std_dev_ns, std_dev_ns / 1000.0);
+    println!(" Jitter Range:       {:>14} ns ({:.3} µs)", jitter_range_ns, jitter_range_ns as f64 / 1000.0);
+    println!(" Throughput:         {:>14.0} solves/sec", 1e9 / mean_ns);
+    println!("============================================================");
+}
+
 fn cmd_why(path: &str, var: &str, depth: Option<usize>) {
     let module = parse_file(path);
     let work_dir = std::path::Path::new(path).parent();
@@ -952,6 +1164,56 @@ fn cmd_verify_smt(path: &str, solver_cmd: Option<&str>, options: &smt::SmtOption
             println!("  Solver returned: {}", msg);
             process::exit(1);
         }
+    }
+}
+
+fn cmd_safety_case(
+    path: &str,
+    out_file: Option<&str>,
+    format: &str,
+    standard: smt::SafetyStandard,
+    custom_invariants: &[String],
+    solver: Option<&str>,
+) {
+    let module = parse_file(path);
+    println!("============================================================");
+    println!(" Aven Safety Case Generator (DO-178C / ISO 26262 ASIL-D)");
+    println!(" Model: '{}' | Standard: {}", path, standard);
+    println!("============================================================");
+
+    let report = match smt::SafetyCaseGenerator::generate(
+        &module,
+        path,
+        standard,
+        custom_invariants,
+        solver,
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Safety Case Generation Error: {}", e);
+            process::exit(1);
+        }
+    };
+
+    let content = if format == "json" {
+        report.to_json()
+    } else {
+        report.to_markdown()
+    };
+
+    if let Some(out_path) = out_file {
+        if let Err(e) = fs::write(out_path, &content) {
+            eprintln!("Error writing safety case to '{}': {}", out_path, e);
+            process::exit(1);
+        }
+        println!("Successfully generated Safety Case report to '{}'", out_path);
+    } else {
+        println!("{}", content);
+    }
+
+    if !report.all_passed {
+        eprintln!("\nNotice: One or more safety invariants were violated.");
+        process::exit(EXIT_CONSTRAINT_VIOLATION);
     }
 }
 
