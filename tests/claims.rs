@@ -866,7 +866,7 @@ fn printed_version_matches_cargo_toml_and_the_site_badge() {
         cargo.contains(&format!("version = \"{version}\"")),
         "Cargo.toml does not use {version}"
     );
-    for page in ["index.html", "docs.html", "registry.html", "weather.html"] {
+    for page in ["index.html", "docs.html"] {
         let html = std::fs::read_to_string(format!("web/public/{page}")).expect(page);
         let badge = format!("<span class=\"brand-version\">v{version}</span>");
         assert!(html.contains(&badge), "{page} badge is not v{version}");

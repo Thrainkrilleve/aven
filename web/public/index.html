@@ -15,6 +15,17 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
+  <style>
+    /* Live-demo additions (reverse-solve panel + freed-input state) */
+    .demo-reverse { background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem 0.85rem; margin-bottom: 1rem; }
+    .demo-reverse p { margin: 0 0 0.6rem; font-size: 0.82rem; color: var(--text-muted); }
+    .demo-reverse-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.45rem; flex-wrap: wrap; }
+    .demo-reverse-row > span { min-width: 4.75rem; font-size: 0.82rem; color: var(--text-muted); }
+    .demo-reverse select, .demo-reverse input { background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 0.32rem 0.5rem; font: inherit; font-size: 0.82rem; }
+    .demo-reverse input { width: 7.5rem; font-family: var(--font-mono); }
+    .slider-row.is-freed { opacity: 0.6; }
+    .slider-row.is-freed output { color: var(--amber); }
+  </style>
 </head>
 <body>
 
@@ -29,11 +40,8 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
       </button>
       <ul class="nav-links" id="nav-links">
-        <li><a href="/#playground">Playground</a></li>
-        <li><a href="/weather">Live weather</a></li>
+        <li><a href="/#demo">Live demo</a></li>
         <li><a href="/docs.html">Docs</a></li>
-        <li><a href="/registry.html">Packages</a></li>
-        <li><a href="https://github.com/Thrainkrilleve/aven" rel="noopener">GitHub</a></li>
       </ul>
       <div class="nav-actions">
         <a href="/docs.html#install" class="btn btn-primary btn-sm">Install</a>
@@ -54,13 +62,12 @@
             fact in a hash-chained ledger, and compiles pinned models to solver-free C or WebAssembly.
           </p>
           <div class="hero-ctas">
-            <a href="#playground" class="btn btn-primary">
-              Try it in the browser
+            <a href="#demo" class="btn btn-primary">
+              Try the solver in the browser
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
             </a>
             <a href="/docs.html" class="btn btn-ghost">Read the guide</a>
           </div>
-          <p class="hero-live"><span class="wx-live"></span><a href="/weather">Live: an Aven radar nowcast running every five minutes on NOAA, NWS and USGS data, scored against the radar</a></p>
 
           <div class="install" id="install">
             <div class="install-tabs" role="tablist" aria-label="Install method">
@@ -138,50 +145,62 @@ solve Dynamics with {
       </div>
     </section>
 
-    <!-- Playground -->
-    <section class="section" id="playground">
+    <!-- Live demo: the real omnidirectional solver in WebAssembly -->
+    <section class="section" id="demo">
       <div class="container">
         <div class="section-head">
-          <span class="eyebrow">Playground</span>
-          <h2>Real models, compiled to WebAssembly, running in your browser</h2>
+          <span class="eyebrow">Live demo</span>
+          <h2>The real solver, running in your browser</h2>
           <p>
-            Each model below is a <code>forward</code> block from the repository's <code>examples/</code> directory,
-            compiled with <code>avenc emit-wasm</code>. At build time every output is checked against
-            <code>avenc run</code> on the example's own scenario.
+            This is the actual Aven omnidirectional solver compiled to WebAssembly — not a one-way calculator.
+            Change the inputs to solve forward, or switch to <strong>reverse</strong> to fix a target and let it
+            solve backward for an input. The model is <code>examples/server_capacity.aven</code>, a Little's Law
+            sizing relation. Nothing is sent to a server.
           </p>
         </div>
 
         <div class="pg">
           <div class="pg-head">
-            <div class="pg-models" role="tablist" aria-label="Model" id="pg-models"></div>
-            <button class="btn btn-ghost btn-sm" type="button" id="pg-share">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>
-              <span>Copy link</span>
-            </button>
+            <div class="pg-models" role="tablist" aria-label="Solve direction">
+              <button class="pg-model" type="button" data-mode="forward" role="tab" aria-selected="true">Forward</button>
+              <button class="pg-model" type="button" data-mode="reverse" role="tab" aria-selected="false">Reverse — solve for an input</button>
+            </div>
+            <button class="btn btn-ghost btn-sm" type="button" id="demo-reset">Reset</button>
           </div>
           <div class="pg-body">
             <div class="pg-pane">
-              <div class="pane-title">
-                <span id="pg-block">Source</span>
-                <a id="pg-source-link" href="https://github.com/Thrainkrilleve/aven/tree/main/examples" rel="noopener">View file</a>
+              <div class="pane-title"><span>Inputs</span></div>
+              <div id="demo-reverse" class="demo-reverse" hidden>
+                <p>Fix a target output and free an input — the solver works backward, then forward-fills the rest.</p>
+                <div class="demo-reverse-row">
+                  <span>Target</span>
+                  <select id="demo-target" aria-label="Target output"></select>
+                  <input id="demo-target-value" type="number" step="any" aria-label="Target value">
+                </div>
+                <div class="demo-reverse-row">
+                  <span>Solve for</span>
+                  <select id="demo-freed" aria-label="Input to solve for"></select>
+                </div>
               </div>
-              <pre class="pg-code" id="pg-code"></pre>
+              <div class="sliders" id="demo-sliders"></div>
             </div>
             <div class="pg-pane">
-              <div class="pane-title"><span>Inputs</span><button class="copy-btn" type="button" id="pg-reset">Reset</button></div>
-              <div class="sliders" id="pg-sliders"></div>
+              <div class="pane-title"><span>Solved values</span></div>
               <div class="outputs" aria-live="polite">
                 <div class="outputs-head">
-                  <span class="status-ok" id="pg-status">Loading model…</span>
-                  <span id="pg-timing"></span>
+                  <span class="status-ok" id="demo-status">Loading solver…</span>
+                  <span id="demo-timing"></span>
                 </div>
-                <div class="output-grid" id="pg-outputs"></div>
+                <div class="output-grid" id="demo-outputs"></div>
               </div>
+              <div class="pane-title" style="margin-top:1.1rem"><span>Model solved this tick</span></div>
+              <pre class="pg-code" id="demo-src"></pre>
             </div>
           </div>
           <p class="pg-foot">
-            Values and timings are computed locally in WebAssembly; nothing is sent to a server.
-            Inputs not shown use the example's defaults.
+            The solver (symbolic forward evaluation plus guarded Newton–Raphson) is compiled from the same Rust that
+            powers <code>avenc run</code> — 348&nbsp;KB of WebAssembly, instantiated with no imports. Both directions
+            run entirely in your browser.
           </p>
         </div>
       </div>
@@ -346,7 +365,7 @@ static void aven_ProductionProfile(double avg_latency_ms, ...,
           <p>The guide walks from installation to solving, unit checking, optimization and code generation, with every example runnable as written.</p>
           <div class="hero-ctas">
             <a href="/docs.html" class="btn btn-primary">Start the guide</a>
-            <a href="https://github.com/Thrainkrilleve/aven" class="btn btn-ghost" rel="noopener">View the source</a>
+            <a href="#demo" class="btn btn-ghost">Try the live demo</a>
           </div>
         </div>
       </div>
@@ -366,34 +385,24 @@ static void aven_ProductionProfile(double avg_latency_ms, ...,
             <li><a href="/docs.html">Getting started</a></li>
             <li><a href="/docs.html#language">Language guide</a></li>
             <li><a href="/docs.html#cli">CLI reference</a></li>
-            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/docs/TUTORIAL.md" rel="noopener">Cookbook</a></li>
           </ul>
         </div>
         <div>
-          <h4>Project</h4>
+          <h4>Try</h4>
           <ul>
-            <li><a href="/registry.html">Packages</a></li>
-            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/STANDARDS.md" rel="noopener">Engineering standards</a></li>
-            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/RFC_PROCESS.md" rel="noopener">RFC process</a></li>
-            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/CONTRIBUTING.md" rel="noopener">Contributing</a></li>
-          </ul>
-        </div>
-        <div>
-          <h4>Source</h4>
-          <ul>
-            <li><a href="https://github.com/Thrainkrilleve/aven" rel="noopener">GitHub</a></li>
-            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/CODE_OF_CONDUCT.md" rel="noopener">Code of conduct</a></li>
+            <li><a href="/#demo">Live demo</a></li>
+            <li><a href="/docs.html#install">Install</a></li>
           </ul>
         </div>
       </div>
       <div class="footer-bottom">
-        <span>&copy; 2026 Austin Thompson &middot; <a href="https://github.com/Thrainkrilleve/aven/blob/main/LICENSE" rel="noopener">MIT License</a></span>
+        <span>&copy; 2026 Austin Thompson &middot; MIT License</span>
         <span>avenc.dev</span>
       </div>
     </div>
   </footer>
 
   <script type="module" src="/site.js"></script>
-  <script type="module" src="/app.js"></script>
+  <script type="module" src="/solver-demo.js"></script>
 </body>
 </html>

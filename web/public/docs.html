@@ -25,11 +25,8 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
       </button>
       <ul class="nav-links" id="nav-links">
-        <li><a href="/#playground">Playground</a></li>
-        <li><a href="/weather">Live weather</a></li>
+        <li><a href="/#demo">Live demo</a></li>
         <li><a href="/docs.html" aria-current="page">Docs</a></li>
-        <li><a href="/registry.html">Packages</a></li>
-        <li><a href="https://github.com/Thrainkrilleve/aven" rel="noopener">GitHub</a></li>
       </ul>
       <div class="nav-actions">
         <a href="#install" class="btn btn-primary btn-sm">Install</a>
@@ -280,7 +277,7 @@ relation FlightAtmosphericDynamics using ipc("127.0.0.1:9090") {
 }</pre></div>
           <p>Two more backends exist for low-latency use: <code>shm("name")</code> reads a shared-memory ring buffer, and <code>native("lib.so")</code> calls a C or Rust dynamic library in process.</p>
           <h3>Supervising a live feed</h3>
-          <p><code>avenc stream</code> reads one JSON object per line from stdin and solves each as a cycle. <a href="https://github.com/Thrainkrilleve/aven/blob/main/examples/stream/openplc_supervisor.aven" rel="noopener"><code>examples/stream/openplc_supervisor.aven</code></a> checks PLC readings against limits; feed it the OpenPLC Modbus poller:</p>
+          <p><code>avenc stream</code> reads one JSON object per line from stdin and solves each as a cycle. <code>examples/stream/openplc_supervisor.aven</code> checks PLC readings against limits; feed it the OpenPLC Modbus poller:</p>
           <div class="code"><pre>python evaluations/tests/PLC-test/openplc_poller.py --host &lt;plc-address&gt; \
   | avenc stream examples/stream/openplc_supervisor.aven</pre></div>
           <div class="code output"><pre>#1      | a7c77c66d26612c6 | SETTLED
@@ -343,7 +340,7 @@ const mem = new Float64Array(instance.exports.memory.buffer);
 mem.set([20, 64, 1.04, 4096, 16, 50000, 4, 0.7], 0);  // inputs, sorted by name
 instance.exports.aven_solve(0, 1024);
 console.log(mem.slice(128, 133));  // raw_workers, allocated_workers, ...</pre></div>
-          <p><code>floor</code>, <code>ceil</code>, <code>round</code> and <code>sign</code> compile into the module and match <code>avenc run</code> exactly. WebAssembly has no exponential, logarithm, trigonometric or general power instruction, so a model that uses <code>exp</code>, <code>ln</code>, <code>sin</code>, <code>cos</code>, <code>tan</code> or a <code>^</code> other than an integer constant or <code>0.5</code> imports them from the host as module <code>"math"</code>; pass <a href="/aven_math.js"><code>aven_math.js</code></a> as the import object. Those results come from the host's math library and agree with <code>avenc run</code> to within a few units in the last place. The playground on the homepage and the <a href="/weather">live weather page</a> run modules produced this way.</p>
+          <p><code>floor</code>, <code>ceil</code>, <code>round</code> and <code>sign</code> compile into the module and match <code>avenc run</code> exactly. WebAssembly has no exponential, logarithm, trigonometric or general power instruction, so a model that uses <code>exp</code>, <code>ln</code>, <code>sin</code>, <code>cos</code>, <code>tan</code> or a <code>^</code> other than an integer constant or <code>0.5</code> imports them from the host as module <code>"math"</code>; supply those functions in the import object. Those results come from the host's math library and agree with <code>avenc run</code> to within a few units in the last place.</p>
         </section>
 
         <section id="ledger">
@@ -379,18 +376,18 @@ avenc pkg init my_physics              # writes Aven.toml and lib.aven here
 avenc pkg pack                         # → my_physics-0.1.0.avenpkg
 avenc pkg install my_physics-0.1.0.avenpkg
 avenc pkg list</pre></div>
-          <p>Packages install into <code>.aven/packages</code> in the current project. Installing by name from a remote registry is not implemented yet; see the <a href="/registry.html">package index</a> for its status, and the <a href="https://github.com/Thrainkrilleve/aven/blob/main/docs/PACKAGE_SPEC.md" rel="noopener">package specification</a> for the manifest format.</p>
+          <p>Packages install into <code>.aven/packages</code> in the current project. Installing by name from a remote registry is not implemented yet; <code>avenc</code> reads and preserves the <code>[dependencies]</code> and <code>[[units]]</code> manifest sections but does not fetch, resolve or register them.</p>
         </section>
 
         <section id="more">
           <h2>Further reading</h2>
-          <p>The full guides live in the repository:</p>
+          <p>The full guides ship with the source tree, under <code>docs/</code>:</p>
           <ul>
-            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/docs/GETTING_STARTED.md" rel="noopener">Getting started</a> — the fifteen-minute walkthrough, including SMT export.</li>
-            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/docs/TUTORIAL.md" rel="noopener">Aven by example</a> — ten progressive recipes.</li>
-            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/docs/CHEAT_SHEET.md" rel="noopener">Cheat sheet</a> — syntax, functions and commands on one page.</li>
-            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/STANDARDS.md" rel="noopener">Engineering standards</a> — numerical, cryptographic and code-generation rules.</li>
-            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/docs/AVEN_AI_MODEL_GUIDE.md" rel="noopener">Guide for AI models</a> — writing Aven with a language model.</li>
+            <li><code>docs/GETTING_STARTED.md</code> — the fifteen-minute walkthrough, including SMT export.</li>
+            <li><code>docs/TUTORIAL.md</code> — Aven by example, ten progressive recipes.</li>
+            <li><code>docs/CHEAT_SHEET.md</code> — syntax, functions and commands on one page.</li>
+            <li><code>STANDARDS.md</code> — numerical, cryptographic and code-generation rules.</li>
+            <li><code>docs/AVEN_AI_MODEL_GUIDE.md</code> — writing Aven with a language model.</li>
           </ul>
         </section>
       </article>
@@ -400,8 +397,8 @@ avenc pkg list</pre></div>
   <footer class="footer">
     <div class="container">
       <div class="footer-bottom" style="margin-top:0;border-top:none;padding-top:0">
-        <span>&copy; 2026 Austin Thompson &middot; <a href="https://github.com/Thrainkrilleve/aven/blob/main/LICENSE" rel="noopener">MIT License</a></span>
-        <span><a href="https://github.com/Thrainkrilleve/aven/tree/main/web/public/docs.html" rel="noopener">Edit this page</a></span>
+        <span>&copy; 2026 Austin Thompson &middot; MIT License</span>
+        <span>avenc.dev</span>
       </div>
     </div>
   </footer>
