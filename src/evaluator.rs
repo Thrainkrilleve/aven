@@ -1519,6 +1519,13 @@ impl DynamicLibrary {
             }
             Ok(Self { handle })
         }
+        #[cfg(not(any(windows, unix)))]
+        {
+            Err(EvalError::BlackBoxFailure(format!(
+                "dynamic external libraries are not supported on this target (cannot load '{:?}')",
+                p
+            )))
+        }
     }
 
     /// Copy the named symbol out of this library as a `T`.
@@ -1566,6 +1573,13 @@ impl DynamicLibrary {
                 )));
             }
             Ok(unsafe { std::mem::transmute_copy(&proc) })
+        }
+        #[cfg(not(any(windows, unix)))]
+        {
+            let _ = symbol_name;
+            Err(EvalError::BlackBoxFailure(
+                "dynamic external libraries are not supported on this target".to_string(),
+            ))
         }
     }
 }

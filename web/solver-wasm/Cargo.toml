@@ -1,0 +1,19 @@
+# Standalone WASM wrapper around the real avenc omnidirectional solver.
+# Kept separate so the avenc crate stays zero-dependency; this crate carries
+# only a hand-written C-ABI shim (no wasm-bindgen) and depends on avenc by path.
+[package]
+name = "aven-solver-wasm"
+version = "0.9.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+avenc = { path = "../.." }
+
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"
