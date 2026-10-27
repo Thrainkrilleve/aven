@@ -873,6 +873,25 @@ fn printed_version_matches_cargo_toml_and_the_site_badge() {
     }
 }
 
+// The Tauri desktop shell links avenc by path, so its version must track the
+// workspace just like the binary and the site badges — no stale shell releases.
+#[test]
+fn desktop_shell_version_matches_workspace() {
+    let version = env!("CARGO_PKG_VERSION");
+    let cargo = std::fs::read_to_string("app/aven-orchestrator/src-tauri/Cargo.toml")
+        .expect("shell Cargo.toml");
+    assert!(
+        cargo.contains(&format!("version = \"{version}\"")),
+        "app/aven-orchestrator/src-tauri/Cargo.toml is not version {version}"
+    );
+    let html = std::fs::read_to_string("app/aven-orchestrator/dist/index.html")
+        .expect("shell dist/index.html");
+    assert!(
+        html.contains(&format!("<span class=\"version-pill\">v{version}</span>")),
+        "shell version-pill is not v{version}"
+    );
+}
+
 // STANDARDS.md §2.1: non-finite values are rejected, never reported as results
 #[test]
 fn standards_non_finite_results_are_rejected() {

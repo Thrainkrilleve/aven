@@ -252,13 +252,12 @@ aven/
 ├── evaluations/                            # Live-data harnesses, logs and reports
 ├── verify/                                 # Checks against independent references
 ├── benchmarks/                             # Performance benchmarks & RHEL harnesses
-├── web/                                    # avenc.dev site, playground and package index
+├── web/                                    # avenc.dev site and live solver demo (WASM)
 ├── aeric/                                  # AERIC C runtime for edge deployment
 ├── app/                                    # Desktop orchestrator UI (Tauri v2)
 ├── k8s/                                    # Kubernetes controller and manifests
 ├── editors/vscode/                         # VS Code syntax highlighting
-├── scripts/                                # CI and documentation checks
-└── archive/                                # Earlier Python prototypes
+└── scripts/                                # CI and documentation checks
 ```
 
 ---
