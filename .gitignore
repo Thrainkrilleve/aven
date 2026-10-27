@@ -51,3 +51,4 @@ node_modules/
 # Transient verification harness output
 verify/failures/
 verify/nowcast_results.jsonl
+.wrangler/
