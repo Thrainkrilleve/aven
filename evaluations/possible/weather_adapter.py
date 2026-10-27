@@ -67,7 +67,10 @@ def iso_ms(ts):
 
 def nws_stations(lat, lon):
     pts = get_json(f"https://api.weather.gov/points/{lat:.4f},{lon:.4f}")
-    feats = get_json(pts["properties"]["observationStations"])["features"]
+    stations_url = pts["properties"].get("observationStations")
+    if not stations_url:
+        raise RuntimeError(f"NWS lists no observation stations for {lat:.3f},{lon:.3f} (outside its land coverage)")
+    feats = get_json(stations_url)["features"]
     out = []
     for f in feats:
         slon, slat = f["geometry"]["coordinates"][:2]
@@ -135,7 +138,8 @@ def triangle(site_lat, site_lon, obs):
 # ---------------------------------------------------------------------------
 
 def metar_station_pressure(station):
-    data = get_json(f"https://aviationweather.gov/api/data/metar?ids={station['id']}&format=json")
+    body = get(f"https://aviationweather.gov/api/data/metar?ids={station['id']}&format=json")
+    data = json.loads(body) if body.strip() else None  # empty reply: not a METAR station
     if not data or data[0].get("altim") is None:
         return None
     altim = float(data[0]["altim"])  # hPa
@@ -252,17 +256,23 @@ def main():
         obs = [o for o in obs if now_ms - o["timestamp_ms"] <= FRESH_MS]
         if not obs:
             raise RuntimeError("no NWS station near the site has reported in the last 75 minutes")
-        primary = next(o for o in obs if None not in (o["temp_c"], o["dewpoint_c"], o["rh"]) and "u" in o)
+        complete = [o for o in obs if None not in (o["temp_c"], o["dewpoint_c"], o["rh"]) and "u" in o]
         tri, pts = triangle(lat, lon, obs)
 
-        if primary["pressure_pa"] is not None:
-            pressure_hpa, pressure_src = primary["pressure_pa"] / 100.0, "nws_station_pressure"
-            elev = primary["elev_m"] or 0.0
-        else:
-            res = metar_station_pressure(primary)
-            if res is None:
-                raise RuntimeError(f"no pressure for {primary['id']} from NWS or METAR")
-            (pressure_hpa, elev), pressure_src = res, "metar_altimeter"
+        # Primary station: the nearest complete report with a pressure, from NWS or else METAR
+        primary = None
+        for o in complete:
+            if o["pressure_pa"] is not None:
+                primary, pressure_hpa, elev = o, o["pressure_pa"] / 100.0, o["elev_m"] or 0.0
+                pressure_src = "nws_station_pressure"
+                break
+            res = metar_station_pressure(o)
+            if res is not None:
+                primary, (pressure_hpa, elev), pressure_src = o, res, "metar_altimeter"
+                break
+        if primary is None:
+            raise RuntimeError("no recent NWS station near the site reports temperature, dewpoint, "
+                               "humidity, wind and a pressure (NWS or METAR)")
 
         fb = fb_winds(lat, lon, elev)
         site_dbz, radar_ms = radar_dbz(lat, lon)
