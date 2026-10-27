@@ -80,8 +80,8 @@ async function handleApi(request: Request, env: Env, pathname: string): Promise<
 
       const body = method === "HEAD" ? null : JSON.stringify({
         version: env.AVEN_VERSION,
-        packages_indexed: pkgCount?.count || 4,
-        models_shared: modelCount?.count || 2,
+        packages_indexed: pkgCount?.count || 5,
+        models_shared: modelCount?.count || 3,
         total_solves_logged: (benchStats?.solves || 0) + 1720,
         median_latency_us: benchStats?.avg_latency ? Math.round(benchStats.avg_latency) : 10.1,
         status: "healthy",

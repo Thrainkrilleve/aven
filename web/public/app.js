@@ -129,6 +129,41 @@ const MODELS = {
       { name: "Sharpe Ratio", unit: "ratio", index: 3, decimals: 4 },
       { name: "Total Weight Sum", unit: "1.0", index: 5, decimals: 4 },
     ]
+  },
+
+  openplc: {
+    title: "OpenPLC Manufacturing Line & Supervisory Safety",
+    file: "openplc",
+    code: `relation OpenPLCSupervisor {
+    // PLC Cycle Scan Time & Cabinet Thermal Dissipation
+    scan_ms        = 7.5 + (cpu_load_pct * 0.04) + (io_points * 0.08)
+    power_w        = 120.0 + (io_points * 2.8) + (cpu_load_pct * 0.75)
+    temp_c         = 25.0 + (power_w * 0.085)
+    
+    // Production Line Throughput & Defect Yield Invariants
+    throughput_pph = target_rate - (scan_ms * 1.85)
+    quality_pct    = 99.9 - (scan_ms * 0.065) - ((temp_c - 25.0) * 0.04)
+    
+    // Invariant Bounds: scan_ms <= 18.0 ms, temp_c <= 55.0 °C
+}`,
+    inputs: [
+      { id: 'io', name: 'Active I/O Points', min: 8, max: 64, step: 2, val: 28 },
+      { id: 'cpu', name: 'PLC CPU Load (%)', min: 10, max: 95, step: 5, val: 35 },
+      { id: 'rate', name: 'Target Rate (parts/h)', min: 100, max: 250, step: 5, val: 180 },
+    ],
+    // Sorted input vector mapping for WASM: [cpu_load_pct, io_points, target_rate]
+    getInputsVector: (state) => [
+      state.cpu,
+      state.io,
+      state.rate
+    ],
+    outputsMeta: [
+      { name: "Scan Cycle Time", unit: "ms", index: 0, decimals: 2 },
+      { name: "Cabinet Power", unit: "W", index: 1, decimals: 1 },
+      { name: "Enclosure Temp", unit: "°C", index: 2, decimals: 1 },
+      { name: "Line Throughput", unit: "parts/h", index: 3, decimals: 1 },
+      { name: "Quality Yield", unit: "%", index: 4, decimals: 2 },
+    ]
   }
 };
 
