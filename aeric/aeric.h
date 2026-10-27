@@ -123,4 +123,12 @@ const double *AERIC_Setpoints(const aeric_runtime_t *rt);
  * Without the key the digest cannot be forged or recomputed. */
 void AERIC_Seal(aeric_runtime_t *rt, uint8_t out_digest[32]);
 
+/* One-shot SHA-256 and HMAC-SHA256 (the same primitives the seal uses), exposed
+ * so an edge daemon can emit a host-verifiable ledger (chain hash + signatures)
+ * in the Rust ledger's format. `out` is 32 bytes. HMAC matches hmac_sha256_hex
+ * (key > 64 bytes is SHA-256'd, then zero-padded to the 64-byte block). */
+void AERIC_SHA256(const uint8_t *data, size_t len, uint8_t out[32]);
+void AERIC_HMAC_SHA256(const uint8_t *key, size_t key_len,
+                       const uint8_t *msg, size_t msg_len, uint8_t out[32]);
+
 #endif /* AERIC_H */

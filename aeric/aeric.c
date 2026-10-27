@@ -271,3 +271,24 @@ void AERIC_Seal(aeric_runtime_t *rt, uint8_t out_digest[32]) {
     sha_update(&outer, inner, 32);
     sha_final_snapshot(&outer, out_digest);
 }
+
+void AERIC_SHA256(const uint8_t *data, size_t len, uint8_t out[32]) {
+    aeric_sha256_t s;
+    sha_init(&s);
+    sha_update(&s, data, len);
+    sha_final_snapshot(&s, out);
+}
+
+void AERIC_HMAC_SHA256(const uint8_t *key, size_t key_len,
+                       const uint8_t *msg, size_t msg_len, uint8_t out[32]) {
+    uint8_t kb[64];
+    memset(kb, 0, sizeof kb);
+    if (key_len > 64) { uint8_t kd[32]; AERIC_SHA256(key, key_len, kd); memcpy(kb, kd, 32); }
+    else memcpy(kb, key, key_len);
+    uint8_t ip[64], op[64];
+    for (int i = 0; i < 64; ++i) { ip[i] = (uint8_t)(kb[i] ^ 0x36); op[i] = (uint8_t)(kb[i] ^ 0x5c); }
+    aeric_sha256_t s; sha_init(&s); sha_update(&s, ip, 64); sha_update(&s, msg, msg_len);
+    uint8_t inner[32]; sha_final_snapshot(&s, inner);
+    aeric_sha256_t o; sha_init(&o); sha_update(&o, op, 64); sha_update(&o, inner, 32);
+    sha_final_snapshot(&o, out);
+}

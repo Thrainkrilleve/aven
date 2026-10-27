@@ -126,38 +126,46 @@ return-valued rejection (see `aven_shim.c`), not as a process abort.
 
 Turns the library into a standalone backend: a config-driven, fixed-rate control
 loop that pulls sensor frames over TCP, pushes setpoints back, drops to HOLD on a
-missed deadline or lost peer, and appends a hash-chained, HMAC-sealed ledger to
-disk. The AERIC core stays transport-free; the daemon is the edge wiring around it.
+missed deadline or lost peer, and appends a ledger to disk **in the Rust ledger's
+own JSONL format** — so the host's `avenc verify-ledger` validates an edge run
+unmodified. The AERIC core stays transport-free; the daemon is the edge wiring.
 
 | File | Role |
 |------|------|
-| `aeric_daemon.c` | config parse + timed loop + TCP transport + ledger-to-disk |
+| `aeric_daemon.c` | config parse + timed loop + TCP transport + host-format ledger |
 | `daemon.aer` | runtime config (`key = value`, `#` comments) |
 | `daemon_peer.py` | test peer: happy-path / deadline-miss / disconnect |
-| `verify_ledger.py` | independent ledger verifier (FNV chain + HMAC seal + tamper test) |
 
 **Transport** (length-prefixed TCP, little-endian): peer → daemon sends
 `u32 len` + `n_inputs` float64 (sensors); daemon → peer replies `u32 len` +
 `n_outputs` float64 (setpoints), one exchange per live tick. A tick with no
 sensor frame within `deadline_ms`, or a lost peer, is a fault → HOLD (no reply).
 
+**Ledger.** Each setpoint is emitted as a fact in the exact format of the Rust
+`Ledger::to_jsonl` (SHA-256 chain over the canonical `\x1f`-joined form from a
+64-zero genesis, per-fact HMAC signature, closing `{"seal": true, ...}` line).
+The daemon reaches the SHA-256/HMAC primitives through `AERIC_SHA256` /
+`AERIC_HMAC_SHA256` exposed by the core. Verify with the host tool:
+```
+avenc verify-ledger aeric_ledger.jsonl --key <key>
+```
+
 **Run the demo** (MSVC shown; gcc/clang use `-lws2_32 -lwinmm`):
 ```
 cl /O2 aeric_daemon.c aeric.c aven_shim.c model_server_capacity.c /Fe:aericd.exe
-aericd.exe daemon.aer           # terminal 1
-python daemon_peer.py 5555 8 5  # terminal 2
-python verify_ledger.py aeric_ledger.jsonl aven-aeric-demo-key-v1
+aericd.exe daemon.aer                                   # terminal 1
+python daemon_peer.py 5555 8 5                           # terminal 2
+avenc verify-ledger aeric_ledger.jsonl --key aven-aeric-demo-key-v1
 ```
 
 **Verified** (Ryzen 7 9800X3D, 50 Hz, `max_ticks=120`): the peer streams, pauses
 250 ms (→ HOLD), resumes, disconnects (→ HOLD). The daemon records 120 ticks
 (56 live / 64 hold), max jitter ~17 ms across connect/pause transitions (~1.7 ms
-headless). The ledger independently verifies: FNV chain intact, HMAC seal valid,
-a flipped setpoint bit is **detected**, and the wrong key is **rejected**. Builds
-clean at `-Wall -Wextra -Wpedantic` on MSVC, gcc 14.2, and clang 19.1.
+headless). `avenc verify-ledger` reports **"Ledger OK: 600 facts, chain intact,
+every signature valid"**; the wrong key and a tampered `value_bits` are both
+**rejected**. Builds clean at `-Wall -Wextra -Wpedantic` on MSVC, gcc 14.2, and
+clang 19.1; a gcc-built daemon's ledger verifies identically.
 
 **Honest limits.** Jitter is bounded by `deadline_ms`, not sub-ms — true
-worst-case/RT timing (SCHED_FIFO, busy-spin) is the Level-2/3 track. The on-disk
-ledger is AERIC-native JSONL verified by `verify_ledger.py`; making it pass
-`avenc verify-ledger` (the Rust SHA-256/canonical-JSON format) is the separate
-host-interop gate. Single client, one transport (TCP) — more drivers are Level-2.
+worst-case/RT timing (SCHED_FIFO, busy-spin) is the Level-2/3 track. Single
+client, one transport (TCP) — more drivers (Modbus/MQTT/OPC-UA/CAN) are Level-2.

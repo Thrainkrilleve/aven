@@ -149,15 +149,38 @@ static int write_frame(sock_t s, const double *outb, size_t n_out){
     return send_all(s,outb,len);
 }
 
-/* ---------------- ledger line (JSONL) -------------------------------------- */
-static void ledger_line(FILE *lf, uint64_t tick, int status, uint64_t prev, uint64_t hash,
-                        const double *sp, size_t n){
-    fprintf(lf,"{\"tick\": %llu, \"status\": %d, \"prev\": \"%016llx\", \"hash\": \"%016llx\", \"setpoints\": [",
-            (unsigned long long)tick,status,(unsigned long long)prev,(unsigned long long)hash);
-    for(size_t i=0;i<n;i++){ if(sp[i]==sp[i]) fprintf(lf,"%.17g",sp[i]); else fprintf(lf,"null"); if(i+1<n)fputc(',',lf); }
-    fprintf(lf,"], \"bits\": [");
-    for(size_t i=0;i<n;i++){ uint64_t u; memcpy(&u,&sp[i],8); fprintf(lf,"\"%016llx\"",(unsigned long long)u); if(i+1<n)fputc(',',lf); }
-    fprintf(lf,"]}\n"); fflush(lf);
+/* ---------------- host-verifiable ledger (Rust ledger JSONL format) ---------
+ * One fact per setpoint, chained with SHA-256 over the canonical form
+ *   seq \x1f tick \x1f kind \x1f name \x1f value_bits:016x \x1f causes \x1f origin \x1f meta
+ * hashed as SHA256(prev_hex \x1d canonical); each fact and the closing seal are
+ * HMAC-signed. Verifiable by `avenc verify-ledger <file> --key <key>`. */
+static void hex32(const uint8_t *d, char *out){
+    static const char *H="0123456789abcdef";
+    for(int i=0;i<32;i++){ out[2*i]=H[d[i]>>4]; out[2*i+1]=H[d[i]&15]; }
+    out[64]=0;
+}
+static void write_fact(FILE *lf, const char *key, size_t keylen, char prev[65],
+                       uint64_t *seq, uint64_t tick, const char *name, double val){
+    (*seq)++;
+    uint64_t bits; memcpy(&bits,&val,8);
+    char canon[600];
+    int cn=snprintf(canon,sizeof canon,"%llu\x1f%llu\x1f%s\x1f%s\x1f%016llx\x1f\x1f%s\x1f%s",
+        (unsigned long long)*seq,(unsigned long long)tick,"setpoint",name,
+        (unsigned long long)bits,"aeric","-");
+    uint8_t msg[800]; size_t ml=0;
+    memcpy(msg,prev,64); ml=64; msg[ml++]=0x1d; memcpy(msg+ml,canon,(size_t)cn); ml+=(size_t)cn;
+    uint8_t h[32]; AERIC_SHA256(msg,ml,h); char hhex[65]; hex32(h,hhex);
+    uint8_t sg[32]; AERIC_HMAC_SHA256((const uint8_t*)key,keylen,(const uint8_t*)hhex,64,sg);
+    char sghex[65]; hex32(sg,sghex);
+    fprintf(lf,"{\"seq\": %llu, \"tick\": %llu, \"kind\": \"setpoint\", \"name\": \"%s\", ",
+            (unsigned long long)*seq,(unsigned long long)tick,name);
+    if(val==val && val-val==0.0) fprintf(lf,"\"value\": %.17g, ",val);
+    else fprintf(lf,"\"value\": null, ");
+    fprintf(lf,"\"value_bits\": \"%016llx\", \"causes\": [], \"origin\": \"aeric\", \"metadata\": null, "
+               "\"prev\": \"%s\", \"hash\": \"%s\", \"sig\": \"%s\"}\n",
+            (unsigned long long)bits,prev,hhex,sghex);
+    fflush(lf);
+    memcpy(prev,hhex,65);
 }
 
 int main(int argc, char **argv){
@@ -190,9 +213,10 @@ int main(int argc, char **argv){
     double dummy=0.0, next=now_s(), max_jit=0.0, last=next;
     uint64_t tick=0; unsigned live=0, held=0;
     sock_t cli=BAD_SOCK;
+    char prev[65]; memset(prev,'0',64); prev[64]=0;   /* ledger chain head = genesis */
+    uint64_t seq=0;
 
     while(cfg.max_ticks==0 || tick<cfg.max_ticks){
-        uint64_t prevh=rt.last_tick_hash;
         int status;
 
         if(cli==BAD_SOCK){
@@ -215,18 +239,21 @@ int main(int argc, char **argv){
             }
         }
         tick++; if(status==AERIC_OK) live++; else held++;
-        ledger_line(lf,tick,status,prevh,rt.last_tick_hash,AERIC_Setpoints(&rt),cfg.n_outputs);
+        { const double *sp=AERIC_Setpoints(&rt); char nm[32];
+          for(size_t i=0;i<cfg.n_outputs;i++){ snprintf(nm,sizeof nm,"sp%zu",i); write_fact(lf,key,strlen(key),prev,&seq,tick,nm,sp[i]); } }
 
         double t=now_s(); double jit=(t-last)-period; if(tick>1 && jit>max_jit) max_jit=jit; last=t;
         next+=period; sleep_s(next-now_s());
     }
 
-    /* closing HMAC seal */
-    uint8_t digest[32]; AERIC_Seal(&rt,digest);
-    fprintf(lf,"{\"seal\": true, \"ticks\": %llu, \"head\": \"%016llx\", \"sig\": \"",
-            (unsigned long long)tick,(unsigned long long)rt.last_tick_hash);
-    for(int i=0;i<32;i++) fprintf(lf,"%02x",digest[i]);
-    fprintf(lf,"\"}\n"); fclose(lf);
+    /* closing seal: {"seal": true, "facts": N, "head": "<hash>",
+     *                "sig": hmac(key, "seal\x1d" N "\x1d" head)} */
+    { char sm[160]; int sl=snprintf(sm,sizeof sm,"seal\x1d%llu\x1d%s",(unsigned long long)seq,prev);
+      uint8_t sg[32]; AERIC_HMAC_SHA256((const uint8_t*)key,strlen(key),(const uint8_t*)sm,(size_t)sl,sg);
+      char sghex[65]; hex32(sg,sghex);
+      fprintf(lf,"{\"seal\": true, \"facts\": %llu, \"head\": \"%s\", \"sig\": \"%s\"}\n",
+              (unsigned long long)seq,prev,sghex); }
+    fclose(lf);
 
     if(cli!=BAD_SOCK) closesock(cli);
     closesock(srv);

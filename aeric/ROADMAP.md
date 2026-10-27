@@ -120,16 +120,16 @@ real transport.
       over the socket; disconnect → HOLD.
 - [x] Deadline-miss injection (peer pauses) → HOLD, recorded in the ledger.
       *(A distinct fault taxonomy — sensor vs deadline vs transport — is Level 2.)*
-- [ ] A daemon-produced ledger passes **`avenc verify-ledger`** unmodified.
-      *(Still open — AERIC emits native JSONL verified by `verify_ledger.py`;
-      matching the Rust SHA-256/canonical-JSON format is the host-interop gate.)*
+- [x] A daemon-produced ledger passes **`avenc verify-ledger`** unmodified
+      (600 facts, chain intact, every signature valid; wrong key / tampered
+      `value_bits` both rejected; a gcc-built daemon's ledger verifies identically).
 - [~] Jitter: max measured (~17 ms across transitions, ~1.7 ms headless, 50 Hz);
       full p50/p99 over ≥10⁵ ticks and sub-ms RT still pending (Level 2/3).
 
-**Status: substantially met** — the daemon runs, holds rate, degrades to HOLD on
-deadline-miss/disconnect, and writes an independently-verifiable sealed ledger
-(chain + HMAC pass, tampering detected, wrong key rejected), clean on MSVC/gcc/clang.
-Remaining: `avenc verify-ledger` interop and RT-grade jitter.
+**Status: met** — the daemon runs, holds rate, degrades to HOLD on
+deadline-miss/disconnect, and writes a host-verifiable sealed ledger that the Rust
+`avenc verify-ledger` accepts (and rejects when tampered), clean on MSVC/gcc/clang.
+Remaining: only RT-grade (sub-ms) jitter, which is the Level 2/3 track.
 
 **Effort:** L · **Depends on:** Level 0, Toolchain-A (nice-to-have), Verif-ledger.
 
@@ -254,7 +254,7 @@ evidence.
 | Worst-case tick latency (RT, sub-ms) | ⬜ unverified | needs SCHED_FIFO/busy-spin (Level 2/3) |
 | Clean under gcc/clang `-Wpedantic` | ✅ verified | gcc 14.2 + clang 19.1, zero diagnostics (portable `AVEN_EXPORT`) |
 | Forgery-resistant seal (AERIC) | ✅ verified | HMAC-SHA256 keyed; matches Python `hmac` ref + Rust `hmac_sha256_hex` construction; key-dependent |
-| Host verifies edge-signed ledger (JSONL interop) | ⬜ unverified | needs ledger-to-disk in Rust JSONL format (Level-1) |
+| Host verifies edge-signed ledger (JSONL interop) | ✅ verified | `avenc verify-ledger` accepts the daemon ledger (600 facts, all sigs valid); wrong key / tamper rejected |
 | "MISRA-grade" | ⬜ **unfounded** | static-analysis track |
 | SHM end-to-end cycle time | ⬜ unverified | measure on real loop (not guessed) |
 
