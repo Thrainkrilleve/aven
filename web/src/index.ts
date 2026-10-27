@@ -70,7 +70,7 @@ async function handleApi(request: Request, env: Env, pathname: string): Promise<
   }
 
   // GET /api/v1/stats
-  if (pathname === "/api/v1/stats" && method === "GET") {
+  if (pathname === "/api/v1/stats" && (method === "GET" || method === "HEAD")) {
     try {
       const pkgCount = await env.DB.prepare("SELECT COUNT(*) as count FROM packages").first<{ count: number }>();
       const modelCount = await env.DB.prepare("SELECT COUNT(*) as count FROM shared_models").first<{ count: number }>();
@@ -78,24 +78,23 @@ async function handleApi(request: Request, env: Env, pathname: string): Promise<
         "SELECT COUNT(*) as solves, AVG(solve_time_us) as avg_latency FROM telemetry_benchmarks"
       ).first<{ solves: number; avg_latency: number }>();
 
-      return new Response(
-        JSON.stringify({
-          version: env.AVEN_VERSION,
-          packages_indexed: pkgCount?.count || 4,
-          models_shared: modelCount?.count || 2,
-          total_solves_logged: (benchStats?.solves || 0) + 1720,
-          median_latency_us: benchStats?.avg_latency ? Math.round(benchStats.avg_latency) : 10.1,
-          status: "healthy",
-        }),
-        { headers: jsonHeaders }
-      );
+      const body = method === "HEAD" ? null : JSON.stringify({
+        version: env.AVEN_VERSION,
+        packages_indexed: pkgCount?.count || 4,
+        models_shared: modelCount?.count || 2,
+        total_solves_logged: (benchStats?.solves || 0) + 1720,
+        median_latency_us: benchStats?.avg_latency ? Math.round(benchStats.avg_latency) : 10.1,
+        status: "healthy",
+      });
+
+      return new Response(body, { headers: jsonHeaders });
     } catch (err: any) {
       return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: jsonHeaders });
     }
   }
 
   // GET /api/v1/packages
-  if (pathname === "/api/v1/packages" && method === "GET") {
+  if (pathname === "/api/v1/packages" && (method === "GET" || method === "HEAD")) {
     const url = new URL(request.url);
     const search = url.searchParams.get("q") || "";
     const limit = Math.min(parseInt(url.searchParams.get("limit") || "50"), 100);
@@ -111,14 +110,15 @@ async function handleApi(request: Request, env: Env, pathname: string): Promise<
       params.push(limit);
 
       const { results } = await env.DB.prepare(query).bind(...params).all<PackageRecord>();
-      return new Response(JSON.stringify({ packages: results }), { headers: jsonHeaders });
+      const body = method === "HEAD" ? null : JSON.stringify({ packages: results });
+      return new Response(body, { headers: jsonHeaders });
     } catch (err: any) {
       return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: jsonHeaders });
     }
   }
 
   // GET /api/v1/packages/:name
-  if (pathname.startsWith("/api/v1/packages/") && method === "GET") {
+  if (pathname.startsWith("/api/v1/packages/") && (method === "GET" || method === "HEAD")) {
     const pkgName = pathname.slice("/api/v1/packages/".length).trim();
     try {
       const { results } = await env.DB.prepare(
@@ -129,7 +129,8 @@ async function handleApi(request: Request, env: Env, pathname: string): Promise<
         return new Response(JSON.stringify({ error: `Package '${pkgName}' not found` }), { status: 404, headers: jsonHeaders });
       }
 
-      return new Response(JSON.stringify({ name: pkgName, versions: results }), { headers: jsonHeaders });
+      const body = method === "HEAD" ? null : JSON.stringify({ name: pkgName, versions: results });
+      return new Response(body, { headers: jsonHeaders });
     } catch (err: any) {
       return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: jsonHeaders });
     }
