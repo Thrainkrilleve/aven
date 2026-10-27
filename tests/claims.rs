@@ -895,3 +895,84 @@ fn standards_non_finite_results_are_rejected() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// ROADMAP "proof in the code": the C emitted from a model must compute the same
+// answers as the solver. This compiles `avenc emit-c` output with a real C
+// compiler and compares every printed output against `avenc run`. It skips (does
+// not fail) where no C compiler is installed — like the node-dependent tests —
+// and CI pins a toolchain so it runs there as a hard gate.
+// ---------------------------------------------------------------------------
+#[test]
+fn emitted_c_output_matches_avenc_run() {
+    let cc = ["cc", "gcc", "clang"].into_iter().find(|c| {
+        Command::new(c)
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    });
+    let Some(cc) = cc else {
+        eprintln!("skipping emitted_c_output_matches_avenc_run: no C compiler (cc/gcc/clang)");
+        return;
+    };
+
+    // Ground truth: the solver running the omnidirectional relation.
+    let run = avenc(&["run", "examples/server_capacity.aven"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    let env = settled(&run);
+
+    // Artifact under test: the solver-free C the compiler emits for the model.
+    let emit = avenc(&["emit-c", "examples/server_capacity.aven"]);
+    assert_eq!(emit.code, 0, "emit-c failed: {}", emit.stderr);
+
+    let dir = std::env::temp_dir().join(format!("aven_emitc_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let c_path = dir.join("model.c");
+    let exe_path = dir.join(format!("model{}", std::env::consts::EXE_SUFFIX));
+    std::fs::write(&c_path, &emit.stdout).expect("write emitted C");
+
+    let compile = Command::new(cc)
+        .arg(&c_path)
+        .arg("-o")
+        .arg(&exe_path)
+        .arg("-lm")
+        .output()
+        .expect("invoke C compiler");
+    assert!(
+        compile.status.success(),
+        "C compile failed ({cc}): {}",
+        String::from_utf8_lossy(&compile.stderr)
+    );
+
+    let prog = Command::new(&exe_path)
+        .output()
+        .expect("run compiled model");
+    assert!(prog.status.success(), "compiled model exited non-zero");
+    let stdout = String::from_utf8_lossy(&prog.stdout);
+
+    // Every "name = value" the compiled C printed must match the solver's value.
+    let mut checked = 0;
+    for line in stdout.lines() {
+        if let Some((k, v)) = line.split_once('=') {
+            let (k, v) = (k.trim(), v.trim());
+            if let Ok(c_val) = v.parse::<f64>() {
+                let solved = *env
+                    .get(k)
+                    .unwrap_or_else(|| panic!("emit-c printed '{k}' absent from `run`: {env:?}"));
+                let tol = 1e-6 * solved.abs().max(1.0);
+                assert!(
+                    (c_val - solved).abs() <= tol,
+                    "emit-c vs run disagree on {k}: C={c_val}, run={solved}"
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(
+        checked >= 5,
+        "expected >=5 compared outputs (the model's derived variables), got {checked}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

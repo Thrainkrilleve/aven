@@ -1437,6 +1437,7 @@ impl Evaluator for ShmEvaluator {
 }
 
 #[cfg(windows)]
+#[allow(clippy::upper_case_acronyms)] // HMODULE / FARPROC are the Win32 type names
 mod os_ffi {
     use std::ffi::c_void;
     pub type HMODULE = *mut c_void;

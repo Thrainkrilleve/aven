@@ -3,7 +3,7 @@
 // output ordering, SHA-256 model-identity hashing, domain finiteness guards, and CLI emission.
 
 use avenc::ast::{AvenModule, BlockKind};
-use avenc::codegen_c::CTranspiler;
+use avenc::codegen_c::{CTranspiler, CodegenOptions};
 use avenc::diff;
 use avenc::lexer::Lexer;
 use avenc::parser::Parser;
@@ -385,4 +385,55 @@ fn test_aeric_shim_cli_out_dir_emission() {
 
     // Clean up temporary test directory
     let _ = fs::remove_dir_all(&temp_dir);
+}
+
+// ---------------------------------------------------------------------------
+// Drift gate: a `forward` block must not diverge from the `relation` it mirrors.
+//
+// examples/server_capacity.aven ships BOTH an omnidirectional `relation
+// WorkerScaling` and a direction-pinned `forward ProductionProfile` with the
+// same equations. The forward block is what `emit-c` compiles, but the solver
+// runs the relation — and nothing stops the two hand-kept copies drifting apart.
+// This gate makes drift a build failure: the C the compiler DERIVES from the
+// relation (topo-sorting the equations itself) must be byte-identical to the C
+// it emits from the forward block, once the block's own name is normalized away.
+// ---------------------------------------------------------------------------
+#[test]
+fn forward_block_does_not_drift_from_relation() {
+    let src = fs::read_to_string("examples/server_capacity.aven").expect("read server_capacity");
+    let module = parse_module_from_str(&src, "server_capacity");
+    let relation = module
+        .blocks
+        .iter()
+        .find(|b| b.kind == BlockKind::Relation)
+        .expect("server_capacity has a relation block");
+    let forward = module
+        .blocks
+        .iter()
+        .find(|b| b.kind == BlockKind::Forward)
+        .expect("server_capacity has a forward block");
+
+    // Emit each as a bare library function (no demo main → no dependence on the
+    // solve bindings). topo_sort derives the firing order from the equations, so
+    // the comparison is purely about equation content, not source ordering.
+    let opts = CodegenOptions {
+        no_main: true,
+        ..Default::default()
+    };
+    let empty = HashMap::new();
+    let c_from_relation = CTranspiler::transpile_block_with_options(relation, &empty, &opts)
+        .expect("compiler derives C from the relation");
+    let c_from_forward = CTranspiler::transpile_block_with_options(forward, &empty, &opts)
+        .expect("compiler emits C from the forward block");
+
+    // The only legitimate difference is the function name carrying the block name.
+    let norm_relation = c_from_relation.replace(relation.name.as_str(), "BLOCK");
+    let norm_forward = c_from_forward.replace(forward.name.as_str(), "BLOCK");
+    assert_eq!(
+        norm_relation, norm_forward,
+        "forward block '{}' has drifted from relation '{}': emit-c derives different C \
+         from each. Re-sync the forward block with the relation, or delete it and let \
+         emit-c derive the direction from the relation.",
+        forward.name, relation.name
+    );
 }
