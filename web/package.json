@@ -1,5 +1,6 @@
 {
   "name": "avenc-web",
+  "type": "module",
   "version": "1.0.0",
   "description": "Scientific facing website, WebAssembly playground, and D1 package registry for Aven",
   "main": "src/index.ts",

@@ -287,6 +287,8 @@ Run in Node.js with zero dependencies:
 const fs = require('fs');
 const wasmBuffer = fs.readFileSync('governor.wasm');
 
+// A model that uses exp, ln, trig or a fractional ^ also needs the host math imports:
+// WebAssembly.instantiate(wasmBuffer, { math: { exp: Math.exp, ln: Math.log, sin: Math.sin, cos: Math.cos, tan: Math.tan, pow: Math.pow } })
 WebAssembly.instantiate(wasmBuffer).then(({ instance }) => {
     // Direct execution export (parameters sorted alphabetically):
     // ThrottleGovernor(base_throttle, current_rpm, kp, target_rpm)

@@ -108,7 +108,8 @@ Units are checked for consistency only; `avenc run` does not rescale numeric val
 - Dual-ABI compliance:
   1. **Direct Calculation**: Exported function taking numeric inputs as parameters and returning settled outputs directly on the WebAssembly operand stack.
   2. **Memory-Mapped Solver**: Standard `(export "aven_solve") (param $in_ptr i32) (param $out_ptr i32) (result i32)` reading IEEE-754 `f64` values from linear memory and returning status code (0 for success).
-- WebAssembly 1.0 has no power instruction: `x ^ n` is lowered to exact multiplication for integer constants `|n| <= 64`, and to `f64.sqrt` for `n = 0.5`. Any other exponent is a compile error, never an approximation.
+- `floor`, `ceil`, `round` and `sign` compile to functions inside the module that match the evaluator exactly, including the 1e-9 snap of `floor` and `ceil` and rounding halves away from zero. `sqrt` and `abs` are single instructions.
+- WebAssembly 1.0 has no power, exponential, logarithm or trigonometric instruction. `x ^ n` compiles to multiplication for integer constants `|n| <= 64` and to `f64.sqrt` for `n = 0.5`; these need nothing from the host, but integer powers above 2 can differ from `avenc run` in the last bit (repeated multiplication rounds at each step). `exp`, `ln`/`log`, `sin`, `cos`, `tan` and any other `^` are imported from the host as module `"math"` (`exp`, `ln`, `sin`, `cos`, `tan`, `pow`); a module imports only the ones it uses, and one that uses none imports nothing. Their results depend on the host's math library and agree with `avenc run` to within a few units in the last place, not bit for bit. `web/public/aven_math.js` is the JavaScript import object.
 
 ---
 

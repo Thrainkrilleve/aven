@@ -4,6 +4,8 @@
 // in sorted-name order, and writes one f64 per output, in evaluation order. The order
 // for each model is recorded in models/manifest.json by scripts/build-models.mjs.
 
+import { AVEN_HOST_IMPORTS } from "./aven_math.js";
+
 const IN_PTR = 0;
 const OUT_PTR = 1024;
 
@@ -16,7 +18,7 @@ export class AvenWasmEngine {
     if (this.instances.has(model.key)) return;
     const response = await fetch(`/models/${model.key}.wasm`);
     if (!response.ok) throw new Error(`Failed to load model '${model.key}': HTTP ${response.status}`);
-    const { instance } = await WebAssembly.instantiate(await response.arrayBuffer(), {});
+    const { instance } = await WebAssembly.instantiate(await response.arrayBuffer(), AVEN_HOST_IMPORTS);
     this.instances.set(model.key, instance);
   }
 

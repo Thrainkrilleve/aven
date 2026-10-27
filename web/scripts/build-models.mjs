@@ -9,10 +9,12 @@
 // Usage: node scripts/build-models.mjs   (AVENC=/path/to/avenc to override the binary)
 
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { AVEN_HOST_IMPORTS } from "../public/aven_math.js";
 
 const webDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoDir = resolve(webDir, "..");
@@ -23,6 +25,8 @@ const MODELS = [
   { key: "quadcopter", example: "examples/quadcopter_avionics.aven", title: "Quadcopter flight envelope" },
   { key: "server_capacity", example: "examples/server_capacity.aven", title: "Server capacity (Little's Law)" },
   { key: "portfolio", example: "examples/portfolio_rebalancing.aven", title: "Portfolio allocation" },
+  // Not a playground tab: run by the worker's scheduled job and re-run on /weather
+  { key: "weather", example: "examples/weather_nowcast.aven", title: "Weather cell and radar nowcast" },
 ];
 
 const run = (...args) => execFileSync(avenc, args, { cwd: repoDir, encoding: "utf8" });
@@ -37,9 +41,9 @@ function extractBlock(source, keyword, name) {
 function parseAbi(wat) {
   // The first function is the direct-call form: its params are the inputs (sorted)
   // and its locals are the outputs (in evaluation order), matching aven_solve's buffers.
-  const direct = wat.slice(wat.indexOf("(func $"), wat.indexOf("(func (export \"aven_solve\")"));
-  const names = (kind) => [...direct.matchAll(new RegExp(`\\(${kind} \\$(\\w+) f64\\)`, "g"))].map((m) => m[1]);
   const block = wat.match(/\| Block: (\w+)/)[1];
+  const direct = wat.slice(wat.indexOf(`(func $${block} `), wat.indexOf("(func (export \"aven_solve\")"));
+  const names = (kind) => [...direct.matchAll(new RegExp(`\\(${kind} \\$(\\w+) f64\\)`, "g"))].map((m) => m[1]);
   return { block, inputs: names("param"), outputs: names("local") };
 }
 
@@ -52,7 +56,7 @@ function parseDefaults(solveBlock) {
 }
 
 async function runWasm(bytes, inputs) {
-  const { instance } = await WebAssembly.instantiate(bytes, {});
+  const { instance } = await WebAssembly.instantiate(bytes, AVEN_HOST_IMPORTS);
   const mem = instance.exports.memory.buffer;
   new Float64Array(mem, 0, inputs.length).set(inputs);
   instance.exports.aven_solve(0, 1024);
@@ -93,6 +97,7 @@ for (const m of MODELS) {
     title: m.title,
     example: m.example,
     block,
+    sha256: createHash("sha256").update(wasm).digest("hex"),
     source: extractBlock(source, "forward", block),
     inputs: inputs.map((name) => ({ name, default: defaults[name] })),
     outputs,

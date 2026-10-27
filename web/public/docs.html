@@ -26,6 +26,7 @@
       </button>
       <ul class="nav-links" id="nav-links">
         <li><a href="/#playground">Playground</a></li>
+        <li><a href="/weather">Live weather</a></li>
         <li><a href="/docs.html" aria-current="page">Docs</a></li>
         <li><a href="/registry.html">Packages</a></li>
         <li><a href="https://github.com/Thrainkrilleve/aven" rel="noopener">GitHub</a></li>
@@ -337,12 +338,12 @@ cc -O2 capacity.c -lm -o capacity &amp;&amp; ./capacity</pre></div>
           <div class="code"><pre>avenc emit-wasm examples/server_capacity.aven -o capacity.wasm
 avenc emit-wasm examples/server_capacity.aven --wat</pre></div>
           <p>The WebAssembly module exports <code>memory</code>, a function named after the block that takes each input as a parameter, and <code>aven_solve(in_ptr, out_ptr)</code>, which reads inputs as consecutive <code>f64</code> values in alphabetical order of name and writes outputs in evaluation order:</p>
-          <div class="code"><pre>const { instance } = await WebAssembly.instantiate(bytes);
+          <div class="code"><pre>const { instance } = await WebAssembly.instantiate(bytes);  // no imports: server_capacity uses none
 const mem = new Float64Array(instance.exports.memory.buffer);
 mem.set([20, 64, 1.04, 4096, 16, 50000, 4, 0.7], 0);  // inputs, sorted by name
 instance.exports.aven_solve(0, 1024);
 console.log(mem.slice(128, 133));  // raw_workers, allocated_workers, ...</pre></div>
-          <p>WebAssembly has no power instruction, so <code>x ^ n</code> compiles only when <code>n</code> is an integer constant (|n| ≤ 64) or <code>0.5</code>; other exponents are rejected at compile time. The playground on the homepage runs modules produced this way.</p>
+          <p><code>floor</code>, <code>ceil</code>, <code>round</code> and <code>sign</code> compile into the module and match <code>avenc run</code> exactly. WebAssembly has no exponential, logarithm, trigonometric or general power instruction, so a model that uses <code>exp</code>, <code>ln</code>, <code>sin</code>, <code>cos</code>, <code>tan</code> or a <code>^</code> other than an integer constant or <code>0.5</code> imports them from the host as module <code>"math"</code>; pass <a href="/aven_math.js"><code>aven_math.js</code></a> as the import object. Those results come from the host's math library and agree with <code>avenc run</code> to within a few units in the last place. The playground on the homepage and the <a href="/weather">live weather page</a> run modules produced this way.</p>
         </section>
 
         <section id="ledger">

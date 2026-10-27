@@ -154,6 +154,8 @@ Load directly in Node.js or the browser:
 const fs = require('fs');
 const wasmBuffer = fs.readFileSync('thermostat.wasm');
 
+// A model that uses exp, ln, trig or a fractional ^ also needs the host math imports:
+// WebAssembly.instantiate(wasmBuffer, { math: { exp: Math.exp, ln: Math.log, sin: Math.sin, cos: Math.cos, tan: Math.tan, pow: Math.pow } })
 WebAssembly.instantiate(wasmBuffer).then(({ instance }) => {
     // Zero-copy in-memory solve
     console.log("Aven WASM engine loaded successfully");
