@@ -21,3 +21,6 @@ pub mod parser;
 pub mod solver;
 pub mod units;
 pub mod smt;
+pub mod temporal;
+pub mod compaction;
+pub mod debugger;

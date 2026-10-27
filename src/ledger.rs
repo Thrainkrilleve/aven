@@ -83,6 +83,7 @@ pub struct Ledger {
     /// HMAC-SHA256 of each chain hash when the ledger has a signing key
     signatures: Vec<String>,
     key: Option<Vec<u8>>,
+    initial_head: Option<String>,
 }
 
 impl Ledger {
@@ -94,6 +95,19 @@ impl Ledger {
     pub fn with_key(key: &[u8]) -> Self {
         Self {
             key: Some(key.to_vec()),
+            ..Self::default()
+        }
+    }
+
+    /// A ledger with an explicit initial head hash (used for segmented log chaining) and optional signing key.
+    pub fn with_initial_head_and_key(head: &str, key: Option<&[u8]>) -> Self {
+        Self {
+            initial_head: if head == GENESIS_HASH {
+                None
+            } else {
+                Some(head.to_string())
+            },
+            key: key.map(|k| k.to_vec()),
             ..Self::default()
         }
     }
@@ -136,7 +150,11 @@ impl Ledger {
 
     /// Hash covering the whole ledger so far (the genesis hash when empty).
     pub fn head(&self) -> &str {
-        self.chain.last().map(String::as_str).unwrap_or(GENESIS_HASH)
+        self.chain
+            .last()
+            .map(String::as_str)
+            .or(self.initial_head.as_deref())
+            .unwrap_or(GENESIS_HASH)
     }
 
     pub fn is_signed(&self) -> bool {
@@ -145,7 +163,7 @@ impl Ledger {
 
     /// Recomputes the chain (and signatures) from the stored facts.
     pub fn verify(&self) -> Result<(), String> {
-        let mut prev = GENESIS_HASH.to_string();
+        let mut prev = self.initial_head.as_deref().unwrap_or(GENESIS_HASH).to_string();
         for (i, f) in self.facts.iter().enumerate() {
             let h = chain_hash(&prev, f);
             if self.chain.get(i) != Some(&h) {
@@ -169,7 +187,7 @@ impl Ledger {
     /// chain hash and, when signed, its HMAC signature. `value_bits` is the exact f64.
     pub fn to_jsonl(&self) -> String {
         let mut out = String::new();
-        let mut prev = GENESIS_HASH;
+        let mut prev = self.initial_head.as_deref().unwrap_or(GENESIS_HASH);
         for (i, f) in self.facts.iter().enumerate() {
             let meta = match &f.metadata {
                 None => "null".to_string(),
@@ -386,7 +404,7 @@ fn canonical(f: &Fact) -> String {
     )
 }
 
-fn chain_hash(prev: &str, f: &Fact) -> String {
+pub fn chain_hash(prev: &str, f: &Fact) -> String {
     sha256_hex(format!("{}\u{1d}{}", prev, canonical(f)).as_bytes())
 }
 
@@ -678,7 +696,17 @@ pub struct LedgerVerification {
 /// previous line's hash, its hash must match its contents, and when `key` is given every line
 /// must carry a valid signature. Returns the first failure with its 1-based line number.
 pub fn verify_jsonl(text: &str, key: Option<&[u8]>) -> Result<LedgerVerification, String> {
-    let mut prev = GENESIS_HASH.to_string();
+    verify_jsonl_with_head(text, GENESIS_HASH, key)
+}
+
+/// Verifies a JSON Lines audit log starting from an expected initial head hash.
+/// Enables cross-segment cryptographic chain continuity audits.
+pub fn verify_jsonl_with_head(
+    text: &str,
+    initial_head: &str,
+    key: Option<&[u8]>,
+) -> Result<LedgerVerification, String> {
+    let mut prev = initial_head.to_string();
     let mut count = 0;
     let mut sealed = false;
     for (n, line) in text.lines().enumerate() {
@@ -773,3 +801,90 @@ pub fn verify_jsonl(text: &str, key: Option<&[u8]>) -> Result<LedgerVerification
         signed: key.is_some(),
     })
 }
+
+/// Loads and verifies a JSON Lines audit log into an in-memory Ledger.
+pub fn from_jsonl(text: &str, key: Option<&[u8]>) -> Result<Ledger, String> {
+    from_jsonl_with_head(text, GENESIS_HASH, key)
+}
+
+/// Loads and verifies a JSON Lines audit log with a specific initial head hash.
+pub fn from_jsonl_with_head(
+    text: &str,
+    initial_head: &str,
+    key: Option<&[u8]>,
+) -> Result<Ledger, String> {
+    let mut ledger = Ledger::with_initial_head_and_key(initial_head, key);
+    let mut prev = initial_head.to_string();
+    let mut count = 0;
+    let mut sealed = false;
+
+    for (n, line) in text.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let at = |m: String| format!("line {}: {}", n + 1, m);
+        let mut p = JsonParser {
+            s: line.as_bytes(),
+            i: 0,
+        };
+        let Json::Obj(obj) = p.value().map_err(at)? else {
+            return Err(at("not a JSON object".to_string()));
+        };
+        if sealed {
+            return Err(at("content after the closing seal".to_string()));
+        }
+        if matches!(obj.iter().find(|(k, _)| k == "seal"), Some((_, Json::Bool(true)))) {
+            let facts = as_u64(field(&obj, "facts").map_err(at)?).map_err(at)? as usize;
+            let head = as_str(field(&obj, "head").map_err(at)?).map_err(at)?;
+            if facts != count || head != prev {
+                return Err(at(format!(
+                    "seal records {} fact(s) ending at {}… but the log has {} ending at {}…",
+                    facts,
+                    &head[..head.len().min(16)],
+                    count,
+                    &prev[..16]
+                )));
+            }
+            if let Some(k) = key {
+                let msg = format!("seal\u{1d}{}\u{1d}{}", facts, head);
+                match obj.iter().find(|(name, _)| name == "sig").map(|(_, v)| v) {
+                    Some(Json::Str(s)) if *s == hmac_sha256_hex(k, msg.as_bytes()) => {}
+                    _ => return Err(at("the closing seal has an invalid signature".to_string())),
+                }
+            }
+            sealed = true;
+            continue;
+        }
+
+        let fact = fact_from_json(&obj).map_err(at)?;
+        let stored_prev = as_str(field(&obj, "prev").map_err(at)?).map_err(at)?;
+        if stored_prev != prev {
+            return Err(at(format!(
+                "chain broken at fact #{}: it links to {}… but the previous hash is {}…",
+                fact.seq,
+                &stored_prev[..stored_prev.len().min(16)],
+                &prev[..16]
+            )));
+        }
+        let expected = chain_hash(&prev, &fact);
+        let stored = as_str(field(&obj, "hash").map_err(at)?).map_err(at)?;
+        if stored != expected {
+            return Err(at(format!("fact #{} was modified: hash mismatch", fact.seq)));
+        }
+        if let Some(k) = key {
+            match obj.iter().find(|(name, _)| name == "sig").map(|(_, v)| v) {
+                Some(Json::Str(s)) if *s == hmac_sha256_hex(k, expected.as_bytes()) => {}
+                Some(_) => return Err(at(format!("fact #{} has an invalid signature", fact.seq))),
+                None => return Err(at(format!("fact #{} is not signed", fact.seq))),
+            }
+        }
+        prev = expected;
+        count += 1;
+        ledger.append(fact);
+    }
+    if key.is_some() && !sealed {
+        return Err(format!("no closing seal after fact {}", count));
+    }
+    Ok(ledger)
+}
+

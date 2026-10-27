@@ -43,13 +43,13 @@
 
 ---
 
-## Phase 6 — Time Made Rigorous (target: v0.5)
+## Phase 6 — Time Made Rigorous (v0.5 — Completed)
 *Goal: the temporal semantics stop being intuitive and start being specified.*
 
-1. **Signal calculus formalization.** Write down the denotational semantics of `Signal<T>`: retention windows, staleness, `when`-filtering, cross-signal alignment. Publish it — a small paper or long spec chapter. If it can't be formalized, that's a design flaw to fix, not to hide.
-2. **Rewind guarantees, specified.** Exact semantics of the irreversibility boundary: what `commit` means, what rewinding across sinks may and may not do, and the explicit-override protocol.
-3. **Ledger storage & compaction.** Long runs need bounded memory: segment files, fact compression (structural sharing of repeated derivation shapes), snapshotting of settled subgraphs.
-4. **The debugger UI.** `aven debug` — timeline scrubbing, provenance tree rendering, branch diffing. The killer app; incumbents genuinely cannot retrofit this.
+1. **Signal calculus formalization.** Denotational semantics of temporal streams: bounded FIFO retention windows, staleness decay models (Linear, Exponential, Step), discrete rate-of-change ($dv/dt$), moving average, EMA, variance, and cross-signal alignment (`src/temporal.rs`).
+2. **Rewind guarantees, specified.** Exact semantics of the irreversibility boundary: what `committed-effect` means, enforcing commit barrier guards against accidental time-travel rewind without explicit `--force` override.
+3. **Ledger storage & compaction.** Bounded memory via segmented JSONL audit logs (`SegmentedLedgerWriter`), cross-segment cryptographic chain continuity audits (`verify_segmented_directory`), and historical snapshot compaction (`LedgerCompactor`, `avenc compact-ledger`).
+4. **Interactive debugger UI & REPL.** `avenc debug` — timeline scrubbing (`goto`, `step`, `prev`), causal provenance DAG rendering (`why`), counterfactual what-if branching (`what-if`), and timeline diffing (`diff`).
 
 ---
 

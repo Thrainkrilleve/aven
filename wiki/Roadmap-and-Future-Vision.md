@@ -40,10 +40,10 @@ From its inception as an experimental relational solver to a production-grade mu
 - [x] **Safety Case Generation:** Automated compliance documentation for FAA DO-178C (Table A-5 / DO-333) and ISO 26262 ASIL-D functional safety audits (`avenc safety-case`).
 - [x] **High-Resolution RT Timing & Jitter Profiler:** Real-time single-tick WCET latency quantiles (min/p50/p90/p95/p99/p99.9/max) and cycle jitter reporting (`avenc bench --latency-profile`).
 
-### Phase 6: Temporal Rigor, Ledger Compaction & Interactive Debugger
-- [ ] **Signal Calculus Formalization:** Retention windows, staleness decay, and cross-signal temporal alignment.
-- [ ] **Ledger Storage Compaction:** Bounded memory via segmented audit logs and settled subgraph snapshots.
-- [ ] **Interactive Debugger UI (`avenc debug`):** Timeline scrubbing, causal provenance DAG rendering, and rewind inspection.
+### Phase 6: Temporal Rigor, Ledger Compaction & Interactive Debugger (Completed)
+- [x] **Signal Calculus Formalization:** Bounded FIFO retention windows, continuous staleness decay (Linear, Exponential, Step), discrete rate-of-change ($dv/dt$), moving average, EMA, variance, and cross-signal temporal alignment (`src/temporal.rs`).
+- [x] **Ledger Storage Compaction & Segmented Audit Logs:** Segment rotation (`SegmentedLedgerWriter`), cross-segment cryptographic chain verification (`verify_segmented_directory`), and settled historical snapshot compaction (`LedgerCompactor`, `avenc compact-ledger`).
+- [x] **Interactive Time-Travel Debugger (`avenc debug`):** Interactive REPL and headless CLI, timeline scrubbing (`goto`, `step`, `prev`), irreversible commit boundary enforcement, causal provenance graph rendering (`why`), and counterfactual branching with output diffing (`what-if`, `diff`).
 
 ---
 

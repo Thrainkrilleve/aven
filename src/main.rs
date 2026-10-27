@@ -20,6 +20,9 @@ mod parser;
 mod solver;
 mod units;
 mod smt;
+mod temporal;
+mod compaction;
+mod debugger;
 
 use ast::*;
 use codegen_c::CTranspiler;
@@ -32,6 +35,7 @@ use solver::SolverEngine;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
+use std::io;
 use std::process;
 
 const VERSION: &str = "0.6.0";
@@ -78,6 +82,10 @@ fn print_usage() {
     );
     println!("  avenc verify-ledger <out.jsonl> [--key <KEY>]");
     println!("                                        Check an audit log's hash chain and HMAC-SHA256 signatures");
+    println!("  avenc compact-ledger <in.jsonl> -o <out.jsonl>");
+    println!("                                        Compact settled historical audit log to bound storage footprint");
+    println!("  avenc debug <file.aven> [ledger.jsonl] [--goto <N>] [--what-if \"<var>=<val>\"] [--diff <t1>,<t2>]");
+    println!("                                        Interactive time-travel debugger & counterfactual branch explorer");
     println!("  avenc demo                            Run built-in multi-pillar verification test");
 }
 
@@ -258,6 +266,119 @@ fn real_main() {
                 let n = iterations.unwrap_or(200).max(1);
                 cmd_bench(file, n);
             }
+        }
+        "debug" => {
+            let mut model_file = None;
+            let mut ledger_file = None;
+            let mut goto_tick = None;
+            let mut what_if = None;
+            let mut diff_ticks = None;
+
+            let mut i = 2;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--goto" | "-t" => {
+                        if i + 1 < args.len() {
+                            goto_tick = args[i + 1].parse::<usize>().ok();
+                            i += 2;
+                        } else {
+                            i += 1;
+                        }
+                    }
+                    "--what-if" => {
+                        if i + 1 < args.len() {
+                            what_if = Some(args[i + 1].clone());
+                            i += 2;
+                        } else {
+                            i += 1;
+                        }
+                    }
+                    "--diff" | "--diff-ticks" => {
+                        if i + 1 < args.len() {
+                            let parts: Vec<&str> = args[i + 1].split(',').collect();
+                            if parts.len() == 2 {
+                                if let (Ok(t1), Ok(t2)) = (
+                                    parts[0].trim().parse::<usize>(),
+                                    parts[1].trim().parse::<usize>(),
+                                ) {
+                                    diff_ticks = Some((t1, t2));
+                                }
+                            }
+                            i += 2;
+                        } else {
+                            i += 1;
+                        }
+                    }
+                    arg if !arg.starts_with('-') => {
+                        if model_file.is_none() {
+                            model_file = Some(arg.to_string());
+                        } else if ledger_file.is_none() {
+                            ledger_file = Some(arg.to_string());
+                        }
+                        i += 1;
+                    }
+                    _ => {
+                        i += 1;
+                    }
+                }
+            }
+
+            let Some(model) = model_file else {
+                eprintln!(
+                    "Error: missing file argument for 'debug': avenc debug <file.aven> [ledger.jsonl]"
+                );
+                process::exit(1);
+            };
+            cmd_debug(
+                &model,
+                ledger_file.as_deref(),
+                goto_tick,
+                what_if.as_deref(),
+                diff_ticks,
+            );
+        }
+        "compact-ledger" => {
+            let mut in_path = None;
+            let mut out_path = None;
+
+            let mut i = 2;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "-o" | "--out" => {
+                        if i + 1 < args.len() {
+                            out_path = Some(args[i + 1].clone());
+                            i += 2;
+                        } else {
+                            i += 1;
+                        }
+                    }
+                    arg if !arg.starts_with('-') => {
+                        if in_path.is_none() {
+                            in_path = Some(arg.to_string());
+                        } else if out_path.is_none() {
+                            out_path = Some(arg.to_string());
+                        }
+                        i += 1;
+                    }
+                    _ => {
+                        i += 1;
+                    }
+                }
+            }
+
+            let Some(in_file) = in_path else {
+                eprintln!(
+                    "Error: missing input file: avenc compact-ledger <in.jsonl> [-o] <out.jsonl>"
+                );
+                process::exit(1);
+            };
+            let Some(out_file) = out_path else {
+                eprintln!(
+                    "Error: missing output file: avenc compact-ledger <in.jsonl> [-o] <out.jsonl>"
+                );
+                process::exit(1);
+            };
+            cmd_compact_ledger(&in_file, &out_file);
         }
         "run" => {
             let allow_stale = args.iter().any(|a| a == "--allow-stale");
@@ -1215,6 +1336,139 @@ fn cmd_safety_case(
         eprintln!("\nNotice: One or more safety invariants were violated.");
         process::exit(EXIT_CONSTRAINT_VIOLATION);
     }
+}
+
+fn cmd_debug(
+    model_path: &str,
+    ledger_path: Option<&str>,
+    goto_tick: Option<usize>,
+    what_if: Option<&str>,
+    diff_ticks: Option<(usize, usize)>,
+) {
+    let module = parse_file(model_path);
+    let work_dir = std::path::Path::new(model_path).parent();
+
+    let ledger = if let Some(lp) = ledger_path {
+        let text = match fs::read_to_string(lp) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("Error reading ledger '{}': {}", lp, e);
+                process::exit(1);
+            }
+        };
+        match ledger::from_jsonl(&text, None) {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("Error loading ledger '{}': {}", lp, e);
+                process::exit(1);
+            }
+        }
+    } else {
+        let res = execute_module(&module, false, work_dir);
+        res.ledger
+    };
+
+    let mut session = debugger::DebuggerSession::new(model_path, module, ledger);
+
+    if let Some((t1, t2)) = diff_ticks {
+        let diffs = session.diff_ticks(t1, t2);
+        println!("Diff between tick {} and tick {}:", t1, t2);
+        if diffs.is_empty() {
+            println!("  No variable changes.");
+        } else {
+            for d in diffs {
+                let old_s = d.old_value.map_or("None".to_string(), |v| format!("{:.4}", v));
+                let new_s = d.new_value.map_or("None".to_string(), |v| format!("{:.4}", v));
+                let delta_s = d.delta.map_or(String::new(), |v| format!(" (Δ {:+.4})", v));
+                println!("  {:<24} : {} -> {}{}", d.name, old_s, new_s, delta_s);
+            }
+        }
+        return;
+    }
+
+    if let Some(wi) = what_if {
+        if let Some(pos) = wi.find('=') {
+            let var = wi[..pos].trim();
+            let val: f64 = wi[pos + 1..].trim().parse().unwrap_or(0.0);
+            match session.what_if(&[(var.to_string(), val)]) {
+                Ok(res) => {
+                    println!(
+                        "Counterfactual What-If Result (mutating '{}' = {} at t{}):",
+                        var, val, res.baseline_tick
+                    );
+                    println!(
+                        "  {:<24} {:>14} {:>14} {:>14}",
+                        "Output Variable", "Nominal", "Branch", "Delta"
+                    );
+                    println!("  --------------------------------------------------------------------");
+                    for d in res.diffs {
+                        let old_s = d.old_value.map_or("None".to_string(), |v| format!("{:.4}", v));
+                        let new_s = d.new_value.map_or("None".to_string(), |v| format!("{:.4}", v));
+                        let delta_s = d.delta.map_or("None".to_string(), |v| format!("{:+.4}", v));
+                        println!("  {:<24} {:>14} {:>14} {:>14}", d.name, old_s, new_s, delta_s);
+                    }
+                }
+                Err(e) => eprintln!("What-if error: {}", e),
+            }
+        }
+        return;
+    }
+
+    if let Some(t) = goto_tick {
+        match session.goto_tick(t, true) {
+            Ok(st) => {
+                println!("Scrubbed to tick {}:", st.tick);
+                let mut keys: Vec<&String> = st.vars.keys().collect();
+                keys.sort();
+                for k in keys {
+                    let v = &st.vars[k];
+                    println!("  {:<24} = {:>14.4}  ({})", v.name, v.value, v.kind);
+                }
+            }
+            Err(e) => eprintln!("Error jumping to tick {}: {}", t, e),
+        }
+        return;
+    }
+
+    // Default interactive REPL mode
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    let _ = session.run_interactive(stdin.lock(), stdout.lock());
+}
+
+fn cmd_compact_ledger(in_path: &str, out_path: &str) {
+    let text = match fs::read_to_string(in_path) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("Error reading input ledger '{}': {}", in_path, e);
+            process::exit(1);
+        }
+    };
+
+    let original = match ledger::from_jsonl(&text, None) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("Error parsing ledger '{}': {}", in_path, e);
+            process::exit(1);
+        }
+    };
+
+    let compacted = compaction::LedgerCompactor::compact_ledger(&original);
+    let compacted_jsonl = compacted.to_jsonl();
+
+    if let Err(e) = fs::write(out_path, &compacted_jsonl) {
+        eprintln!("Error writing compacted ledger to '{}': {}", out_path, e);
+        process::exit(1);
+    }
+
+    println!(
+        "Compacted ledger '{}' -> '{}': {} facts compressed to {} facts ({:.1}% reduction)",
+        in_path,
+        out_path,
+        original.len(),
+        compacted.len(),
+        (1.0 - (compacted.len() as f64 / original.len().max(1) as f64)) * 100.0
+    );
 }
 
 /// Whether the optimizer proved its result globally optimal, from its trace.
