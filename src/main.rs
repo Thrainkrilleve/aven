@@ -23,6 +23,8 @@ mod smt;
 mod temporal;
 mod compaction;
 mod debugger;
+mod codegen_wasm;
+mod package;
 
 use ast::*;
 use codegen_c::CTranspiler;
@@ -86,6 +88,9 @@ fn print_usage() {
     println!("                                        Compact settled historical audit log to bound storage footprint");
     println!("  avenc debug <file.aven> [ledger.jsonl] [--goto <N>] [--what-if \"<var>=<val>\"] [--diff <t1>,<t2>]");
     println!("                                        Interactive time-travel debugger & counterfactual branch explorer");
+  println!("  avenc emit-wasm <file.aven> [-o out.wasm] [--wat]");
+    println!("                                        Transpile relation/forward blocks to WebAssembly (.wasm / .wat)");
+    println!("  avenc pkg <init|pack|install|list>    Package manager: init, pack, install, and list unit-verified packages");
     println!("  avenc demo                            Run built-in multi-pillar verification test");
 }
 
@@ -380,6 +385,84 @@ fn real_main() {
             };
             cmd_compact_ledger(&in_file, &out_file);
         }
+        "emit-wasm" => {
+            let mut file_arg = None;
+            let mut out_file = None;
+            let mut emit_wat = false;
+
+            let mut i = 2;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "-o" | "--out" => {
+                        if i + 1 < args.len() {
+                            out_file = Some(args[i + 1].clone());
+                            i += 2;
+                        } else {
+                            i += 1;
+                        }
+                    }
+                    "--wat" => {
+                        emit_wat = true;
+                        i += 1;
+                    }
+                    arg if !arg.starts_with('-') => {
+                        if file_arg.is_none() {
+                            file_arg = Some(arg.to_string());
+                        }
+                        i += 1;
+                    }
+                    _ => {
+                        i += 1;
+                    }
+                }
+            }
+
+            let Some(file) = file_arg else {
+                eprintln!(
+                    "Error: missing file argument for 'emit-wasm': avenc emit-wasm <file.aven> [-o out.wasm] [--wat]"
+                );
+                process::exit(1);
+            };
+            cmd_emit_wasm(&file, out_file.as_deref(), emit_wat);
+        }
+        "pkg" => {
+            let subcmd = args.get(2).map(|s| s.as_str());
+            match subcmd {
+                Some("init") => {
+                    let name = args.get(3).map(|s| s.as_str()).unwrap_or("my_package");
+                    cmd_pkg_init(name);
+                }
+                Some("pack") => {
+                    let dir = args.get(3).map(|s| s.as_str()).unwrap_or(".");
+                    let out = args
+                        .windows(2)
+                        .find(|w| w[0] == "-o" || w[0] == "--out")
+                        .map(|w| w[1].as_str());
+                    cmd_pkg_pack(dir, out);
+                }
+                Some("install") => {
+                    let pkg_file = args.get(3).map(|s| s.as_str());
+                    let Some(p) = pkg_file else {
+                        eprintln!(
+                            "Error: missing package file for 'pkg install': avenc pkg install <package.avenpkg>"
+                        );
+                        process::exit(1);
+                    };
+                    cmd_pkg_install(p);
+                }
+                Some("list") => {
+                    cmd_pkg_list();
+                }
+                _ => {
+                    eprintln!("Usage: avenc pkg <init|pack|install|list>");
+                    eprintln!("  avenc pkg init [name]            Initialize a new Aven package");
+                    eprintln!("  avenc pkg pack [dir] [-o out]     Pack package into .avenpkg archive");
+                    eprintln!("  avenc pkg install <file.avenpkg> Install package into local cache");
+                    eprintln!("  avenc pkg list                   List installed packages");
+                    process::exit(1);
+                }
+            }
+        }
         "run" => {
             let allow_stale = args.iter().any(|a| a == "--allow-stale");
             let json = args.iter().any(|a| a == "--json");
@@ -550,7 +633,25 @@ fn parse_file(path: &str) -> AvenModule {
         }
     };
 
-    let mut lexer = Lexer::new(&content);
+    let parent_dir = std::path::Path::new(path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .to_path_buf();
+    let search_dirs = [
+        parent_dir,
+        std::path::PathBuf::from("vendor"),
+        std::path::PathBuf::from(".aven/packages"),
+    ];
+
+    let resolved_content = match package::PackageManager::resolve_imports(&content, &search_dirs) {
+        Ok(rc) => rc,
+        Err(e) => {
+            eprintln!("Import resolution error: {}", e);
+            process::exit(1);
+        }
+    };
+
+    let mut lexer = Lexer::new(&resolved_content);
     let tokens = match lexer.tokenize() {
         Ok(t) => t,
         Err(e) => {
@@ -2548,4 +2649,115 @@ fn module_variables(module: &AvenModule) -> std::collections::HashSet<String> {
         vars.extend(solve.integer_vars.iter().cloned());
     }
     vars
+}
+
+fn cmd_emit_wasm(file: &str, out_file: Option<&str>, emit_wat: bool) {
+    let module = parse_file(file);
+    let bundle = match codegen_wasm::WasmTranspiler::transpile(&module) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("WASM Transpiler Error: {}", e);
+            process::exit(1);
+        }
+    };
+
+    if emit_wat {
+        if let Some(out_path) = out_file {
+            if let Err(e) = fs::write(out_path, &bundle.wat) {
+                eprintln!("Error writing WAT to '{}': {}", out_path, e);
+                process::exit(1);
+            }
+            println!("Successfully emitted WAT to '{}'", out_path);
+        } else {
+            print!("{}", bundle.wat);
+        }
+    } else {
+        let default_out = format!("{}.wasm", bundle.model_name);
+        let target_path = out_file.unwrap_or(&default_out);
+        if let Err(e) = fs::write(target_path, &bundle.wasm_bytes) {
+            eprintln!("Error writing WASM bytecode to '{}': {}", target_path, e);
+            process::exit(1);
+        }
+        println!(
+            "Successfully emitted WebAssembly binary to '{}' ({} bytes, {} inputs, {} outputs)",
+            target_path,
+            bundle.wasm_bytes.len(),
+            bundle.input_names.len(),
+            bundle.output_names.len()
+        );
+    }
+}
+
+fn cmd_pkg_init(name: &str) {
+    let cur_dir = std::path::Path::new(".");
+    match package::PackageManager::init(cur_dir, name) {
+        Ok(manifest_path) => {
+            println!("Initialized Aven package '{}' at '{:?}'", name, manifest_path);
+        }
+        Err(e) => {
+            eprintln!("Package init error: {}", e);
+            process::exit(1);
+        }
+    }
+}
+
+fn cmd_pkg_pack(dir_str: &str, out_str: Option<&str>) {
+    let dir = std::path::Path::new(dir_str);
+    let out = out_str.map(std::path::Path::new);
+    match package::PackageManager::pack(dir, out) {
+        Ok((path, digest)) => {
+            println!("Successfully packaged '{:?}' [SHA256: {}]", path, digest);
+        }
+        Err(e) => {
+            eprintln!("Package pack error: {}", e);
+            process::exit(1);
+        }
+    }
+}
+
+fn cmd_pkg_install(archive_str: &str) {
+    let archive_path = std::path::Path::new(archive_str);
+    let cache_dir = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join(".aven")
+        .join("packages");
+
+    match package::PackageManager::install(archive_path, &cache_dir) {
+        Ok(manifest) => {
+            println!(
+                "Successfully installed package '{}' v{} into '{:?}'",
+                manifest.name, manifest.version, cache_dir
+            );
+        }
+        Err(e) => {
+            eprintln!("Package install error: {}", e);
+            process::exit(1);
+        }
+    }
+}
+
+fn cmd_pkg_list() {
+    let cache_dir = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join(".aven")
+        .join("packages");
+
+    match package::PackageManager::list(&cache_dir) {
+        Ok(list) => {
+            if list.is_empty() {
+                println!("No packages installed in '{:?}'", cache_dir);
+            } else {
+                println!("Installed Aven packages in '{:?}':", cache_dir);
+                println!("  {:<24} {:<12} {}", "Package", "Version", "Description");
+                println!("  -------------------------------------------------------------");
+                for p in list {
+                    println!("  {:<24} {:<12} {}", p.name, p.version, p.description);
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("Package list error: {}", e);
+            process::exit(1);
+        }
+    }
 }

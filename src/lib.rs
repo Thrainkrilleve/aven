@@ -24,3 +24,5 @@ pub mod smt;
 pub mod temporal;
 pub mod compaction;
 pub mod debugger;
+pub mod codegen_wasm;
+pub mod package;

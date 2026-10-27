@@ -45,6 +45,12 @@ From its inception as an experimental relational solver to a production-grade mu
 - [x] **Ledger Storage Compaction & Segmented Audit Logs:** Segment rotation (`SegmentedLedgerWriter`), cross-segment cryptographic chain verification (`verify_segmented_directory`), and settled historical snapshot compaction (`LedgerCompactor`, `avenc compact-ledger`).
 - [x] **Interactive Time-Travel Debugger (`avenc debug`):** Interactive REPL and headless CLI, timeline scrubbing (`goto`, `step`, `prev`), irreversible commit boundary enforcement, causal provenance graph rendering (`why`), and counterfactual branching with output diffing (`what-if`, `diff`).
 
+### Phase 7: Ecosystem Bootstrap, Package Registry & WebAssembly (Completed)
+- [x] **Package Manager & Cryptographic Registry:** Unit-verified relation packages with `Aven.toml`, `.avenpkg` distribution archives with SHA-256 seal integrity verification, dependency installation, package enumeration, and namespaced import resolution (`avenc pkg init|pack|install|list`).
+- [x] **WebAssembly Core 1.0 Transpiler:** Standard `.wasm` binary bytecode and `.wat` text emission (`avenc emit-wasm`) implementing pure-`std` LEB128 encoding, terminal calculation exports, and zero-copy memory-mapped `aven_solve` solver interfaces verified via Node.js V8 execution.
+- [x] **Kill-Switch Domain Applications:** Structurally superior reference models in financial engineering (`examples/portfolio_rebalancing.aven`) and drone avionics (`examples/quadcopter_avionics.aven`).
+- [x] **Documentation & Community Governance:** Weekend-first onboarding guide (`docs/GETTING_STARTED.md`), package specification (`docs/PACKAGE_SPEC.md`), language RFC lifecycle (`RFC_PROCESS.md`), Contributor Covenant v2.1 (`CODE_OF_CONDUCT.md`), and contribution ground rules (`CONTRIBUTING.md`).
+
 ---
 
 ## 3. The Long-Term Vision

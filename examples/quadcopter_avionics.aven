@@ -1,0 +1,55 @@
+// examples/quadcopter_avionics.aven — Autonomous Multirotor Flight Dynamics & Battery Invariants
+// Phase 7 Kill-Switch Application: Autonomous Avionics & Physical Flight Envelope Safety
+//
+// Invariant modeling of rotor thrust, aerodynamic drag, battery internal resistance voltage sag,
+// and flight recovery authority.
+
+relation MultirotorDynamics {
+    // Total vertical thrust from 4 synchronized brushless motors (in Newtons)
+    // Thrust = 4 * c_t * rho * (rpm / 60)^2 * prop_diameter^4
+    rps                 = motor_rpm / 60
+    single_thrust_n     = thrust_coeff * air_density * (rps^2) * (prop_diameter_m^4)
+    total_thrust_n      = 4 * single_thrust_n
+
+    // Gravitational weight force (F = m * g)
+    weight_n            = total_mass_kg * 9.80665
+
+    // Thrust-to-Weight Ratio (TWR) — Must exceed 1.0 for hover; > 1.8 for storm gust recovery
+    thrust_weight_ratio = total_thrust_n / weight_n
+
+    // Net vertical climb acceleration (a = (T - W) / m in m/s^2)
+    climb_accel_mps2    = (total_thrust_n - weight_n) / total_mass_kg
+
+    // Electrical Power & Battery Dynamics:
+    // Motor mechanical power = Thrust * exit velocity
+    total_amps_draw     = (total_thrust_n * amps_per_newton) + base_avionics_amps
+    voltage_sag_volts   = total_amps_draw * battery_internal_resistance_ohms
+    terminal_voltage    = battery_open_circuit_volts - voltage_sag_volts
+    delivered_power_w   = terminal_voltage * total_amps_draw
+}
+
+forward FastFlightComputer {
+    rps                 = motor_rpm / 60
+    single_thrust_n     = thrust_coeff * air_density * (rps^2) * (prop_diameter_m^4)
+    total_thrust_n      = 4 * single_thrust_n
+    weight_n            = total_mass_kg * 9.80665
+    thrust_weight_ratio = total_thrust_n / weight_n
+    climb_accel_mps2    = (total_thrust_n - weight_n) / total_mass_kg
+    total_amps_draw     = (total_thrust_n * amps_per_newton) + base_avionics_amps
+    voltage_sag_volts   = total_amps_draw * battery_internal_resistance_ohms
+    terminal_voltage    = battery_open_circuit_volts - voltage_sag_volts
+    delivered_power_w   = terminal_voltage * total_amps_draw
+}
+
+// 2.5 kg Commercial Drone Hover / Climb Scenario:
+solve MultirotorDynamics with {
+    total_mass_kg                       = 2.5
+    motor_rpm                           = 6400
+    thrust_coeff                        = 0.115
+    air_density                         = 1.225
+    prop_diameter_m                     = 0.381
+    amps_per_newton                     = 1.45
+    base_avionics_amps                  = 1.80
+    battery_open_circuit_volts          = 25.2
+    battery_internal_resistance_ohms    = 0.045
+}

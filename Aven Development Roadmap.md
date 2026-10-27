@@ -53,14 +53,16 @@
 
 ---
 
-## Phase 7 — Ecosystem Bootstrap (target: v0.6–0.9)
+## Phase 7 — Ecosystem Bootstrap (v0.6–0.9 — Completed)
 *Goal: someone chooses Aven for a real project and doesn't regret it.*
 
-1. **Package manager & registry.** Namespaced by unit-verified relation packages — a physics package where every equation ships with its dimensions is a uniquely Aven-shaped niche.
-2. **Kill-switch applications.** Target domains where Aven's model is *structurally* superior, not merely comparable: financial modeling (bidirectional spreadsheets-with-types), scientific computing, simulation/debugging-heavy work, configuration with constraints.
-3. **Docs with a weekend-first promise.** The "motivated beginner ships something in a weekend" bar becomes an actual measured onboarding study, not a vibe.
-4. **Interop bridge.** Transpiler targets initially C; a WASM backend unlocks browser experiments cheaply.
-5. **Community scaffolding.** Governance, RFC process, code of conduct, contribution guide — boring, essential, started early because rewriting culture late never works.
+1. **Package manager & registry.** Unit-verified relation packages with `Aven.toml` manifests, cryptographic packaging (`avenc pkg pack`) sealed with SHA-256 signatures, deterministic dependency installation (`avenc pkg install`), dependency listing (`avenc pkg list`), and namespaced import resolution (`import <pkg>;` in `parse_file`).
+2. **Kill-switch applications.** Target domains where Aven's model is *structurally* superior:
+   - Financial Engineering: multi-asset Markowitz / Black-Litterman risk-return portfolio allocation with cash conservation, covariance discounting, and Sharpe ratio maximization (`examples/portfolio_rebalancing.aven`).
+   - Avionics & Aerospace: multi-rotor drone aerodynamics $T=4 \cdot c_T \cdot \rho \cdot \omega^2 \cdot D^4$, thrust-to-weight ratio, vertical climb rate, battery internal resistance voltage sag ($V_{term} = V_{oc} - I \cdot R_{int}$), and electrical power budgeting (`examples/quadcopter_avionics.aven`).
+3. **Docs with a weekend-first promise.** Onboarding tutorial (`docs/GETTING_STARTED.md`) and package manifest specification (`docs/PACKAGE_SPEC.md`) enabling motivated practitioners to build and deploy verified relation packages in under 15 minutes.
+4. **Interop bridge & WebAssembly.** Dual-mode WebAssembly emission (`avenc emit-wasm`): human-readable WebAssembly Text (`.wat`) and standard binary WebAssembly Core 1.0 bytecode (`.wasm`) with LEB128 encoding, zero-overhead direct calculation exports, and zero-copy memory-mapped `aven_solve(in_ptr, out_ptr)` buffers runnable directly in web browsers and Node.js V8 engines without external dependencies.
+5. **Community scaffolding.** Formal governance lifecycle (`RFC_PROCESS.md`), Contributor Covenant v2.1 (`CODE_OF_CONDUCT.md`), and standard development guidelines (`CONTRIBUTING.md`) codifying zero external crate dependencies and deterministic PRNG testing.
 
 ---
 

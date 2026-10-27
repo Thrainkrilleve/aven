@@ -1,0 +1,55 @@
+// examples/portfolio_rebalancing.aven — Multi-Asset Risk-Adjusted Portfolio Allocation
+// Phase 7 Kill-Switch Application: Financial Engineering & Constraint-Satisfying Asset Allocation
+//
+// Demonstrates bidirectional algebraic solving, risk-return tradeoff constraints,
+// and capital conservation invariants for quantitative wealth management.
+
+relation CapitalAllocation {
+    // Total portfolio value split across 3 asset classes (Equities, Bonds, Real Estate)
+    equity_value  = portfolio_value * equity_weight
+    bond_value    = portfolio_value * bond_weight
+    reit_value    = portfolio_value * reit_weight
+
+    // Capital conservation invariant: weights must sum to unity
+    total_weight  = equity_weight + bond_weight + reit_weight
+
+    // Expected annual portfolio return
+    expected_return_pct = (equity_weight * equity_return_pct) + (bond_weight * bond_return_pct) + (reit_weight * reit_return_pct)
+
+    // Simplified parametric portfolio volatility (annualized standard deviation %)
+    // Incorporating risk diversification discount factor
+    weighted_variance   = (equity_weight * equity_vol_pct)^2 + (bond_weight * bond_vol_pct)^2 + (reit_weight * reit_vol_pct)^2
+    portfolio_vol_pct   = sqrt(weighted_variance) * diversification_factor
+
+    // Sharpe ratio (excess return over risk-free rate per unit of volatility)
+    excess_return_pct   = expected_return_pct - risk_free_rate_pct
+    sharpe_ratio        = excess_return_pct / portfolio_vol_pct
+}
+
+forward FastRebalanceProfile {
+    equity_value        = portfolio_value * equity_weight
+    bond_value          = portfolio_value * bond_weight
+    reit_value          = portfolio_value * reit_weight
+    total_weight        = equity_weight + bond_weight + reit_weight
+    expected_return_pct = (equity_weight * equity_return_pct) + (bond_weight * bond_return_pct) + (reit_weight * reit_return_pct)
+    portfolio_vol_pct   = sqrt((equity_weight * equity_vol_pct)^2 + (bond_weight * bond_vol_pct)^2 + (reit_weight * reit_vol_pct)^2) * diversification_factor
+    excess_return_pct   = expected_return_pct - risk_free_rate_pct
+    sharpe_ratio        = excess_return_pct / portfolio_vol_pct
+}
+
+// Institutional Endowment Allocation Scenario:
+// $10,000,000 portfolio: 55% Global Equities, 35% Treasury Bonds, 10% Real Estate
+solve CapitalAllocation with {
+    portfolio_value         = 10000000
+    equity_weight           = 0.55
+    bond_weight             = 0.35
+    reit_weight             = 0.10
+    equity_return_pct       = 10.5
+    bond_return_pct         = 4.2
+    reit_return_pct         = 7.8
+    equity_vol_pct          = 16.0
+    bond_vol_pct            = 5.5
+    reit_vol_pct            = 12.0
+    diversification_factor  = 0.88
+    risk_free_rate_pct      = 3.5
+}
