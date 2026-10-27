@@ -277,7 +277,7 @@ fn test_randomized_1_package_manifest_and_dependency_graph() {
             name: pkg_name.clone(),
             version: version.clone(),
             description: "Randomized test library".to_string(),
-            authors: vec!["Test Runner <runner@aven.org>".to_string()],
+            authors: vec!["Test Runner <runner@avenc.dev>".to_string()],
             license: "MIT".to_string(),
             entry: "lib.aven".to_string(),
             dependencies: HashMap::new(),

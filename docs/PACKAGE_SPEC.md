@@ -15,7 +15,7 @@ Every Aven package root contains an `Aven.toml` manifest:
 name = "aerospace_dynamics"
 version = "0.2.1"
 description = "US Standard Atmosphere (1976) & Hypersonic Aerodynamic Relations"
-authors = ["Aero WG <aero@aven.org>"]
+authors = ["Aero WG <aero@avenc.dev>"]
 license = "Apache-2.0"
 entry = "lib.aven"
 

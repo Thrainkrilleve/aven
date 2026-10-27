@@ -51,5 +51,5 @@ an individual is officially representing the community in public spaces.
 ## Contact
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the project leadership at `conduct@aven.org`. All complaints will be
+reported to the project leadership at `conduct@avenc.dev`. All complaints will be
 reviewed and investigated promptly and fairly.

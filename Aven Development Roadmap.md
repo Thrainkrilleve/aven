@@ -12,17 +12,17 @@
 | Expression parsing, evaluation | ✅ Solid |
 | Symbolic differentiation (product/chain/power rule, functions) | ✅ Solid |
 | Single-unknown backward solving (Newton + symbolic derivative) | ✅ Solid |
-| Coupled multi-unknown system solving (multidim Newton, analytic Jacobian) | ✅ v0.2 (rank-deficiency reporting still weak) |
-| Dimensional/unit algebra | ✅ Basic (4 dimensions, hardcoded) |
-| Direction-pinned C transpilation | ✅ Prototype (timing-parity benchmark passed at phase 2) |
-| Fact ledger, provenance (`why`), rewind/fork/branch, irreversibility guards | ✅ Prototype |
-| **Not yet:** real `.aven` grammar, modules, strings/data structures, IO, package manager, error taxonomy, docs, tests, community | ❌ All ahead |
-
-**Blunt assessment:** the research risk is retired — the paradigm computes, compiles, and time-travels. What remains is 90% engineering and 10% formalization. Languages die from the engineering and community parts, not the ideas.
+| Coupled multi-unknown system solving (multidim Newton, analytic Jacobian) | ✅ Solid (with rank-deficiency diagnostics & minimal fixes) |
+| Dimensional/unit algebra | ✅ Extensible 7-dimensional SI base tensor |
+| Direction-pinned C transpilation | ✅ Production-grade (freestanding ANSI C99 & AERIC edge deployment) |
+| WebAssembly backend | ✅ Completed (WASM Core 1.0 binary & WAT text emission) |
+| Fact ledger, provenance (`why`), rewind/fork/branch, irreversibility guards | ✅ Completed (with segmented compaction & time-travel debugger) |
+| Package manager & registry | ✅ Completed (Aven.toml, .avenpkg with SHA-256 integrity seal) |
+| Formal verification & safety cases | ✅ Completed (SMT-LIB2 Z3/CVC5 exporter, DO-178C / ISO 26262 audits) |
 
 ---
 
-## Phase 4 — Realism (target: v0.3)
+## Phase 4 — Realism (v0.3 — Completed)
 *Goal: Aven stops being a demo and becomes a tool you'd actually reach for.*
 
 1. **Full grammar & front-end.** A real lexer/parser for `.aven` files: `relation`/`forward` blocks, `solve ... with`, `signal` declarations, `when` clauses, comments. ANTLR or hand-written; generate good error messages from day one (they are a feature, not polish).
@@ -33,7 +33,7 @@
 
 ---
 
-## Phase 5 — The Contract with the Machine (target: v0.4)
+## Phase 5 — The Contract with the Machine (v0.4 — Completed)
 *Goal: performance claims become enforced guarantees, not benchmarks.*
 
 1. **`extern "C"` interop.** Bind C libraries directly — instant stdlib by theft. FFI bindings with unit-safe wrappers for common crates (libc, SDL, sqlite).

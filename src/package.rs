@@ -232,7 +232,7 @@ impl PackageManager {
             name: name.to_string(),
             version: "0.1.0".to_string(),
             description: format!("Aven library package for {}", name),
-            authors: vec!["Contributor <contrib@aven.org>".to_string()],
+            authors: vec!["Contributor <contrib@avenc.dev>".to_string()],
             license: "MIT".to_string(),
             entry: "lib.aven".to_string(),
             dependencies: HashMap::new(),

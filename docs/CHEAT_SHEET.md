@@ -69,23 +69,32 @@ import <package_name>;
 
 ---
 
-## 3. Built-In Mathematical Functions
+## 3. Built-In Mathematical Functions & Constants
 
-All mathematical functions validate inputs against numerical domain faults:
+All mathematical functions are unary expressions and validate inputs against numerical domain faults:
 
 | Function | Description | Valid Domain |
 |:---|:---|:---:|
 | `sqrt(x)` | Square root | $x \ge 0$ |
 | `abs(x)` | Absolute value | $\mathbb{R}$ |
+| `ceil(x)` | Smallest integer $\ge x$ (1e-9 snap) | $\mathbb{R}$ |
+| `floor(x)` | Largest integer $\le x$ (1e-9 snap) | $\mathbb{R}$ |
+| `round(x)` | Nearest integer rounding | $\mathbb{R}$ |
+| `sign(x)` | Signum (-1.0, 0.0, or +1.0) | $\mathbb{R}$ |
+| `ln(x)`, `log(x)` | Natural logarithm (base $e$) | $x > 0$ |
+| `exp(x)` | Natural exponential ($e^x$) | $\mathbb{R}$ (dimensionless) |
 | `sin(x)` | Trigonometric sine | $\mathbb{R}$ (dimensionless) |
 | `cos(x)` | Trigonometric cosine | $\mathbb{R}$ (dimensionless) |
 | `tan(x)` | Trigonometric tangent | $x \ne \frac{\pi}{2} + k\pi$ |
-| `exp(x)` | Natural exponential ($e^x$) | $\mathbb{R}$ (dimensionless) |
-| `ln(x)` | Natural logarithm | $x > 0$ |
-| `log10(x)` | Base-10 logarithm | $x > 0$ |
-| `ceil(x)` | Smallest integer $\ge x$ | $\mathbb{R}$ |
-| `floor(x)` | Largest integer $\le x$ | $\mathbb{R}$ |
-| `clamp(x, min, max)` | Bounds $x$ into $[\min, \max]$ | $\min \le \max$ |
+
+> [!NOTE]
+> *To compute $\log_{10}(x)$:* use `ln(x) / 2.302585092994046`.  
+> *To clamp or bound variables:* use inequality bounds (e.g. `x >= min`, `x <= max`) in `relation` or `solve` blocks.
+
+### Built-in Mathematical Constants
+- `pi`, `PI` = `3.141592653589793`
+- `e`, `E` = `2.718281828459045`
+- `tau`, `TAU` = `6.283185307179586`
 
 ---
 

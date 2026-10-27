@@ -27,7 +27,7 @@ All implementations, compiler modifications, codegen backends, and community con
 - **Precision**: Calculations use standard IEEE-754 double-precision 64-bit binary floating-point (`f64`).
 - **Domain Fault Guards**: Math operations must actively guard against undefined mathematical domains:
   - Division by zero: Denominators satisfying $|d| < 10^{-15}$ must generate structured domain errors or soft-epsilon clamping.
-  - Non-positive logarithms: Arguments $x \le 0$ to $\ln(x)$ or $\log_{10}(x)$ must reject evaluation prior to hardware NaN emission.
+  - Non-positive logarithms: Arguments $x \le 0$ to $\ln(x)$ or $\log(x)$ must reject evaluation prior to hardware NaN emission.
   - Square roots of negatives: Arguments $x < 0$ to $\sqrt{x}$ must raise domain violations.
 - **NaN / $\pm\infty$ Rejection**: Any intermediate non-finite floating-point state immediately triggers an `EvalError::DomainViolation` or `EvalError::NumericalDivergence`. Unchecked NaN propagation is considered a critical compiler defect.
 
@@ -62,7 +62,7 @@ Where:
    - $[d_{A / B}] = [d_A] - [d_B]$
 4. **Dimensionless Exponentiation & Functions**:
    - For $A^k$, if $k$ is non-integer, $A$ must be dimensionless or $k$ must be a compile-time rational constant.
-   - Transcendental function arguments ($\sin, \cos, \tan, \exp, \ln, \log_{10}$) MUST be dimensionless ($[0, 0, 0, 0, 0, 0, 0]$).
+   - Transcendental function arguments ($\sin, \cos, \tan, \exp, \ln$) MUST be dimensionless ($[0, 0, 0, 0, 0, 0, 0]$).
 5. **Static Enforcement**: Dimensional mismatches must abort compilation prior to code generation or solver execution, indicating the exact source span (`line:column`).
 
 ---
