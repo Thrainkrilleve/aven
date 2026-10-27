@@ -167,7 +167,10 @@ impl CTranspiler {
 
         if is_traceable {
             lines.push("/* eBPF uprobe export: preserve symbol in .symtab under -O2 and prevent IPA cloning */".to_string());
-            lines.push("#if defined(__GNUC__) || defined(__clang__)".to_string());
+            lines.push("/* clang defines __GNUC__ but has no 'noipa'; use noinline+used there, GCC's noipa below */".to_string());
+            lines.push("#if defined(__clang__)".to_string());
+            lines.push("#define AVEN_EXPORT __attribute__((noinline, used))".to_string());
+            lines.push("#elif defined(__GNUC__)".to_string());
             lines.push("#define AVEN_EXPORT __attribute__((noipa, noinline, used))".to_string());
             lines.push("#else".to_string());
             lines.push("#define AVEN_EXPORT".to_string());

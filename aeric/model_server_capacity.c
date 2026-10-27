@@ -10,7 +10,10 @@ static double aven_ceil(double v) {
 }
 
 /* eBPF uprobe export: preserve symbol in .symtab under -O2 and prevent IPA cloning */
-#if defined(__GNUC__) || defined(__clang__)
+/* clang defines __GNUC__ but has no 'noipa'; use noinline+used there, GCC's noipa below */
+#if defined(__clang__)
+#define AVEN_EXPORT __attribute__((noinline, used))
+#elif defined(__GNUC__)
 #define AVEN_EXPORT __attribute__((noipa, noinline, used))
 #else
 #define AVEN_EXPORT

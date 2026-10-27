@@ -236,9 +236,10 @@ evidence.
 | Compiled vs interpreted speedup | ✅ verified | ~133× (5.5 ns vs 729 ns/solve) |
 | Optimizer agrees with HiGHS / reference solvers | ✅ verified | 2,958/2,958, `verify/OPTIMIZER_PROOF.md` |
 | Compute-kernel throughput | ✅ verified | ~5.5 ns/solve compiled (amortized), one machine/compiler |
-| Deterministic across runs/platforms | 🟡 partial | bit-identical across 4 impls on MSVC; gcc/clang + cross-platform still pending |
+| Deterministic across compilers (x86-64) | 🟡 partial | MSVC + gcc 14.2 + clang 19.1 bit-identical on 260,085 rows; non-x86 / non-Windows still pending |
+| `avenc emit-c --aeric-shim` generator | ✅ verified | 6 tests in `tests/toolchain_aeric_shim.rs` |
 | Worst-case tick latency / jitter | ⬜ unverified | needs RT timing harness (p99/max); throughput ≠ worst case |
-| Clean under gcc/clang `-Wpedantic` | ⬜ unverified | Portability track |
+| Clean under gcc/clang `-Wpedantic` | ✅ verified | gcc 14.2 + clang 19.1, zero diagnostics (portable `AVEN_EXPORT`) |
 | Tamper-evident / forgery-resistant ledger | ⬜ unverified | needs HMAC (Security track) |
 | "MISRA-grade" | ⬜ **unfounded** | static-analysis track |
 | SHM end-to-end cycle time | ⬜ unverified | measure on real loop (not guessed) |
