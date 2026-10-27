@@ -8,7 +8,7 @@
 //
 // Run: cargo run --release --bin bench_aven -- <scratchdir>
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write, BufWriter};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::time::Instant;
 
 use avenc::ast::{AvenModule, BlockKind};
@@ -18,11 +18,21 @@ use avenc::lexer::Lexer;
 use avenc::parser::Parser;
 
 const INPUTS: [&str; 8] = [
-    "avg_latency_ms", "avg_payload_kb", "framing_overhead_ratio", "os_kernel_ram_mb",
-    "ram_per_worker", "reqs_per_second", "socket_buffer_mb", "target_utilization",
+    "avg_latency_ms",
+    "avg_payload_kb",
+    "framing_overhead_ratio",
+    "os_kernel_ram_mb",
+    "ram_per_worker",
+    "reqs_per_second",
+    "socket_buffer_mb",
+    "target_utilization",
 ];
 const OUTPUTS: [&str; 5] = [
-    "raw_workers", "allocated_workers", "total_ram_needed", "payload_gbps", "wire_rate_gbps",
+    "raw_workers",
+    "allocated_workers",
+    "total_ram_needed",
+    "payload_gbps",
+    "wire_rate_gbps",
 ];
 
 fn parse_model(path: &str) -> AvenModule {
@@ -34,7 +44,10 @@ fn parse_model(path: &str) -> AvenModule {
 fn main() {
     let sp = std::env::args().nth(1).unwrap_or_else(|| ".".into());
     let model = parse_model("examples/server_capacity.aven");
-    let blk = model.blocks.iter().find(|b| b.kind == BlockKind::Forward)
+    let blk = model
+        .blocks
+        .iter()
+        .find(|b| b.kind == BlockKind::Forward)
         .expect("no forward block");
     let order = CTranspiler::topo_sort(blk).expect("topo");
 
@@ -49,7 +62,9 @@ fn main() {
         let line = line.unwrap();
         let mut it = line.split_whitespace();
         let mut v = [0.0f64; 8];
-        for k in 0..8 { v[k] = it.next().unwrap().parse().unwrap(); }
+        for slot in &mut v {
+            *slot = it.next().unwrap().parse().unwrap();
+        }
         rows.push(v);
     }
 
@@ -58,7 +73,9 @@ fn main() {
     let of = std::fs::File::create(format!("{sp}/out_rust.txt")).expect("create out");
     let mut w = BufWriter::new(of);
     for (i, v) in rows.iter().enumerate() {
-        for k in 0..8 { env.insert(INPUTS[k].to_string(), v[k]); }
+        for k in 0..8 {
+            env.insert(INPUTS[k].to_string(), v[k]);
+        }
         for &idx in &order {
             let eq = &blk.equations[idx];
             let val = diff::eval_expr(&eq.rhs, &env).unwrap_or(f64::NAN);
@@ -79,7 +96,9 @@ fn main() {
     let t0 = Instant::now();
     for _ in 0..k_reps {
         for v in &rows {
-            for k in 0..8 { env.insert(INPUTS[k].to_string(), v[k]); }
+            for k in 0..8 {
+                env.insert(INPUTS[k].to_string(), v[k]);
+            }
             for &idx in &order {
                 let eq = &blk.equations[idx];
                 let val = diff::eval_expr(&eq.rhs, &env).unwrap_or(f64::NAN);
@@ -91,6 +110,8 @@ fn main() {
     let ns = t0.elapsed().as_nanos() as f64 / (n as f64 * k_reps as f64);
     println!(
         "{{\"backend\":\"rust_evaluator\",\"n\":{n},\"ns_per_solve\":{:.3},\"solves_per_sec\":{:.0},\"_sink\":{}}}",
-        ns, 1e9 / ns, sink
+        ns,
+        1e9 / ns,
+        sink
     );
 }

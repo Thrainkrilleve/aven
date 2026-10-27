@@ -4,13 +4,15 @@
 // Includes minimum 3 randomized tests using OS entropy + PID so data is never recycled.
 
 use avenc::ast::AvenModule;
-use avenc::compaction::{verify_segmented_directory, LedgerCompactor, SegmentConfig, SegmentedLedgerWriter};
+use avenc::compaction::{
+    LedgerCompactor, SegmentConfig, SegmentedLedgerWriter, verify_segmented_directory,
+};
 use avenc::debugger::DebuggerSession;
 use avenc::ledger::{Fact, FactMetadata, Ledger};
 use avenc::lexer::Lexer;
 use avenc::parser::Parser;
 use avenc::temporal::{
-    align_signals, RetentionWindow, StalenessDecay, TemporalSample, TemporalSupervisor,
+    RetentionWindow, StalenessDecay, TemporalSample, TemporalSupervisor, align_signals,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -83,10 +85,18 @@ fn test_temporal_signal_calculus_golden() {
 
     assert_eq!(window.len(), 5);
     let roc = window.rate_of_change().expect("rate of change");
-    assert!((roc - 10.0).abs() < 1e-6, "slope should be 10.0, got {}", roc);
+    assert!(
+        (roc - 10.0).abs() < 1e-6,
+        "slope should be 10.0, got {}",
+        roc
+    );
 
     let avg = window.moving_average().expect("moving average");
-    assert!((avg - 30.0).abs() < 1e-6, "average should be 30.0, got {}", avg);
+    assert!(
+        (avg - 30.0).abs() < 1e-6,
+        "average should be 30.0, got {}",
+        avg
+    );
 
     let ema = window.exponential_smoothing(0.5).expect("ema");
     assert!(ema > 10.0 && ema < 50.0);
@@ -110,7 +120,9 @@ fn test_temporal_signal_calculus_golden() {
     assert!((linear.confidence(500, 1000) - 0.5).abs() < 1e-6);
     assert_eq!(linear.confidence(1200, 1000), 0.0);
 
-    let exp = StalenessDecay::Exponential { half_life_ms: 500.0 };
+    let exp = StalenessDecay::Exponential {
+        half_life_ms: 500.0,
+    };
     assert!((exp.confidence(500, 1000) - 0.5).abs() < 1e-3);
 
     // Cross-signal alignment
@@ -161,7 +173,11 @@ fn test_segmented_ledger_compaction_golden() {
         let fact = Fact {
             seq: i,
             tick: i / 2,
-            kind: if i % 3 == 0 { "input".to_string() } else { "derived".to_string() },
+            kind: if i % 3 == 0 {
+                "input".to_string()
+            } else {
+                "derived".to_string()
+            },
             name: format!("var_{}", i),
             value: (i as f64) * 1.5,
             causes: if i > 0 { vec![i - 1] } else { vec![] },
@@ -312,7 +328,10 @@ fn test_debugger_session_what_if_golden() {
 
     // Diff ticks
     let diffs = session.diff_ticks(0, 1);
-    let req_diff = diffs.iter().find(|d| d.name == "reqs_per_second").expect("req diff");
+    let req_diff = diffs
+        .iter()
+        .find(|d| d.name == "reqs_per_second")
+        .expect("req diff");
     assert_eq!(req_diff.old_value, Some(20000.0));
     assert_eq!(req_diff.new_value, Some(40000.0));
     assert_eq!(req_diff.delta, Some(20000.0));
@@ -326,16 +345,27 @@ fn test_debugger_session_what_if_golden() {
         .what_if(&[("reqs_per_second".to_string(), 60000.0)])
         .expect("what if solve");
     assert_eq!(what_if.baseline_tick, 1);
-    assert_eq!(what_if.mutated_inputs.get("reqs_per_second"), Some(&60000.0));
+    assert_eq!(
+        what_if.mutated_inputs.get("reqs_per_second"),
+        Some(&60000.0)
+    );
 
     // Counterfactual raw_workers should be (60000 * 20) / 1000 = 1200.0
-    let rw_diff = what_if.diffs.iter().find(|d| d.name == "raw_workers").expect("rw diff");
+    let rw_diff = what_if
+        .diffs
+        .iter()
+        .find(|d| d.name == "raw_workers")
+        .expect("rw diff");
     assert_eq!(rw_diff.old_value, Some(800.0));
     assert_eq!(rw_diff.new_value, Some(1200.0));
     assert_eq!(rw_diff.delta, Some(400.0));
 
     // Counterfactual allocated_workers should be ceil(1200 / 0.70) = 1715.0
-    let alloc_diff = what_if.diffs.iter().find(|d| d.name == "allocated_workers").expect("alloc diff");
+    let alloc_diff = what_if
+        .diffs
+        .iter()
+        .find(|d| d.name == "allocated_workers")
+        .expect("alloc diff");
     assert_eq!(alloc_diff.new_value, Some(1715.0));
 }
 
@@ -386,13 +416,19 @@ fn test_irreversible_rewind_guard() {
 
     // Attempt rewind to tick 0 without override -> MUST fail due to committed effect at tick 1
     let err = session.goto_tick(0, false);
-    assert!(err.is_err(), "rewind crossing committed effect without allow_irreversible must fail");
+    assert!(
+        err.is_err(),
+        "rewind crossing committed effect without allow_irreversible must fail"
+    );
     let msg = err.unwrap_err();
     assert!(msg.contains("committed") || msg.contains("irreversible"));
 
     // Attempt rewind to tick 0 WITH override -> succeeds
     let ok = session.goto_tick(0, true);
-    assert!(ok.is_ok(), "rewind with allow_irreversible override must succeed");
+    assert!(
+        ok.is_ok(),
+        "rewind with allow_irreversible override must succeed"
+    );
     assert_eq!(session.current_tick, 0);
 }
 
@@ -440,7 +476,9 @@ fn test_randomized_1_temporal_streams() {
     }
 
     // Invariant: exponential and linear decay monotonicity
-    let decay_exp = StalenessDecay::Exponential { half_life_ms: 1000.0 };
+    let decay_exp = StalenessDecay::Exponential {
+        half_life_ms: 1000.0,
+    };
     let decay_lin = StalenessDecay::Linear;
     let ttl = 2000;
 
@@ -487,7 +525,11 @@ fn test_randomized_2_segmented_rotation_and_tamper_detection() {
         let fact = Fact {
             seq: i,
             tick: i / 3,
-            kind: if i % 4 == 0 { "input".to_string() } else { "derived".to_string() },
+            kind: if i % 4 == 0 {
+                "input".to_string()
+            } else {
+                "derived".to_string()
+            },
             name: format!("rand_var_{}", i),
             value: val,
             causes: if i > 0 { vec![i - 1] } else { vec![] },
@@ -631,7 +673,7 @@ fn test_cli_debug_and_compaction_subprocesses() {
 
     // 1. Test avenc debug CLI non-interactive what-if branch
     let output = Command::new(cargo)
-        .args(&[
+        .args([
             "debug",
             "examples/server_capacity.aven",
             "--what-if",
@@ -640,9 +682,14 @@ fn test_cli_debug_and_compaction_subprocesses() {
         .output()
         .expect("run avenc debug");
 
-    assert!(output.status.success(), "avenc debug command should succeed");
+    assert!(
+        output.status.success(),
+        "avenc debug command should succeed"
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Counterfactual What-If Result") && stdout.contains("allocated_workers"));
+    assert!(
+        stdout.contains("Counterfactual What-If Result") && stdout.contains("allocated_workers")
+    );
 
     // 2. Test avenc compact-ledger CLI
     let dir = create_temp_dir("cli_compact_test");
@@ -673,7 +720,7 @@ fn test_cli_debug_and_compaction_subprocesses() {
     fs::write(&in_log, l.to_jsonl()).expect("write in_log");
 
     let compact_output = Command::new(cargo)
-        .args(&[
+        .args([
             "compact-ledger",
             in_log.to_str().unwrap(),
             out_log.to_str().unwrap(),
@@ -681,7 +728,10 @@ fn test_cli_debug_and_compaction_subprocesses() {
         .output()
         .expect("run avenc compact-ledger");
 
-    assert!(compact_output.status.success(), "avenc compact-ledger should succeed");
+    assert!(
+        compact_output.status.success(),
+        "avenc compact-ledger should succeed"
+    );
     assert!(out_log.exists());
     let compacted_content = fs::read_to_string(&out_log).expect("read compacted");
     assert!(compacted_content.contains("test_in"));

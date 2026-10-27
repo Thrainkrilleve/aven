@@ -70,11 +70,7 @@ impl SmtTranspiler {
         }
 
         if uses_integers {
-            if has_nonlinear {
-                "QF_NIRA"
-            } else {
-                "QF_LIRA"
-            }
+            if has_nonlinear { "QF_NIRA" } else { "QF_LIRA" }
         } else if has_nonlinear {
             "QF_NRA"
         } else {
@@ -102,7 +98,7 @@ impl SmtTranspiler {
     }
 
     /// Translates an AST Expr into SMT-LIB2 prefix S-expression notation.
-    pub fn expr_to_smt(expr: &Expr, int_vars: &HashSet<String>) -> String {
+    pub fn expr_to_smt(expr: &Expr) -> String {
         match expr {
             Expr::Num(n) => Self::format_real(*n),
             Expr::Var(v) => match v.as_str() {
@@ -112,11 +108,11 @@ impl SmtTranspiler {
                 other => other.to_string(),
             },
             Expr::UnaryMinus(inner) => {
-                format!("(- {})", Self::expr_to_smt(inner, int_vars))
+                format!("(- {})", Self::expr_to_smt(inner))
             }
             Expr::Bin(op, left, right) => {
-                let l = Self::expr_to_smt(left, int_vars);
-                let r = Self::expr_to_smt(right, int_vars);
+                let l = Self::expr_to_smt(left);
+                let r = Self::expr_to_smt(right);
                 match op {
                     BinaryOp::Add => format!("(+ {} {})", l, r),
                     BinaryOp::Sub => format!("(- {} {})", l, r),
@@ -136,13 +132,10 @@ impl SmtTranspiler {
                 }
             }
             Expr::Call(name, arg) => {
-                let a = Self::expr_to_smt(arg, int_vars);
+                let a = Self::expr_to_smt(arg);
                 match name.as_str() {
                     "abs" => format!("(ite (>= {} 0.0) {} (- {}))", a, a, a),
-                    "sign" => format!(
-                        "(ite (> {} 0.0) 1.0 (ite (< {} 0.0) (- 1.0) 0.0))",
-                        a, a
-                    ),
+                    "sign" => format!("(ite (> {} 0.0) 1.0 (ite (< {} 0.0) (- 1.0) 0.0))", a, a),
                     "floor" => format!("(to_real (to_int {}))", a),
                     "ceil" => {
                         // SMT-LIB encoding of ceil: if a == floor(a) then a else floor(a) + 1.0
@@ -180,7 +173,10 @@ impl SmtTranspiler {
     ) -> Result<String, SmtError> {
         let mut lines = Vec::new();
 
-        lines.push(format!("; SMT-LIB2 translation for Aven block '{}'", block.name));
+        lines.push(format!(
+            "; SMT-LIB2 translation for Aven block '{}'",
+            block.name
+        ));
         lines.push("; Emitted by avenc v0.6.0 -- SMT Formal Verification Engine".to_string());
         lines.push(format!("; Mode: {:?}", options.mode));
         lines.push("".to_string());
@@ -214,9 +210,10 @@ impl SmtTranspiler {
         }
 
         // Set Logic
-        let logic = options.logic.as_deref().unwrap_or_else(|| {
-            Self::detect_logic(block, !int_vars.is_empty())
-        });
+        let logic = options
+            .logic
+            .as_deref()
+            .unwrap_or_else(|| Self::detect_logic(block, !int_vars.is_empty()));
         lines.push(format!("(set-logic {})", logic));
         lines.push("(set-option :produce-models true)".to_string());
         lines.push("".to_string());
@@ -235,7 +232,7 @@ impl SmtTranspiler {
         // Assert block equations
         lines.push("; Physical relations and invariant equations".to_string());
         for eq in &block.equations {
-            let rhs_smt = Self::expr_to_smt(&eq.rhs, &int_vars);
+            let rhs_smt = Self::expr_to_smt(&eq.rhs);
             let clause = Self::constraint_clause(eq.op, &eq.lhs, &rhs_smt);
             lines.push(format!("(assert {}) ; {}", clause, eq.original_text));
         }
@@ -264,7 +261,7 @@ impl SmtTranspiler {
                     SmtMode::Satisfy => {
                         lines.push("; Safety and boundary constraints (Satisfy mode)".to_string());
                         for c in &s.constraints {
-                            let rhs_smt = Self::expr_to_smt(&c.rhs, &int_vars);
+                            let rhs_smt = Self::expr_to_smt(&c.rhs);
                             let clause = Self::constraint_clause(c.op, &c.lhs, &rhs_smt);
                             lines.push(format!("(assert {}) ; {}", clause, c.original_text));
                         }
@@ -273,7 +270,7 @@ impl SmtTranspiler {
                         lines.push("; Invariant Refutation Assertion (Prove mode: UNSAT => invariant holds unconditionally)".to_string());
                         let mut clauses = Vec::new();
                         for c in &s.constraints {
-                            let rhs_smt = Self::expr_to_smt(&c.rhs, &int_vars);
+                            let rhs_smt = Self::expr_to_smt(&c.rhs);
                             clauses.push(Self::constraint_clause(c.op, &c.lhs, &rhs_smt));
                         }
                         if clauses.len() == 1 {
@@ -289,7 +286,7 @@ impl SmtTranspiler {
 
         // Custom invariant provided via options
         if let Some(inv_str) = &options.prove_invariant {
-            let inv_smt = Self::parse_invariant_to_smt(inv_str, &int_vars)?;
+            let inv_smt = Self::parse_invariant_to_smt(inv_str)?;
             match options.mode {
                 SmtMode::Prove => {
                     lines.push(format!(
@@ -342,10 +339,7 @@ impl SmtTranspiler {
     }
 
     /// Parses an invariant expression or comparison into SMT-LIB2 prefix syntax.
-    pub fn parse_invariant_to_smt(
-        inv_str: &str,
-        int_vars: &HashSet<String>,
-    ) -> Result<String, SmtError> {
+    pub fn parse_invariant_to_smt(inv_str: &str) -> Result<String, SmtError> {
         let trimmed = inv_str.trim();
         if trimmed.starts_with('(') {
             return Ok(trimmed.to_string());
@@ -366,22 +360,28 @@ impl SmtTranspiler {
                 let lhs_raw = trimmed[..pos].trim();
                 let rhs_raw = trimmed[pos + op_pattern.len()..].trim();
 
-                let lhs_tokens = Lexer::new(lhs_raw)
-                    .tokenize()
-                    .map_err(|e| SmtError(format!("failed to lex invariant LHS '{}': {}", lhs_raw, e)))?;
-                let lhs_expr = Parser::new(lhs_tokens)
-                    .parse_expr()
-                    .map_err(|e| SmtError(format!("failed to parse invariant LHS '{}': {}", lhs_raw, e)))?;
+                let lhs_tokens = Lexer::new(lhs_raw).tokenize().map_err(|e| {
+                    SmtError(format!("failed to lex invariant LHS '{}': {}", lhs_raw, e))
+                })?;
+                let lhs_expr = Parser::new(lhs_tokens).parse_expr().map_err(|e| {
+                    SmtError(format!(
+                        "failed to parse invariant LHS '{}': {}",
+                        lhs_raw, e
+                    ))
+                })?;
 
-                let rhs_tokens = Lexer::new(rhs_raw)
-                    .tokenize()
-                    .map_err(|e| SmtError(format!("failed to lex invariant RHS '{}': {}", rhs_raw, e)))?;
-                let rhs_expr = Parser::new(rhs_tokens)
-                    .parse_expr()
-                    .map_err(|e| SmtError(format!("failed to parse invariant RHS '{}': {}", rhs_raw, e)))?;
+                let rhs_tokens = Lexer::new(rhs_raw).tokenize().map_err(|e| {
+                    SmtError(format!("failed to lex invariant RHS '{}': {}", rhs_raw, e))
+                })?;
+                let rhs_expr = Parser::new(rhs_tokens).parse_expr().map_err(|e| {
+                    SmtError(format!(
+                        "failed to parse invariant RHS '{}': {}",
+                        rhs_raw, e
+                    ))
+                })?;
 
-                let lhs_smt = Self::expr_to_smt(&lhs_expr, int_vars);
-                let rhs_smt = Self::expr_to_smt(&rhs_expr, int_vars);
+                let lhs_smt = Self::expr_to_smt(&lhs_expr);
+                let rhs_smt = Self::expr_to_smt(&rhs_expr);
 
                 return Ok(format!("({} {} {})", smt_op, lhs_smt, rhs_smt));
             }
@@ -393,11 +393,14 @@ impl SmtTranspiler {
         let expr = Parser::new(tokens)
             .parse_expr()
             .map_err(|e| SmtError(format!("failed to parse invariant '{}': {}", trimmed, e)))?;
-        Ok(Self::expr_to_smt(&expr, int_vars))
+        Ok(Self::expr_to_smt(&expr))
     }
 
     /// Executes an SMT solver (Z3, CVC5, or python z3-solver) against the given SMT-LIB2 script.
-    pub fn run_solver(smt_script: &str, custom_solver: Option<&str>) -> Result<SmtResult, SmtError> {
+    pub fn run_solver(
+        smt_script: &str,
+        custom_solver: Option<&str>,
+    ) -> Result<SmtResult, SmtError> {
         let (raw_output, solver_used) = if let Some(cmd) = custom_solver {
             run_cmd_solver(cmd, smt_script)?
         } else if is_cmd_available("z3") {
@@ -408,7 +411,8 @@ impl SmtTranspiler {
             run_python_z3(smt_script)?
         } else {
             return Err(SmtError(
-                "no SMT solver found. Install Z3 / CVC5 or pip install z3-solver in .venv".to_string(),
+                "no SMT solver found. Install Z3 / CVC5 or pip install z3-solver in .venv"
+                    .to_string(),
             ));
         };
 
@@ -436,8 +440,10 @@ fn is_nonlinear_expr(expr: &Expr) -> bool {
         Expr::Num(_) | Expr::Var(_) => false,
         Expr::UnaryMinus(inner) => is_nonlinear_expr(inner),
         Expr::Call(name, inner) => {
-            matches!(name.as_str(), "ceil" | "floor" | "round" | "sqrt" | "ln" | "log")
-                || is_nonlinear_expr(inner)
+            matches!(
+                name.as_str(),
+                "ceil" | "floor" | "round" | "sqrt" | "ln" | "log"
+            ) || is_nonlinear_expr(inner)
         }
         Expr::Bin(BinaryOp::Pow, _, _) => true,
         Expr::Bin(BinaryOp::Div, _, right) => !right.vars().is_empty(),
@@ -650,15 +656,23 @@ pub fn parse_smt_model(output: &str) -> HashMap<String, String> {
         match e {
             Sexp::Atom(a) => a.clone(),
             Sexp::List(items) => {
-                format!("({})", items.iter().map(render).collect::<Vec<_>>().join(" "))
+                format!(
+                    "({})",
+                    items.iter().map(render).collect::<Vec<_>>().join(" ")
+                )
             }
         }
     }
 
     fn collect(e: &Sexp, map: &mut HashMap<String, String>) {
         if let Sexp::List(items) = e {
-            if let [Sexp::Atom(head), Sexp::Atom(name), Sexp::List(params), _sort, value] =
-                items.as_slice()
+            if let [
+                Sexp::Atom(head),
+                Sexp::Atom(name),
+                Sexp::List(params),
+                _sort,
+                value,
+            ] = items.as_slice()
             {
                 if head == "define-fun" && params.is_empty() {
                     let text = match eval(value) {
@@ -745,9 +759,18 @@ impl SafetyCaseReport {
     /// Renders the formal compliance safety case as a Markdown document.
     pub fn to_markdown(&self) -> String {
         let mut md = String::new();
-        md.push_str(&format!("# Formal Safety Case & Compliance Audit: {}\n\n", self.model_name));
-        md.push_str(&format!("**Model Specification:** `{}`  \n", self.model_path));
-        md.push_str(&format!("**SHA-256 Fingerprint:** `{}`  \n", self.sha256_fingerprint));
+        md.push_str(&format!(
+            "# Formal Safety Case & Compliance Audit: {}\n\n",
+            self.model_name
+        ));
+        md.push_str(&format!(
+            "**Model Specification:** `{}`  \n",
+            self.model_path
+        ));
+        md.push_str(&format!(
+            "**SHA-256 Fingerprint:** `{}`  \n",
+            self.sha256_fingerprint
+        ));
         md.push_str(&format!("**Target Block:** `{}`  \n", self.target_block));
         md.push_str(&format!("**Target Standards:** {}  \n", self.standard));
         md.push_str(&format!("**Theorem Prover:** `{}`  \n", self.solver_used));
@@ -767,13 +790,27 @@ impl SafetyCaseReport {
 
         md.push_str("## 2. Structural Metrics & Boundary Envelope\n\n");
         md.push_str(&format!("- **Total Equations:** {}\n", self.num_equations));
-        md.push_str(&format!("- **Input Parameters ({}):** `{}`\n", self.inputs.len(), self.inputs.join(", ")));
-        md.push_str(&format!("- **Actuator Outputs ({}):** `{}`\n", self.outputs.len(), self.outputs.join(", ")));
-        md.push_str(&format!("- **Continuous (Real) State:** `{}`\n", self.continuous_vars.join(", ")));
+        md.push_str(&format!(
+            "- **Input Parameters ({}):** `{}`\n",
+            self.inputs.len(),
+            self.inputs.join(", ")
+        ));
+        md.push_str(&format!(
+            "- **Actuator Outputs ({}):** `{}`\n",
+            self.outputs.len(),
+            self.outputs.join(", ")
+        ));
+        md.push_str(&format!(
+            "- **Continuous (Real) State:** `{}`\n",
+            self.continuous_vars.join(", ")
+        ));
         if self.integer_vars.is_empty() {
             md.push_str("- **Discrete (Integer) State:** `None`\n\n");
         } else {
-            md.push_str(&format!("- **Discrete (Integer) State:** `{}`\n\n", self.integer_vars.join(", ")));
+            md.push_str(&format!(
+                "- **Discrete (Integer) State:** `{}`\n\n",
+                self.integer_vars.join(", ")
+            ));
         }
 
         md.push_str("### Declared Relations\n```aven\n");
@@ -790,16 +827,28 @@ impl SafetyCaseReport {
                 let mut keys: Vec<&String> = self.solved_state.keys().collect();
                 keys.sort();
                 for k in keys {
-                    let sort = if self.integer_vars.contains(k) { "Int" } else { "Real" };
-                    md.push_str(&format!("| `{}` | `{}` | {} |\n", k, self.solved_state[k], sort));
+                    let sort = if self.integer_vars.contains(k) {
+                        "Int"
+                    } else {
+                        "Real"
+                    };
+                    md.push_str(&format!(
+                        "| `{}` | `{}` | {} |\n",
+                        k, self.solved_state[k], sort
+                    ));
                 }
-                md.push_str("\n");
+                md.push('\n');
             }
             SmtStatus::Unsat => {
-                md.push_str("Model satisfiability status: **✗ UNSAT (Infeasible System of Equations)**\n\n");
+                md.push_str(
+                    "Model satisfiability status: **✗ UNSAT (Infeasible System of Equations)**\n\n",
+                );
             }
             SmtStatus::Unknown(msg) => {
-                md.push_str(&format!("Model satisfiability status: **? UNKNOWN ({})**\n\n", msg));
+                md.push_str(&format!(
+                    "Model satisfiability status: **? UNKNOWN ({})**\n\n",
+                    msg
+                ));
             }
         }
 
@@ -807,7 +856,9 @@ impl SafetyCaseReport {
         if self.proofs.is_empty() {
             md.push_str("*(No safety invariants specified or declared)*\n\n");
         } else {
-            md.push_str("| Invariant Requirement | SMT Translation | Formal Verdict | Counterexample |\n");
+            md.push_str(
+                "| Invariant Requirement | SMT Translation | Formal Verdict | Counterexample |\n",
+            );
             md.push_str("|---|---|---|---|\n");
             for p in &self.proofs {
                 let verdict_str = if p.proven {
@@ -816,14 +867,21 @@ impl SafetyCaseReport {
                     "✗ VIOLATED"
                 };
                 let ce_str = if let Some(ref ce) = p.counterexample {
-                    let items: Vec<String> = ce.iter().take(4).map(|(k, v)| format!("{}={}", k, v)).collect();
+                    let items: Vec<String> = ce
+                        .iter()
+                        .take(4)
+                        .map(|(k, v)| format!("{}={}", k, v))
+                        .collect();
                     format!("`{}`", items.join(", "))
                 } else {
                     "None (Refutation UNSAT)".to_string()
                 };
-                md.push_str(&format!("| `{}` | `{}` | {} | {} |\n", p.invariant, p.smt_clause, verdict_str, ce_str));
+                md.push_str(&format!(
+                    "| `{}` | `{}` | {} | {} |\n",
+                    p.invariant, p.smt_clause, verdict_str, ce_str
+                ));
             }
-            md.push_str("\n");
+            md.push('\n');
         }
 
         md.push_str("## 5. Safety Standards Traceability Matrix\n\n");
@@ -848,8 +906,14 @@ impl SafetyCaseReport {
 
         md.push_str("## 6. Tool Qualification Record (DO-330 / ISO 26262 TCL-1)\n\n");
         md.push_str("- **Compiler:** `avenc v0.6.0` (pure-Rust standard library toolchain)\n");
-        md.push_str(&format!("- **SMT Theorem Prover:** `{}`\n", self.solver_used));
-        md.push_str(&format!("- **Audit Digest:** `SHA-256:{}`\n", sha256_hex(md.as_bytes())));
+        md.push_str(&format!(
+            "- **SMT Theorem Prover:** `{}`\n",
+            self.solver_used
+        ));
+        md.push_str(&format!(
+            "- **Audit Digest:** `SHA-256:{}`\n",
+            sha256_hex(md.as_bytes())
+        ));
 
         md
     }
@@ -859,19 +923,33 @@ impl SafetyCaseReport {
         let mut json = String::new();
         json.push_str("{\n");
         json.push_str(&format!("  \"model_name\": \"{}\",\n", self.model_name));
-        json.push_str(&format!("  \"source_path\": \"{}\",\n", self.model_path.replace('\\', "/")));
-        json.push_str(&format!("  \"sha256_fingerprint\": \"{}\",\n", self.sha256_fingerprint));
+        json.push_str(&format!(
+            "  \"source_path\": \"{}\",\n",
+            self.model_path.replace('\\', "/")
+        ));
+        json.push_str(&format!(
+            "  \"sha256_fingerprint\": \"{}\",\n",
+            self.sha256_fingerprint
+        ));
         json.push_str(&format!("  \"target_block\": \"{}\",\n", self.target_block));
         json.push_str(&format!("  \"logic\": \"{}\",\n", self.logic));
         json.push_str(&format!("  \"all_passed\": {},\n", self.all_passed));
-        json.push_str(&format!("  \"satisfiability\": \"{:?}\",\n", self.satisfiability_status));
-        json.push_str(&format!("  \"solver_used\": \"{}\",\n", self.solver_used.replace('\\', "/")));
+        json.push_str(&format!(
+            "  \"satisfiability\": \"{:?}\",\n",
+            self.satisfiability_status
+        ));
+        json.push_str(&format!(
+            "  \"solver_used\": \"{}\",\n",
+            self.solver_used.replace('\\', "/")
+        ));
         json.push_str(&format!("  \"timestamp\": \"{}\",\n", self.timestamp));
 
         // Inputs array
         json.push_str("  \"inputs\": [");
         for (i, inp) in self.inputs.iter().enumerate() {
-            if i > 0 { json.push_str(", "); }
+            if i > 0 {
+                json.push_str(", ");
+            }
             json.push_str(&format!("\"{}\"", inp));
         }
         json.push_str("],\n");
@@ -879,7 +957,9 @@ impl SafetyCaseReport {
         // Outputs array
         json.push_str("  \"outputs\": [");
         for (i, out) in self.outputs.iter().enumerate() {
-            if i > 0 { json.push_str(", "); }
+            if i > 0 {
+                json.push_str(", ");
+            }
             json.push_str(&format!("\"{}\"", out));
         }
         json.push_str("],\n");
@@ -887,10 +967,18 @@ impl SafetyCaseReport {
         // Proofs array
         json.push_str("  \"proofs\": [\n");
         for (i, p) in self.proofs.iter().enumerate() {
-            if i > 0 { json.push_str(",\n"); }
+            if i > 0 {
+                json.push_str(",\n");
+            }
             json.push_str("    {\n");
-            json.push_str(&format!("      \"invariant\": \"{}\",\n", p.invariant.replace('\"', "\\\"")));
-            json.push_str(&format!("      \"smt_clause\": \"{}\",\n", p.smt_clause.replace('\"', "\\\"")));
+            json.push_str(&format!(
+                "      \"invariant\": \"{}\",\n",
+                p.invariant.replace('\"', "\\\"")
+            ));
+            json.push_str(&format!(
+                "      \"smt_clause\": \"{}\",\n",
+                p.smt_clause.replace('\"', "\\\"")
+            ));
             json.push_str(&format!("      \"proven\": {},\n", p.proven));
             json.push_str(&format!("      \"status\": \"{:?}\"\n", p.status));
             json.push_str("    }");
@@ -911,17 +999,19 @@ impl SafetyCaseGenerator {
         custom_invariants: &[String],
         solver_cmd: Option<&str>,
     ) -> Result<SafetyCaseReport, SmtError> {
-        let source_text = fs::read_to_string(source_path)
-            .unwrap_or_else(|_| module.name.clone());
+        let source_text = fs::read_to_string(source_path).unwrap_or_else(|_| module.name.clone());
         let sha256_fingerprint = sha256_hex(source_text.as_bytes());
 
-        let target_block = if let Some(fb) = module.blocks.iter().find(|b| b.kind == BlockKind::Forward) {
-            fb
-        } else if let Some(rb) = module.blocks.first() {
-            rb
-        } else {
-            return Err(SmtError("module has no relation or forward blocks".to_string()));
-        };
+        let target_block =
+            if let Some(fb) = module.blocks.iter().find(|b| b.kind == BlockKind::Forward) {
+                fb
+            } else if let Some(rb) = module.blocks.first() {
+                rb
+            } else {
+                return Err(SmtError(
+                    "module has no relation or forward blocks".to_string(),
+                ));
+            };
 
         // Determine outputs (LHS of equations)
         let mut outputs = Vec::new();
@@ -945,7 +1035,12 @@ impl SafetyCaseGenerator {
 
         // Integer vs Continuous
         let mut int_vars_set = HashSet::new();
-        if let Some(s) = module.solves.iter().find(|s| s.target == target_block.name || s.targets.contains(&target_block.name)).or_else(|| module.solves.first()) {
+        if let Some(s) = module
+            .solves
+            .iter()
+            .find(|s| s.target == target_block.name || s.targets.contains(&target_block.name))
+            .or_else(|| module.solves.first())
+        {
             for iv in &s.integer_vars {
                 int_vars_set.insert(iv.clone());
             }
@@ -991,9 +1086,20 @@ impl SafetyCaseGenerator {
         // Step 2: Discharge Invariants
         let mut inv_candidates = Vec::new();
         // Inequalities from solve block
-        if let Some(s) = module.solves.iter().find(|s| s.target == target_block.name || s.targets.contains(&target_block.name)).or_else(|| module.solves.first()) {
+        if let Some(s) = module
+            .solves
+            .iter()
+            .find(|s| s.target == target_block.name || s.targets.contains(&target_block.name))
+            .or_else(|| module.solves.first())
+        {
             for c in &s.constraints {
-                if matches!(c.op, ConstraintOp::Less | ConstraintOp::LessEqual | ConstraintOp::Greater | ConstraintOp::GreaterEqual) {
+                if matches!(
+                    c.op,
+                    ConstraintOp::Less
+                        | ConstraintOp::LessEqual
+                        | ConstraintOp::Greater
+                        | ConstraintOp::GreaterEqual
+                ) {
                     inv_candidates.push(c.original_text.clone());
                 }
             }
@@ -1022,8 +1128,8 @@ impl SafetyCaseGenerator {
             } else {
                 None
             };
-            let smt_clause = SmtTranspiler::parse_invariant_to_smt(&inv, &int_vars_set)
-                .unwrap_or_else(|_| inv.clone());
+            let smt_clause =
+                SmtTranspiler::parse_invariant_to_smt(&inv).unwrap_or_else(|_| inv.clone());
 
             proofs.push(InvariantProofRecord {
                 invariant: inv,
@@ -1062,4 +1168,3 @@ impl SafetyCaseGenerator {
         })
     }
 }
-

@@ -10,21 +10,21 @@
 
 mod ast;
 mod codegen_c;
+mod codegen_wasm;
+mod compaction;
+mod debugger;
 mod diagnostics;
 mod diff;
 mod evaluator;
 mod ledger;
 mod lexer;
 mod optimize;
-mod parser;
-mod solver;
-mod units;
-mod smt;
-mod temporal;
-mod compaction;
-mod debugger;
-mod codegen_wasm;
 mod package;
+mod parser;
+mod smt;
+mod solver;
+mod temporal;
+mod units;
 
 use ast::*;
 use codegen_c::CTranspiler;
@@ -69,30 +69,62 @@ fn print_usage() {
     println!(
         "                                        Show causal derivation tree (default depth: 20; 0 for unlimited)"
     );
-    println!("  avenc emit-c <file.aven> [-o out.c] [--traceable] [--checked-c] [--no-main] [--aeric-shim] [--out-dir <dir>]");
-    println!("                                        Transpile the forward block to standalone C (same as build --emit-c)");
-    println!("  avenc build <file.aven> [--emit-c] [-o out.c] [--traceable] [--checked-c] [--no-main] [--aeric-shim] [--out-dir <dir>]");
-    println!("                                        Transpile pinned relations to standalone C or AERIC deployment bundle");
+    println!(
+        "  avenc emit-c <file.aven> [-o out.c] [--traceable] [--checked-c] [--no-main] [--aeric-shim] [--out-dir <dir>]"
+    );
+    println!(
+        "                                        Transpile the forward block to standalone C (same as build --emit-c)"
+    );
+    println!(
+        "  avenc build <file.aven> [--emit-c] [-o out.c] [--traceable] [--checked-c] [--no-main] [--aeric-shim] [--out-dir <dir>]"
+    );
+    println!(
+        "                                        Transpile pinned relations to standalone C or AERIC deployment bundle"
+    );
     println!("  avenc emit-smt <file.aven> [-o out.smt2] [--prove] [--logic <LOGIC>]");
-    println!("                                        Transpile relation/forward blocks to SMT-LIB2 format for Z3/CVC5");
+    println!(
+        "                                        Transpile relation/forward blocks to SMT-LIB2 format for Z3/CVC5"
+    );
     println!("  avenc verify-smt <file.aven> [--prove] [--solver <CMD>]");
-    println!("                                        Formally verify safety invariants or check satisfiability via SMT");
-    println!("  avenc safety-case <file.aven> [-o report.md] [--format md|json] [--standard all|do178c|iso26262] [--invariant \"<expr>\"]");
-    println!("                                        Generate formal safety case report for DO-178C (Table A-5) & ISO 26262 ASIL-D");
-    println!("  avenc bench <file.aven> [--iterations N] [--latency-profile] [--target-hz HZ] [--compiled] [--json] [--markdown]");
-    println!("                                        Benchmark solve performance, WCET single-tick latency, and cycle jitter");
+    println!(
+        "                                        Formally verify safety invariants or check satisfiability via SMT"
+    );
+    println!(
+        "  avenc safety-case <file.aven> [-o report.md] [--format md|json] [--standard all|do178c|iso26262] [--invariant \"<expr>\"]"
+    );
+    println!(
+        "                                        Generate formal safety case report for DO-178C (Table A-5) & ISO 26262 ASIL-D"
+    );
+    println!(
+        "  avenc bench <file.aven> [--iterations N] [--latency-profile] [--target-hz HZ] [--compiled] [--json] [--markdown]"
+    );
+    println!(
+        "                                        Benchmark solve performance, WCET single-tick latency, and cycle jitter"
+    );
     println!(
         "  avenc check <file.aven>               Validate syntax, relations, and unit declarations"
     );
     println!("  avenc verify-ledger <out.jsonl> [--key <KEY>]");
-    println!("                                        Check an audit log's hash chain and HMAC-SHA256 signatures");
+    println!(
+        "                                        Check an audit log's hash chain and HMAC-SHA256 signatures"
+    );
     println!("  avenc compact-ledger <in.jsonl> -o <out.jsonl>");
-    println!("                                        Compact settled historical audit log to bound storage footprint");
-    println!("  avenc debug <file.aven> [ledger.jsonl] [--goto <N>] [--what-if \"<var>=<val>\"] [--diff <t1>,<t2>]");
-    println!("                                        Interactive time-travel debugger & counterfactual branch explorer");
-  println!("  avenc emit-wasm <file.aven> [-o out.wasm] [--wat]");
-    println!("                                        Transpile relation/forward blocks to WebAssembly (.wasm / .wat)");
-    println!("  avenc pkg <init|pack|install|list>    Package manager: init, pack, install, and list unit-verified packages");
+    println!(
+        "                                        Compact settled historical audit log to bound storage footprint"
+    );
+    println!(
+        "  avenc debug <file.aven> [ledger.jsonl] [--goto <N>] [--what-if \"<var>=<val>\"] [--diff <t1>,<t2>]"
+    );
+    println!(
+        "                                        Interactive time-travel debugger & counterfactual branch explorer"
+    );
+    println!("  avenc emit-wasm <file.aven> [-o out.wasm] [--wat]");
+    println!(
+        "                                        Transpile relation/forward blocks to WebAssembly (.wasm / .wat)"
+    );
+    println!(
+        "  avenc pkg <init|pack|install|list>    Package manager: init, pack, install, and list unit-verified packages"
+    );
     println!("  avenc demo                            Run built-in multi-pillar verification test");
 }
 
@@ -127,7 +159,9 @@ fn real_main() {
                 .skip(2)
                 .find(|a| !a.starts_with("--") && Some(*a) != key_arg.as_ref());
             let Some(file) = file_arg else {
-                eprintln!("Error: missing file argument for 'verify-ledger': avenc verify-ledger <out.jsonl> [--key <KEY>]");
+                eprintln!(
+                    "Error: missing file argument for 'verify-ledger': avenc verify-ledger <out.jsonl> [--key <KEY>]"
+                );
                 process::exit(1);
             };
             cmd_verify_ledger(file, key_arg.as_deref());
@@ -144,14 +178,22 @@ fn real_main() {
                 aeric_shim: args.iter().any(|a| a == "--aeric-shim"),
                 no_main: args.iter().any(|a| a == "--no-main"),
             };
-            let out_file = args.windows(2).find(|w| w[0] == "-o").map(|w| w[1].as_str());
-            let out_dir = args.windows(2).find(|w| w[0] == "--out-dir").map(|w| w[1].as_str());
+            let out_file = args
+                .windows(2)
+                .find(|w| w[0] == "-o")
+                .map(|w| w[1].as_str());
+            let out_dir = args
+                .windows(2)
+                .find(|w| w[0] == "--out-dir")
+                .map(|w| w[1].as_str());
             cmd_build(file, true, out_file, out_dir, &options);
         }
         "emit-smt" => {
             let file_arg = args.iter().skip(2).find(|a| !a.starts_with('-'));
             let Some(file) = file_arg else {
-                eprintln!("Error: missing file argument for 'emit-smt': avenc emit-smt <file.aven> [-o out.smt2] [--prove]");
+                eprintln!(
+                    "Error: missing file argument for 'emit-smt': avenc emit-smt <file.aven> [-o out.smt2] [--prove]"
+                );
                 process::exit(1);
             };
             let prove = args.iter().any(|a| a == "--prove");
@@ -182,7 +224,9 @@ fn real_main() {
         "verify-smt" => {
             let file_arg = args.iter().skip(2).find(|a| !a.starts_with('-'));
             let Some(file) = file_arg else {
-                eprintln!("Error: missing file argument for 'verify-smt': avenc verify-smt <file.aven> [--prove] [--solver <CMD>]");
+                eprintln!(
+                    "Error: missing file argument for 'verify-smt': avenc verify-smt <file.aven> [--prove] [--solver <CMD>]"
+                );
                 process::exit(1);
             };
             let prove = args.iter().any(|a| a == "--prove");
@@ -213,7 +257,9 @@ fn real_main() {
         "safety-case" => {
             let file_arg = args.iter().skip(2).find(|a| !a.starts_with('-'));
             let Some(file) = file_arg else {
-                eprintln!("Error: missing file argument for 'safety-case': avenc safety-case <file.aven> [-o report.md]");
+                eprintln!(
+                    "Error: missing file argument for 'safety-case': avenc safety-case <file.aven> [-o report.md]"
+                );
                 process::exit(1);
             };
             let out_file = args
@@ -257,7 +303,9 @@ fn real_main() {
                 .windows(2)
                 .find(|w| w[0] == "--iterations" || w[0] == "-n")
                 .and_then(|w| w[1].parse::<usize>().ok());
-            let latency_profile = args.iter().any(|a| a == "--latency-profile" || a == "--profile");
+            let latency_profile = args
+                .iter()
+                .any(|a| a == "--latency-profile" || a == "--profile");
             let target_hz = args
                 .windows(2)
                 .find(|w| w[0] == "--target-hz" || w[0] == "--hz")
@@ -458,8 +506,12 @@ fn real_main() {
                 _ => {
                     eprintln!("Usage: avenc pkg <init|pack|install|list>");
                     eprintln!("  avenc pkg init [name]            Initialize a new Aven package");
-                    eprintln!("  avenc pkg pack [dir] [-o out]     Pack package into .avenpkg archive");
-                    eprintln!("  avenc pkg install <file.avenpkg> Install package into local cache");
+                    eprintln!(
+                        "  avenc pkg pack [dir] [-o out]     Pack package into .avenpkg archive"
+                    );
+                    eprintln!(
+                        "  avenc pkg install <file.avenpkg> Install package into local cache"
+                    );
                     eprintln!("  avenc pkg list                   List installed packages");
                     process::exit(1);
                 }
@@ -477,10 +529,11 @@ fn real_main() {
                 .windows(2)
                 .find(|w| w[0] == "--ledger")
                 .map(|w| w[1].clone());
-            let file_arg = args
-                .iter()
-                .skip(2)
-                .find(|a| !a.starts_with("--") && Some(*a) != ledger_out.as_ref() && Some(*a) != key_arg.as_ref());
+            let file_arg = args.iter().skip(2).find(|a| {
+                !a.starts_with("--")
+                    && Some(*a) != ledger_out.as_ref()
+                    && Some(*a) != key_arg.as_ref()
+            });
             if file_arg.is_none() {
                 eprintln!("Error: missing file argument for 'run'");
                 process::exit(1);
@@ -513,18 +566,27 @@ fn real_main() {
                 eprintln!("Error: missing file argument for 'pareto'");
                 process::exit(1);
             }
-            let positional: Vec<&String> =
-                args.iter().skip(3).take(3).take_while(|s| !s.starts_with("--")).collect();
+            let positional: Vec<&String> = args
+                .iter()
+                .skip(3)
+                .take(3)
+                .take_while(|s| !s.starts_with("--"))
+                .collect();
             let (sweep_var, min_val, max_val) = match positional.as_slice() {
                 [v, lo, hi] => match (lo.parse::<f64>(), hi.parse::<f64>()) {
                     (Ok(lo), Ok(hi)) if lo < hi => (v.as_str(), lo, hi),
                     _ => {
-                        eprintln!("Error: pareto range must be two numbers with min < max, got '{}' '{}'", lo, hi);
+                        eprintln!(
+                            "Error: pareto range must be two numbers with min < max, got '{}' '{}'",
+                            lo, hi
+                        );
                         process::exit(1);
                     }
                 },
                 _ => {
-                    eprintln!("Usage: avenc pareto <file.aven> <var> <min> <max> [--steps N] [--backend native|external] [--cmd <command>]");
+                    eprintln!(
+                        "Usage: avenc pareto <file.aven> <var> <min> <max> [--steps N] [--backend native|external] [--cmd <command>]"
+                    );
                     process::exit(1);
                 }
             };
@@ -542,7 +604,15 @@ fn real_main() {
                 .and_then(|w| w[1].parse::<usize>().ok())
                 .unwrap_or(5)
                 .clamp(1, 1000);
-            cmd_pareto(&args[2], sweep_var, min_val, max_val, backend_arg, cmd_arg, steps);
+            cmd_pareto(
+                &args[2],
+                sweep_var,
+                min_val,
+                max_val,
+                backend_arg,
+                cmd_arg,
+                steps,
+            );
         }
         "why" => {
             let mut non_flags = Vec::new();
@@ -831,7 +901,11 @@ fn cmd_run(
                 res.ledger.len(),
                 out,
                 &res.ledger.head()[..16],
-                if res.ledger.is_signed() { ", HMAC-signed" } else { "" }
+                if res.ledger.is_signed() {
+                    ", HMAC-signed"
+                } else {
+                    ""
+                }
             );
             if let Some(ref k_hex) = generated_key_hex {
                 println!("  Randomized verification key: {}", k_hex);
@@ -847,9 +921,7 @@ fn cmd_run(
         for f in &res.stale_facts {
             eprintln!("    • {}", f);
         }
-        eprintln!(
-            "\n  Refusing to settle a decision on expired inputs."
-        );
+        eprintln!("\n  Refusing to settle a decision on expired inputs.");
         eprintln!("  Pass --allow-stale to explicitly override in non-production environments.");
         process::exit(EXIT_DECISION_BLOCKED);
     }
@@ -1005,7 +1077,9 @@ fn cmd_bench(path: &str, iterations: usize) {
     for _ in 0..iterations {
         let t0 = std::time::Instant::now();
         let tokens = Lexer::new(&source).tokenize().expect("tokenize failed");
-        let _ = Parser::new(tokens).parse_module(path).expect("parse failed");
+        let _ = Parser::new(tokens)
+            .parse_module(path)
+            .expect("parse failed");
         parse_us.push(t0.elapsed().as_secs_f64() * 1e6);
     }
 
@@ -1023,7 +1097,10 @@ fn cmd_bench(path: &str, iterations: usize) {
     let throughput = solve_us.len() as f64 / solve_total_s;
 
     println!("avenc bench '{}' — {} iterations", path, iterations);
-    println!("  {:<28} {:>12} {:>12} {:>12}", "stage", "min µs", "median µs", "p95 µs");
+    println!(
+        "  {:<28} {:>12} {:>12} {:>12}",
+        "stage", "min µs", "median µs", "p95 µs"
+    );
     for (name, samples) in [
         ("lex + parse", parse_us),
         ("solve (incl. external/IPC)", solve_us),
@@ -1053,12 +1130,16 @@ fn cmd_bench_latency_profile(
     output_markdown: bool,
 ) {
     let module = parse_file(path);
-    let target_block = if let Some(fb) = module.blocks.iter().find(|b| b.kind == BlockKind::Forward) {
+    let target_block = if let Some(fb) = module.blocks.iter().find(|b| b.kind == BlockKind::Forward)
+    {
         fb
     } else if let Some(rb) = module.blocks.first() {
         rb
     } else {
-        eprintln!("Error: model '{}' has no relation or forward blocks to profile", path);
+        eprintln!(
+            "Error: model '{}' has no relation or forward blocks to profile",
+            path
+        );
         process::exit(1);
     };
 
@@ -1072,7 +1153,12 @@ fn cmd_bench_latency_profile(
 
     // Prepare input environment from solve block
     let mut initial_env: HashMap<String, f64> = HashMap::new();
-    if let Some(s) = module.solves.iter().find(|s| s.target == target_block.name || s.targets.contains(&target_block.name)).or_else(|| module.solves.first()) {
+    if let Some(s) = module
+        .solves
+        .iter()
+        .find(|s| s.target == target_block.name || s.targets.contains(&target_block.name))
+        .or_else(|| module.solves.first())
+    {
         for b in &s.bindings {
             initial_env.insert(b.name.clone(), b.value);
         }
@@ -1117,7 +1203,11 @@ fn cmd_bench_latency_profile(
 
     let sum_ns: u64 = sorted.iter().sum();
     let mean_ns = sum_ns as f64 / n as f64;
-    let variance: f64 = sorted.iter().map(|&x| (x as f64 - mean_ns).powi(2)).sum::<f64>() / n as f64;
+    let variance: f64 = sorted
+        .iter()
+        .map(|&x| (x as f64 - mean_ns).powi(2))
+        .sum::<f64>()
+        / n as f64;
     let std_dev_ns = variance.sqrt();
     let jitter_range_ns = max_ns.saturating_sub(min_ns);
 
@@ -1141,7 +1231,10 @@ fn cmd_bench_latency_profile(
         println!("  \"jitter_range_ns\": {},", jitter_range_ns);
         if let Some(d) = target_deadline_ns {
             println!("  \"target_deadline_ns\": {},", d);
-            println!("  \"deadline_violations\": {},", deadline_violations.unwrap_or(0));
+            println!(
+                "  \"deadline_violations\": {},",
+                deadline_violations.unwrap_or(0)
+            );
         }
         println!("  \"throughput_solves_per_sec\": {:.0}", 1e9 / mean_ns);
         println!("}}");
@@ -1150,21 +1243,64 @@ fn cmd_bench_latency_profile(
 
     if output_markdown {
         println!("### Real-Time Tick Latency & Jitter Profile: `{}`", path);
-        println!("- **Iterations:** {} | **Target Block:** `{}`", n, target_block.name);
+        println!(
+            "- **Iterations:** {} | **Target Block:** `{}`",
+            n, target_block.name
+        );
         if let Some(hz) = target_hz {
-            println!("- **Target Control Rate:** {:.1} Hz (Deadline: {:.2} µs)", hz, 1e6 / hz);
+            println!(
+                "- **Target Control Rate:** {:.1} Hz (Deadline: {:.2} µs)",
+                hz,
+                1e6 / hz
+            );
         }
         println!("\n| Metric | Latency (ns) | Latency (µs) | Definition |");
         println!("|---|---:|---:|---|");
-        println!("| **Min** | {} | {:.3} | Best-case single-tick execution time |", min_ns, min_ns as f64 / 1000.0);
-        println!("| **p50 (Median)** | {} | {:.3} | 50th percentile nominal cycle latency |", p50_ns, p50_ns as f64 / 1000.0);
-        println!("| **p90** | {} | {:.3} | 90th percentile upper boundary |", p90_ns, p90_ns as f64 / 1000.0);
-        println!("| **p95** | {} | {:.3} | 95th percentile upper boundary |", p95_ns, p95_ns as f64 / 1000.0);
-        println!("| **p99** | {} | {:.3} | 99th percentile real-time latency |", p99_ns, p99_ns as f64 / 1000.0);
-        println!("| **p99.9** | {} | {:.3} | 99.9th percentile tail latency |", p99_9_ns, p99_9_ns as f64 / 1000.0);
-        println!("| **Max (WCET)** | {} | {:.3} | Worst-Case Execution Time across battery |", max_ns, max_ns as f64 / 1000.0);
-        println!("| **Std Dev (σ)** | {:.1} | {:.3} | Latency dispersion / cycle jitter |", std_dev_ns, std_dev_ns / 1000.0);
-        println!("| **Jitter Range** | {} | {:.3} | Max − Min cycle variance |", jitter_range_ns, jitter_range_ns as f64 / 1000.0);
+        println!(
+            "| **Min** | {} | {:.3} | Best-case single-tick execution time |",
+            min_ns,
+            min_ns as f64 / 1000.0
+        );
+        println!(
+            "| **p50 (Median)** | {} | {:.3} | 50th percentile nominal cycle latency |",
+            p50_ns,
+            p50_ns as f64 / 1000.0
+        );
+        println!(
+            "| **p90** | {} | {:.3} | 90th percentile upper boundary |",
+            p90_ns,
+            p90_ns as f64 / 1000.0
+        );
+        println!(
+            "| **p95** | {} | {:.3} | 95th percentile upper boundary |",
+            p95_ns,
+            p95_ns as f64 / 1000.0
+        );
+        println!(
+            "| **p99** | {} | {:.3} | 99th percentile real-time latency |",
+            p99_ns,
+            p99_ns as f64 / 1000.0
+        );
+        println!(
+            "| **p99.9** | {} | {:.3} | 99.9th percentile tail latency |",
+            p99_9_ns,
+            p99_9_ns as f64 / 1000.0
+        );
+        println!(
+            "| **Max (WCET)** | {} | {:.3} | Worst-Case Execution Time across battery |",
+            max_ns,
+            max_ns as f64 / 1000.0
+        );
+        println!(
+            "| **Std Dev (σ)** | {:.1} | {:.3} | Latency dispersion / cycle jitter |",
+            std_dev_ns,
+            std_dev_ns / 1000.0
+        );
+        println!(
+            "| **Jitter Range** | {} | {:.3} | Max − Min cycle variance |",
+            jitter_range_ns,
+            jitter_range_ns as f64 / 1000.0
+        );
         return;
     }
 
@@ -1173,31 +1309,95 @@ fn cmd_bench_latency_profile(
     println!(" Aven High-Resolution Real-Time Latency & Jitter Profiler");
     println!(" Model: '{}' | Iterations: {}", path, n);
     println!("============================================================");
-    println!(" Target Block: '{}' ({} equations)", target_block.name, target_block.equations.len());
+    println!(
+        " Target Block: '{}' ({} equations)",
+        target_block.name,
+        target_block.equations.len()
+    );
     if let Some(hz) = target_hz {
         let deadline = target_deadline_ns.unwrap();
         let violations = deadline_violations.unwrap();
-        println!(" Target Rate: {:.1} Hz | Deadline: {} ns ({:.2} µs)", hz, deadline, deadline as f64 / 1000.0);
+        println!(
+            " Target Rate: {:.1} Hz | Deadline: {} ns ({:.2} µs)",
+            hz,
+            deadline,
+            deadline as f64 / 1000.0
+        );
         if violations == 0 {
             println!(" Deadline Adherence: ✓ 100.0% (0 / {} violations)", n);
         } else {
-            println!(" Deadline Adherence: ✗ {:.2}% ({} / {} violations)", (1.0 - violations as f64 / n as f64) * 100.0, violations, n);
+            println!(
+                " Deadline Adherence: ✗ {:.2}% ({} / {} violations)",
+                (1.0 - violations as f64 / n as f64) * 100.0,
+                violations,
+                n
+            );
         }
     }
     println!("------------------------------------------------------------");
-    println!(" {:<20} {:>14} {:>14}", "Quantile", "Latency (ns)", "Latency (µs)");
+    println!(
+        " {:<20} {:>14} {:>14}",
+        "Quantile", "Latency (ns)", "Latency (µs)"
+    );
     println!("------------------------------------------------------------");
-    println!(" {:<20} {:>14} {:>14.3}", "Min (Best Case)", min_ns, min_ns as f64 / 1000.0);
-    println!(" {:<20} {:>14} {:>14.3}", "p50 (Median)", p50_ns, p50_ns as f64 / 1000.0);
-    println!(" {:<20} {:>14} {:>14.3}", "p90", p90_ns, p90_ns as f64 / 1000.0);
-    println!(" {:<20} {:>14} {:>14.3}", "p95", p95_ns, p95_ns as f64 / 1000.0);
-    println!(" {:<20} {:>14} {:>14.3}", "p99", p99_ns, p99_ns as f64 / 1000.0);
-    println!(" {:<20} {:>14} {:>14.3}", "p99.9", p99_9_ns, p99_9_ns as f64 / 1000.0);
-    println!(" {:<20} {:>14} {:>14.3}", "Max (WCET)", max_ns, max_ns as f64 / 1000.0);
+    println!(
+        " {:<20} {:>14} {:>14.3}",
+        "Min (Best Case)",
+        min_ns,
+        min_ns as f64 / 1000.0
+    );
+    println!(
+        " {:<20} {:>14} {:>14.3}",
+        "p50 (Median)",
+        p50_ns,
+        p50_ns as f64 / 1000.0
+    );
+    println!(
+        " {:<20} {:>14} {:>14.3}",
+        "p90",
+        p90_ns,
+        p90_ns as f64 / 1000.0
+    );
+    println!(
+        " {:<20} {:>14} {:>14.3}",
+        "p95",
+        p95_ns,
+        p95_ns as f64 / 1000.0
+    );
+    println!(
+        " {:<20} {:>14} {:>14.3}",
+        "p99",
+        p99_ns,
+        p99_ns as f64 / 1000.0
+    );
+    println!(
+        " {:<20} {:>14} {:>14.3}",
+        "p99.9",
+        p99_9_ns,
+        p99_9_ns as f64 / 1000.0
+    );
+    println!(
+        " {:<20} {:>14} {:>14.3}",
+        "Max (WCET)",
+        max_ns,
+        max_ns as f64 / 1000.0
+    );
     println!("------------------------------------------------------------");
-    println!(" Mean (µ):           {:>14.1} ns ({:.3} µs)", mean_ns, mean_ns / 1000.0);
-    println!(" Jitter (σ):         {:>14.1} ns ({:.3} µs)", std_dev_ns, std_dev_ns / 1000.0);
-    println!(" Jitter Range:       {:>14} ns ({:.3} µs)", jitter_range_ns, jitter_range_ns as f64 / 1000.0);
+    println!(
+        " Mean (µ):           {:>14.1} ns ({:.3} µs)",
+        mean_ns,
+        mean_ns / 1000.0
+    );
+    println!(
+        " Jitter (σ):         {:>14.1} ns ({:.3} µs)",
+        std_dev_ns,
+        std_dev_ns / 1000.0
+    );
+    println!(
+        " Jitter Range:       {:>14} ns ({:.3} µs)",
+        jitter_range_ns,
+        jitter_range_ns as f64 / 1000.0
+    );
     println!(" Throughput:         {:>14.0} solves/sec", 1e9 / mean_ns);
     println!("============================================================");
 }
@@ -1404,11 +1604,15 @@ fn cmd_verify_smt(path: &str, solver_cmd: Option<&str>, options: &smt::SmtOption
     match (options.mode, res.status) {
         (smt::SmtMode::Prove, smt::SmtStatus::Unsat) => {
             println!("\n✓ FORMALLY PROVEN (UNSAT)");
-            println!("  Safety invariant holds unconditionally across the entire parameter envelope.");
+            println!(
+                "  Safety invariant holds unconditionally across the entire parameter envelope."
+            );
         }
         (smt::SmtMode::Prove, smt::SmtStatus::Sat) => {
             println!("\n✗ INVARIANT VIOLATED (SAT)");
-            println!("  Counterexample found! The safety invariant can be broken under the following state:");
+            println!(
+                "  Counterexample found! The safety invariant can be broken under the following state:"
+            );
             let mut keys: Vec<&String> = res.model.keys().collect();
             keys.sort();
             for k in keys {
@@ -1427,7 +1631,9 @@ fn cmd_verify_smt(path: &str, solver_cmd: Option<&str>, options: &smt::SmtOption
         }
         (smt::SmtMode::Satisfy, smt::SmtStatus::Unsat) => {
             println!("\n✗ INFEASIBLE (UNSAT)");
-            println!("  No physical state exists that satisfies all declared equations and constraints.");
+            println!(
+                "  No physical state exists that satisfies all declared equations and constraints."
+            );
             process::exit(EXIT_CONSTRAINT_VIOLATION);
         }
         (_, smt::SmtStatus::Unknown(msg)) => {
@@ -1477,7 +1683,10 @@ fn cmd_safety_case(
             eprintln!("Error writing safety case to '{}': {}", out_path, e);
             process::exit(1);
         }
-        println!("Successfully generated Safety Case report to '{}'", out_path);
+        println!(
+            "Successfully generated Safety Case report to '{}'",
+            out_path
+        );
     } else {
         println!("{}", content);
     }
@@ -1528,7 +1737,11 @@ fn cmd_debug(
         } else {
             for d in diffs {
                 let (old_s, new_s, delta_s) = session.show_diff(&d);
-                let delta_s = if delta_s == "None" { String::new() } else { format!(" (Δ {})", delta_s) };
+                let delta_s = if delta_s == "None" {
+                    String::new()
+                } else {
+                    format!(" (Δ {})", delta_s)
+                };
                 println!("  {:<24} : {} -> {}{}", d.name, old_s, new_s, delta_s);
             }
         }
@@ -1557,10 +1770,15 @@ fn cmd_debug(
                         "  {:<24} {:>14} {:>14} {:>14}",
                         "Output Variable", "Nominal", "Branch", "Delta"
                     );
-                    println!("  --------------------------------------------------------------------");
+                    println!(
+                        "  --------------------------------------------------------------------"
+                    );
                     for d in res.diffs {
                         let (old_s, new_s, delta_s) = session.show_diff(&d);
-                        println!("  {:<24} {:>14} {:>14} {:>14}", d.name, old_s, new_s, delta_s);
+                        println!(
+                            "  {:<24} {:>14} {:>14} {:>14}",
+                            d.name, old_s, new_s, delta_s
+                        );
                     }
                 }
                 Err(e) => {
@@ -1580,7 +1798,12 @@ fn cmd_debug(
                 keys.sort();
                 for k in keys {
                     let v = &st.vars[k];
-                    println!("  {:<24} = {:>20}  ({})", v.name, session.show(&v.name, v.value), v.kind);
+                    println!(
+                        "  {:<24} = {:>20}  ({})",
+                        v.name,
+                        session.show(&v.name, v.value),
+                        v.kind
+                    );
                 }
             }
             Err(e) => eprintln!("Error jumping to tick {}: {}", t, e),
@@ -1631,8 +1854,15 @@ fn cmd_compact_ledger(in_path: &str, out_path: &str) {
 
 /// Whether the optimizer proved its result globally optimal, from its trace.
 fn optimality_of(trace: &[String]) -> Option<&'static str> {
-    let line = trace.iter().rev().find(|l| l.starts_with("[optimize]") && l.contains("objective ="))?;
-    Some(if line.contains("proven optimal") { "proven" } else { "local" })
+    let line = trace
+        .iter()
+        .rev()
+        .find(|l| l.starts_with("[optimize]") && l.contains("objective ="))?;
+    Some(if line.contains("proven optimal") {
+        "proven"
+    } else {
+        "local"
+    })
 }
 
 fn execute_module(
@@ -1734,7 +1964,7 @@ fn execute_module_with_key(
         // Adapters exchange values in each variable's declared unit
         let mut varmap = evaluator::VarMap::new();
         for (k, v) in &env {
-            varmap.set(k, scale.from_base(k, *v));
+            varmap.set(k, scale.to_declared(k, *v));
         }
 
         let (eval_res, backend_type) = match &blk.backend {
@@ -1839,7 +2069,11 @@ fn execute_module_with_key(
                     println!(
                         "  [{}] ignored adapter fields not used by the model: {}",
                         backend_type,
-                        ignored.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                        ignored
+                            .iter()
+                            .map(|s| s.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
                     );
                 }
                 let mut values: Vec<(String, f64)> = res
@@ -1894,7 +2128,9 @@ fn execute_module_with_key(
                             value: v,
                             causes: Vec::new(),
                             origin: match &res.payload_sha256 {
-                                Some(h) => format!("{}: {} sha256:{}", backend_type, res.backend_id, h),
+                                Some(h) => {
+                                    format!("{}: {} sha256:{}", backend_type, res.backend_id, h)
+                                }
                                 None => format!("{}: {}", backend_type, res.backend_id),
                             },
                             metadata: Some(metadata),
@@ -1986,10 +2222,8 @@ fn execute_module_with_key(
                     }
                     let origin = if let Some(eq) = solver.relations.iter().find(|e| &e.lhs == k) {
                         format!("= {}", eq.rhs)
-                    } else if let Some(eq) = solver
-                        .relations
-                        .iter()
-                        .find(|e| e.rhs.vars().contains(k))
+                    } else if let Some(eq) =
+                        solver.relations.iter().find(|e| e.rhs.vars().contains(k))
                     {
                         format!("solved from {}", eq.original_text)
                     } else if solver.integer_vars.contains(k) {
@@ -2079,20 +2313,34 @@ fn execute_module_with_key(
                         let ipc_eval = evaluator::IpcEvaluator::new(endpoint);
                         if let Err(e) = ipc_eval.actuate(&solved_env) {
                             if verbose {
-                                eprintln!("  [ipc] Note: Actuation stream to '{}' failed or closed: {}", endpoint, e);
+                                eprintln!(
+                                    "  [ipc] Note: Actuation stream to '{}' failed or closed: {}",
+                                    endpoint, e
+                                );
                             }
                         } else if verbose {
-                            println!("  [ipc] Streamed {} actuation command(s) to daemon at {}", solved_env.len(), endpoint);
+                            println!(
+                                "  [ipc] Streamed {} actuation command(s) to daemon at {}",
+                                solved_env.len(),
+                                endpoint
+                            );
                         }
                     }
                     BackendDecl::Shm { path } => {
                         let shm_eval = evaluator::ShmEvaluator::new(path);
                         if let Err(e) = shm_eval.actuate(&solved_env) {
                             if verbose {
-                                eprintln!("  [shm] Note: Actuation stream to '{}' failed: {}", path, e);
+                                eprintln!(
+                                    "  [shm] Note: Actuation stream to '{}' failed: {}",
+                                    path, e
+                                );
                             }
                         } else if verbose {
-                            println!("  [shm] Written {} actuation command(s) to ring buffer at {}", solved_env.len(), path);
+                            println!(
+                                "  [shm] Written {} actuation command(s) to ring buffer at {}",
+                                solved_env.len(),
+                                path
+                            );
                         }
                     }
                     _ => {}
@@ -2112,8 +2360,11 @@ fn execute_module_with_key(
         }
         Err(solver::SolverError::UnderDetermined(diag)) => {
             if verbose {
-                println!("
-{}", diag.report());
+                println!(
+                    "
+{}",
+                    diag.report()
+                );
             }
             // Keep everything that did settle, with its causes, so a stalled model still
             // reports its solved parts
@@ -2310,10 +2561,7 @@ fn cmd_demo() {
         );
     }
     if let Some(k) = evaluator::Orchestrator::find_knee_point(&frontier5) {
-        println!(
-            "  => Knee point: Point {}\n",
-            k + 1
-        );
+        println!("  => Knee point: Point {}\n", k + 1);
     }
 
     println!("============================================================");
@@ -2401,7 +2649,11 @@ fn cmd_pareto(
     let max = scale.to_base(var, max_val);
     let header = |name: &str| {
         let label = scale.label(name, dims.get(name));
-        if label.is_empty() { name.to_string() } else { format!("{} [{}]", name, label) }
+        if label.is_empty() {
+            name.to_string()
+        } else {
+            format!("{} [{}]", name, label)
+        }
     };
 
     println!("============================================================");
@@ -2444,10 +2696,10 @@ fn cmd_pareto(
                 println!("{}", "-".repeat(24 + 19 * display_vars.len()));
 
                 for (idx, pt) in frontier.iter().enumerate() {
-                    let v_sweep = scale.from_base(var, pt.vars.get(var).unwrap_or(0.0));
+                    let v_sweep = scale.to_declared(var, pt.vars.get(var).unwrap_or(0.0));
                     print!("{:<6} {:<18.2}", idx + 1, v_sweep);
                     for vname in &display_vars {
-                        let val = scale.from_base(vname, pt.vars.get(vname).unwrap_or(0.0));
+                        let val = scale.to_declared(vname, pt.vars.get(vname).unwrap_or(0.0));
                         if val.fract() == 0.0 && val.abs() < 1e9 {
                             print!(" {:<18.0}", val);
                         } else {
@@ -2502,7 +2754,10 @@ fn cmd_stream(path: &str, limit: usize) {
         }
     }
 
-    println!("Aven stream supervisor — model '{}', reading one JSON object per line from stdin", path);
+    println!(
+        "Aven stream supervisor — model '{}', reading one JSON object per line from stdin",
+        path
+    );
     println!("{:<7} | {:<16} | Status", "Cycle", "Spec hash");
     println!("{}", "-".repeat(72));
 
@@ -2594,7 +2849,9 @@ fn cmd_stream(path: &str, limit: usize) {
         };
         if failure.is_none() {
             let mut stale = Vec::new();
-            if let Err(e) = eval_forward_blocks(&module, &mut env, &mut ledger, &mut seq, &mut stale, false) {
+            if let Err(e) =
+                eval_forward_blocks(&module, &mut env, &mut ledger, &mut seq, &mut stale, false)
+            {
                 failure = Some(e.to_string());
             }
         }
@@ -2676,7 +2933,7 @@ fn show_value(
     base: f64,
 ) -> String {
     let label = scale.label(name, dims.get(name));
-    let v = scale.from_base(name, base);
+    let v = scale.to_declared(name, base);
     if label.is_empty() {
         format!("{:.4}", v)
     } else {
@@ -2696,7 +2953,11 @@ fn eval_forward_blocks(
     stale_facts: &mut Vec<String>,
     strict: bool,
 ) -> Result<(), solver::SolverError> {
-    for blk in module.blocks.iter().filter(|b| b.kind == BlockKind::Forward) {
+    for blk in module
+        .blocks
+        .iter()
+        .filter(|b| b.kind == BlockKind::Forward)
+    {
         let order = CTranspiler::topo_sort(blk)
             .map_err(|e| solver::SolverError::MathError(e.to_string()))?;
         for idx in order {
@@ -2837,7 +3098,10 @@ fn cmd_pkg_init(name: &str) {
     let cur_dir = std::path::Path::new(".");
     match package::PackageManager::init(cur_dir, name) {
         Ok(manifest_path) => {
-            println!("Initialized Aven package '{}' at '{:?}'", name, manifest_path);
+            println!(
+                "Initialized Aven package '{}' at '{:?}'",
+                name, manifest_path
+            );
         }
         Err(e) => {
             eprintln!("Package init error: {}", e);
@@ -2893,7 +3157,7 @@ fn cmd_pkg_list() {
                 println!("No packages installed in '{:?}'", cache_dir);
             } else {
                 println!("Installed Aven packages in '{:?}':", cache_dir);
-                println!("  {:<24} {:<12} {}", "Package", "Version", "Description");
+                println!("  {:<24} {:<12} Description", "Package", "Version");
                 println!("  -------------------------------------------------------------");
                 for p in list {
                     println!("  {:<24} {:<12} {}", p.name, p.version, p.description);

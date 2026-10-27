@@ -2,7 +2,7 @@
 // Milestone Phase 6: Segmented log rotation, cross-segment hash chaining, and settled history compaction.
 #![allow(dead_code)]
 
-use crate::ledger::{Fact, Ledger, GENESIS_HASH};
+use crate::ledger::{Fact, GENESIS_HASH, Ledger};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -141,9 +141,9 @@ pub fn verify_segmented_directory<P: AsRef<Path>>(
         .filter_map(|e| e.ok().map(|ent| ent.path()))
         .filter(|p| {
             p.is_file()
-                && p.file_name()
-                    .and_then(|n| n.to_str())
-                    .map_or(false, |s| s.starts_with("segment_") && s.ends_with(".jsonl"))
+                && p.file_name().and_then(|n| n.to_str()).map_or(false, |s| {
+                    s.starts_with("segment_") && s.ends_with(".jsonl")
+                })
         })
         .collect();
 

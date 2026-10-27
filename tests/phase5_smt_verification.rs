@@ -81,9 +81,18 @@ fn test_smt_golden_server_capacity() {
     // 2. Solve satisfiability via SmtTranspiler::run_solver (Z3)
     let res = SmtTranspiler::run_solver(&smt_code, None).expect("run_solver");
     assert_eq!(res.status, SmtStatus::Sat);
-    assert_eq!(res.model.get("allocated_workers").map(|s| s.as_str()), Some("1429"));
-    assert_eq!(res.model.get("total_ram_needed").map(|s| s.as_str()), Some("32676"));
-    assert_eq!(res.model.get("raw_workers").map(|s| s.as_str()), Some("1000"));
+    assert_eq!(
+        res.model.get("allocated_workers").map(|s| s.as_str()),
+        Some("1429")
+    );
+    assert_eq!(
+        res.model.get("total_ram_needed").map(|s| s.as_str()),
+        Some("32676")
+    );
+    assert_eq!(
+        res.model.get("raw_workers").map(|s| s.as_str()),
+        Some("1000")
+    );
 
     // 3. Prove invariant: total_ram_needed <= 35000.0 MUST hold (UNSAT = theorem proven)
     let prove_opts = SmtOptions {
@@ -92,11 +101,16 @@ fn test_smt_golden_server_capacity() {
         prove_invariant: Some("(<= total_ram_needed 35000.0)".to_string()),
         block_name: None,
     };
-    let prove_code = SmtTranspiler::transpile_block(blk, solve, &prove_opts).expect("prove transpile");
+    let prove_code =
+        SmtTranspiler::transpile_block(blk, solve, &prove_opts).expect("prove transpile");
     assert!(prove_code.contains("(assert (not (<= total_ram_needed 35000.0)))"));
 
     let prove_res = SmtTranspiler::run_solver(&prove_code, None).expect("prove solver");
-    assert_eq!(prove_res.status, SmtStatus::Unsat, "Safety theorem must be UNSAT");
+    assert_eq!(
+        prove_res.status,
+        SmtStatus::Unsat,
+        "Safety theorem must be UNSAT"
+    );
 
     // 4. Counterexample detection: total_ram_needed <= 30000.0 is false (SAT = counterexample)
     let false_opts = SmtOptions {
@@ -105,10 +119,18 @@ fn test_smt_golden_server_capacity() {
         prove_invariant: Some("(<= total_ram_needed 30000.0)".to_string()),
         block_name: None,
     };
-    let false_code = SmtTranspiler::transpile_block(blk, solve, &false_opts).expect("false transpile");
+    let false_code =
+        SmtTranspiler::transpile_block(blk, solve, &false_opts).expect("false transpile");
     let false_res = SmtTranspiler::run_solver(&false_code, None).expect("false solver");
-    assert_eq!(false_res.status, SmtStatus::Sat, "Violated invariant must be SAT");
-    assert_eq!(false_res.model.get("total_ram_needed").map(|s| s.as_str()), Some("32676"));
+    assert_eq!(
+        false_res.status,
+        SmtStatus::Sat,
+        "Violated invariant must be SAT"
+    );
+    assert_eq!(
+        false_res.model.get("total_ram_needed").map(|s| s.as_str()),
+        Some("32676")
+    );
 }
 
 #[test]
@@ -177,9 +199,14 @@ fn test_smt_randomized_1_continuous_invariant_proof() {
         prove_invariant: Some(format!("(<= {} {:.2})", drop_var, upper_bound)),
         block_name: None,
     };
-    let prove_text = SmtTranspiler::transpile_block(blk, solve, &prove_opts).expect("prove transpile");
+    let prove_text =
+        SmtTranspiler::transpile_block(blk, solve, &prove_opts).expect("prove transpile");
     let prove_res = SmtTranspiler::run_solver(&prove_text, None).expect("prove solve");
-    assert_eq!(prove_res.status, SmtStatus::Unsat, "Upper bound theorem must hold");
+    assert_eq!(
+        prove_res.status,
+        SmtStatus::Unsat,
+        "Upper bound theorem must hold"
+    );
 
     // Counterexample test: prove pressure_drop <= exact_expected - 50.0 (impossible => SAT)
     let lower_invalid_bound = exact_expected - 50.0;
@@ -191,7 +218,11 @@ fn test_smt_randomized_1_continuous_invariant_proof() {
     };
     let fail_text = SmtTranspiler::transpile_block(blk, solve, &fail_opts).expect("fail transpile");
     let fail_res = SmtTranspiler::run_solver(&fail_text, None).expect("fail solve");
-    assert_eq!(fail_res.status, SmtStatus::Sat, "Invalid invariant must produce SAT counterexample");
+    assert_eq!(
+        fail_res.status,
+        SmtStatus::Sat,
+        "Invalid invariant must produce SAT counterexample"
+    );
 }
 
 #[test]
@@ -269,13 +300,16 @@ fn test_smt_randomized_3_rapid_model_cycling_and_syntax() {
         let blk = &module.blocks[0];
         let solve = module.solves.first();
 
-        let smt_text = SmtTranspiler::transpile_block(blk, solve, &SmtOptions::default())
-            .expect("transpile");
+        let smt_text =
+            SmtTranspiler::transpile_block(blk, solve, &SmtOptions::default()).expect("transpile");
 
         // Verify balanced parentheses
         let open_count = smt_text.chars().filter(|&c| c == '(').count();
         let close_count = smt_text.chars().filter(|&c| c == ')').count();
-        assert_eq!(open_count, close_count, "SMT S-expressions must have balanced parentheses");
+        assert_eq!(
+            open_count, close_count,
+            "SMT S-expressions must have balanced parentheses"
+        );
 
         // Execute Z3 solver to verify zero syntax errors
         let res = SmtTranspiler::run_solver(&smt_text, None).expect("run solver");

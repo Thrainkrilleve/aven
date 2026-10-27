@@ -309,7 +309,7 @@ impl Unit {
         v * self.to_base + self.offset
     }
 
-    pub fn from_base_value(&self, v: f64) -> f64 {
+    pub fn to_unit_value(&self, v: f64) -> f64 {
         (v - self.offset) / self.to_base
     }
 }
@@ -519,8 +519,17 @@ impl UnitRegistry {
     pub fn register_unit_decl(&mut self, decl: &UnitDecl) {
         let builtin = matches!(
             decl.dimension.to_lowercase().as_str(),
-            "length" | "time" | "mass" | "current" | "money" | "currency" | "temperature"
-                | "amount" | "angle" | "data" | "transaction"
+            "length"
+                | "time"
+                | "mass"
+                | "current"
+                | "money"
+                | "currency"
+                | "temperature"
+                | "amount"
+                | "angle"
+                | "data"
+                | "transaction"
         );
         for u in &decl.units {
             if builtin {
@@ -549,7 +558,7 @@ impl UnitRegistry {
             ));
         }
 
-        Ok(u_to.from_base_value(u_from.to_base_value(val)))
+        Ok(u_to.to_unit_value(u_from.to_base_value(val)))
     }
 
     /// Lookup simple or compound units like "km/h", "m/s^2", "req/s", or "kW*h"
@@ -683,9 +692,9 @@ impl UnitScale {
     }
 
     /// Converts a base-unit value to `name`'s declared unit.
-    pub fn from_base(&self, name: &str, v: f64) -> f64 {
+    pub fn to_declared(&self, name: &str, v: f64) -> f64 {
         match self.declared.get(name) {
-            Some((u, _)) => u.from_base_value(v),
+            Some((u, _)) => u.to_unit_value(v),
             None => v,
         }
     }
@@ -834,7 +843,12 @@ impl fmt::Display for TypeError {
                 "Type Error at line {}, col {}: unrecognized unit '{}'",
                 line, col, unit
             ),
-            TypeError::AmbiguousUnit { unit, candidates, line, col } => write!(
+            TypeError::AmbiguousUnit {
+                unit,
+                candidates,
+                line,
+                col,
+            } => write!(
                 f,
                 "Type Error at line {}, col {}: ambiguous unit '{}' — write one of {} (unit symbols are case-sensitive)",
                 line,
@@ -903,7 +917,10 @@ impl DimensionalChecker {
                         if let Some(declared) = var_dims.get(&b.name) {
                             if *declared != u.dimension {
                                 return Err(TypeError::DimensionalMismatch {
-                                    context: format!("binding '{} = {} {}'", b.name, b.value, u_str),
+                                    context: format!(
+                                        "binding '{} = {} {}'",
+                                        b.name, b.value, u_str
+                                    ),
                                     left_dim: declared.clone(),
                                     right_dim: u.dimension,
                                     op: "=".to_string(),
@@ -1078,7 +1095,8 @@ impl DimensionalChecker {
                         context: format!("power '({} ^ {})'", base, exp),
                         left_dim: db,
                         right_dim: Dim::SCALAR,
-                        op: "^ (exponent must be a constant giving whole-number dimensions)".to_string(),
+                        op: "^ (exponent must be a constant giving whole-number dimensions)"
+                            .to_string(),
                         line,
                         col,
                     }),

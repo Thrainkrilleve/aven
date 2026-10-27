@@ -7,8 +7,8 @@
 // recomputed without the key. Outside this module facts are only reachable read-only.
 #![allow(dead_code)]
 use crate::evaluator::sha256_hex;
-use std::collections::hash_map::RandomState;
 use std::collections::HashMap;
+use std::collections::hash_map::RandomState;
 use std::fmt;
 use std::hash::{BuildHasher, Hasher};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -163,7 +163,11 @@ impl Ledger {
 
     /// Recomputes the chain (and signatures) from the stored facts.
     pub fn verify(&self) -> Result<(), String> {
-        let mut prev = self.initial_head.as_deref().unwrap_or(GENESIS_HASH).to_string();
+        let mut prev = self
+            .initial_head
+            .as_deref()
+            .unwrap_or(GENESIS_HASH)
+            .to_string();
         for (i, f) in self.facts.iter().enumerate() {
             let h = chain_hash(&prev, f);
             if self.chain.get(i) != Some(&h) {
@@ -741,7 +745,10 @@ pub fn verify_jsonl_with_head(
         if sealed {
             return Err(at("content after the closing seal".to_string()));
         }
-        if matches!(obj.iter().find(|(k, _)| k == "seal"), Some((_, Json::Bool(true)))) {
+        if matches!(
+            obj.iter().find(|(k, _)| k == "seal"),
+            Some((_, Json::Bool(true)))
+        ) {
             let facts = as_u64(field(&obj, "facts").map_err(at)?).map_err(at)? as usize;
             let head = as_str(field(&obj, "head").map_err(at)?).map_err(at)?;
             if facts != count || head != prev {
@@ -767,7 +774,9 @@ pub fn verify_jsonl_with_head(
         // The readable `value` must be exactly the hashed `value_bits`, so a reader can never
         // be shown a number other than the one the chain protects
         let shown_ok = match field(&obj, "value").map_err(at)? {
-            Json::Num(n) => n.parse::<f64>().map_or(false, |v| v.to_bits() == fact.value.to_bits()),
+            Json::Num(n) => n
+                .parse::<f64>()
+                .map_or(false, |v| v.to_bits() == fact.value.to_bits()),
             Json::Null => !fact.value.is_finite(),
             _ => false,
         };
@@ -850,7 +859,10 @@ pub fn from_jsonl_with_head(
         if sealed {
             return Err(at("content after the closing seal".to_string()));
         }
-        if matches!(obj.iter().find(|(k, _)| k == "seal"), Some((_, Json::Bool(true)))) {
+        if matches!(
+            obj.iter().find(|(k, _)| k == "seal"),
+            Some((_, Json::Bool(true)))
+        ) {
             let facts = as_u64(field(&obj, "facts").map_err(at)?).map_err(at)? as usize;
             let head = as_str(field(&obj, "head").map_err(at)?).map_err(at)?;
             if facts != count || head != prev {
@@ -886,7 +898,10 @@ pub fn from_jsonl_with_head(
         let expected = chain_hash(&prev, &fact);
         let stored = as_str(field(&obj, "hash").map_err(at)?).map_err(at)?;
         if stored != expected {
-            return Err(at(format!("fact #{} was modified: hash mismatch", fact.seq)));
+            return Err(at(format!(
+                "fact #{} was modified: hash mismatch",
+                fact.seq
+            )));
         }
         if let Some(k) = key {
             match obj.iter().find(|(name, _)| name == "sig").map(|(_, v)| v) {
@@ -904,4 +919,3 @@ pub fn from_jsonl_with_head(
     }
     Ok(ledger)
 }
-

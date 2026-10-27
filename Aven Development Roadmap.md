@@ -44,7 +44,7 @@ Do these before the new compiler work. Each one is done when the command in the 
 | Safety-case wording | `src/smt.rs` emits `FORMALLY DISCHARGED / CERTIFIABLE` and `PROVEN UNCONDITIONAL`. The standards table marks objectives satisfied, including division-by-zero, on every report. `src/main.rs` describes the command as a DO-178C / ASIL-D audit. | `tests/safety_case_and_timing.rs` fails if the report contains `CERTIFIABLE`, `SATISFIED`, or `PROVEN UNCONDITIONAL`, and fails if the report lacks a sentence that the result is evidence about the model and not a certification. The same test covers the CLI help line. |
 | Homepage figures | `web/public/index.html` states 0.56 ms and 1,720/s from a Windows IPC bench. The caption names the machine. Nothing in CI regenerates the figures. | The page quotes a log committed beside the command that produced it, or the figures are removed. `scripts/check_docs.py` fails if the page states a throughput the log does not contain. |
 | OpenPLC stdin | `evaluations/tests/PLC-test/openplc_adapter.py` waits 150 ms for stdin, then invents `io_points`. Under the default test thread pool, `test_openplc_external_adapter_and_stream_varmap` has failed with 28 and with 32 against the required 30. Alone, it passes. | The adapter reads stdin to completion. `cargo test --release --test test_suite test_openplc_external_adapter_and_stream_varmap` passes with the default thread pool. |
-| Lint matches CI | `.github/workflows/linter.yml` runs `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` on stable. Both fail on rustc 1.99.1. Edition 2024 also needs rustc 1.85 or newer; 1.83 cannot build the tree. | `rust-toolchain.toml` pins a compiler for which both commands pass. The workflow installs that pin. |
+| Lint matches CI | `rust-toolchain.toml` pins channel 1.99.1 with rustfmt and clippy. The GitHub and Forgejo workflows install that file before `cargo` runs. The sources match that rustfmt, and the 1.99 clippy findings are fixed. Edition 2024 still needs rustc 1.85 or newer. | `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` exit 0 on that pin. `scripts/check_docs.py` runs the format check and fails if a linter workflow stops reading `rust-toolchain.toml`, or if `docs/proof/lint-toolchain-1.99.1.txt` does not record both exits for this channel. |
 | Hash chain, not a Merkle tree | Public docs still say Merkle in places. The ledger is a linear SHA-256 chain. | `scripts/check_docs.py` fails if the README, the site, or `STANDARDS.md` says Merkle. |
 
 ## Build next
@@ -60,13 +60,18 @@ One feature, then the runtime that wraps it.
 - Treat the private Forgejo branch as a lab. The shared-memory round trip there showed that the C side can read the Rust ring layout. It also showed `aeric_shm_demo.c` does not build with `-Wall -Wextra -Wpedantic -Werror` as committed, and that the ring publishes the sequence number before the length. Leave it private until a test in this repository owns it.
 - Solver uniqueness is still the deep limit. Newton finds a root near the start. Say that next to any solve, and add a test only when a model has more than one root and the compiler reports which one it took. Do not paper over it with a safety-case sentence.
 
-## Done
+## Recorded
 
-CI on the pinned toolchain runs all of these, and this page lists no capability they do not cover:
+A line is recorded only when a command in this repository exited 0 and the transcript is in `docs/proof/`.
 
-- `cargo test --release`
+On channel 1.99.1, `docs/proof/lint-toolchain-1.99.1.txt`:
+
 - `cargo fmt --check`
 - `cargo clippy --all-targets -- -D warnings`
-- `python3 scripts/check_docs.py`
-- the derived-C comparison
-- the generated AERIC HOLD and ledger check
+- `cargo test --release` (152 passed, 0 failed). Full output: `docs/proof/cargo-test-release-1.99.1.txt`
+- `python3 scripts/check_docs.py` (45 examples compiled, 2 documented outputs compared, 0 problems). Output: `docs/proof/check-docs-1.99.1.txt`
+
+## Not recorded yet
+
+- C emitted from the `relation` alone, with the hand-written `forward` copy deleted, compared with `avenc run`
+- a shim the test rebuilds from `avenc emit-c`, which latches HOLD and whose ledger `avenc verify-ledger` accepts

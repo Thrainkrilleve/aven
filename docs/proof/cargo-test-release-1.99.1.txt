@@ -1,0 +1,241 @@
+   Compiling avenc v0.1.0 (/tmp/aven-shm)
+    Finished `release` profile [optimized] target(s) in 12.69s
+     Running unittests src/lib.rs (target/release/deps/avenc-0f0baaafe7db5bb7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/release/deps/avenc-01289c09f3ea9f16)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/bench_aven.rs (target/release/deps/bench_aven-83b3eeca98e0358b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/adversarial_milp.rs (target/release/deps/adversarial_milp-c81037e7e33d185c)
+
+running 3 tests
+test test_scaled_continuous_with_integer_invariance ... ok
+test test_cosine_similarity_cut_eviction_and_pool_limit ... ok
+test test_duality_gap_certificate_in_audit_ledger ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/claims.rs (target/release/deps/claims-e72adf82225dd518)
+
+running 38 tests
+test backward_solve_is_damped_near_domain_edges ... ok
+test flight_model_matches_us_standard_atmosphere_1976 ... ok
+test deeply_nested_expression_is_a_clean_error ... ok
+test adapter_is_not_asked_for_values_other_relations_compute ... ok
+test freshness_expired_timestamp_blocks_decision ... ok
+test freshness_fresh_data_is_actionable ... ok
+test independent_subsystems_solve_separately ... ok
+test integer_determined_by_equations_must_be_whole ... ok
+test ledger_chain_is_deterministic_and_verifies ... ok
+test ledger_cli_detects_tampering ... ok
+test ledger_hmac_matches_rfc4231_vector ... ok
+test milp_feasible_and_unbounded_is_unbounded ... ok
+test freshness_taint_follows_backward_solved_values ... ok
+test milp_gcd_test_catches_integer_infeasibility ... ok
+test milp_unbounded_domain_solved_and_proven_by_cuts ... ok
+test nonconvex_integer_optimum_is_proven ... ok
+test readme_forward_block_is_evaluated_by_run ... ok
+test readme_forward_results_feed_relations ... ok
+test readme_omnidirectional_f_equals_ma_solves_each_unknown ... ok
+test spec_block_comments_are_supported ... ok
+test spec_builtin_constants ... ok
+test spec_builtin_functions_evaluate ... ok
+test provenance_external_facts_carry_payload_sha256 ... ok
+test spec_integer_keyword_declares_integer_variable ... ok
+test spec_negative_numeric_literal_binding ... ok
+test spec_objective_without_parentheses ... ok
+test spec_operator_precedence_and_associativity ... ok
+test spec_strict_inequalities_are_enforced ... ok
+test standards_non_finite_results_are_rejected ... ok
+test toolchain_emit_c_command_exists ... ok
+test toolchain_exit_code_0_only_when_fully_settled ... ok
+test toolchain_exit_code_2_on_constraint_violation ... ok
+test toolchain_exit_code_3_on_stale_input ... ok
+test toolchain_pareto_command_exists ... ok
+test weather_cell_physics ... ok
+test toolchain_bench_command_exists ... ok
+test examples_all_settle ... ok
+test freshness_taint_reaches_every_derived_value_deterministically ... ok
+
+test result: ok. 38 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+
+     Running tests/phase4_shm_ffi.rs (target/release/deps/phase4_shm_ffi-b941c7148d34b150)
+
+running 4 tests
+test test_phase4_verification_again_rapid_cycling ... ok
+test test_phase4_randomized_bidirectional_ipc_daemon_control ... ok
+test test_phase4_randomized_shm_ring_buffer_and_latency ... ok
+test test_phase4_randomized_native_ffi_plugin ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+
+     Running tests/phase5_smt_verification.rs (target/release/deps/phase5_smt_verification-ed3aba78e65fe90e)
+
+running 6 tests
+Successfully emitted SMT-LIB2 to '/tmp/test_aero_23686.smt2'
+test test_smt_cli_emit_and_verify ... ok
+test test_smt_golden_mixed_integer_storage_sizing ... ok
+test test_smt_randomized_2_mixed_integer_capacity_prover ... ok
+test test_smt_randomized_1_continuous_invariant_proof ... ok
+test test_smt_golden_server_capacity ... ok
+test test_smt_randomized_3_rapid_model_cycling_and_syntax ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/phase6_temporal_debugger.rs (target/release/deps/phase6_temporal_debugger-b79676b382d27600)
+
+running 8 tests
+test test_randomized_1_temporal_streams ... ok
+test test_irreversible_rewind_guard ... ok
+test test_debugger_session_what_if_golden ... ok
+test test_randomized_3_counterfactual_branch_diffing ... ok
+test test_segmented_ledger_compaction_golden ... ok
+test test_temporal_signal_calculus_golden ... ok
+test test_randomized_2_segmented_rotation_and_tamper_detection ... ok
+test test_cli_debug_and_compaction_subprocesses ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/phase7_ecosystem_wasm.rs (target/release/deps/phase7_ecosystem_wasm-03d5994aaf8c600a)
+
+running 12 tests
+test test_kill_switch_quadcopter_avionics_golden ... ok
+test test_kill_switch_financial_model_golden ... ok
+test test_package_manifest_and_pack_golden ... ok
+test test_randomized_1_package_manifest_and_dependency_graph ... ok
+test test_randomized_3_portfolio_rebalancing_counterfactual_stress ... ok
+test test_cli_pkg_and_wasm_subprocesses ... ok
+test test_pkg_install_then_import_from_another_project ... ok
+test test_wasm_binary_emission_and_node_execution ... ok
+test test_wasm_pow_matches_native_evaluation ... ok
+test test_wasm_wat_emission_golden ... ok
+test test_wasm_builtins_match_avenc_run ... ok
+test test_randomized_2_wasm_bytecode_generation_and_opcodes ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+     Running tests/safety_case_and_timing.rs (target/release/deps/safety_case_and_timing-747959bead2db428)
+
+running 6 tests
+test test_randomized_3_realtime_timing_and_jitter_profiler ... ok
+test test_safety_case_cli_file_emission ... ok
+test test_randomized_1_aerodynamics_flight_envelope_safety_case ... ok
+test test_safety_case_golden_server_capacity ... ok
+test test_randomized_2_mixed_integer_cluster_sizing_safety_case ... ok
+test test_safety_case_violation_detection_and_counterexample ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/test_suite.rs (target/release/deps/test_suite-f19e541f628127b6)
+
+running 51 tests
+test test_abs_derivative_sign ... ok
+test test_backward_1d_newton_solving ... ok
+test test_backward_ceil_inversion ... ok
+test test_causal_tree_topological_depth_limit_and_cycle_suppression ... ok
+test test_c_code_generation ... ok
+test test_ceil_unreachable_target_reports_not_reachable ... ok
+test test_causal_why_default_depth_limit_and_unlimited_override ... ok
+test test_coupled_multidimensional_newton_exact_jacobian ... ok
+test test_diagnostics_scale_invariance_across_disparate_physical_units ... ok
+test test_derived_expressions_inside_external_relation_body ... ok
+test test_equality_and_not_equal_operators_in_equations_and_solve_constraints ... ok
+test test_evaluator_config_flag_defaults_to_native_newton ... ok
+test test_comma_separated_relation_targets_in_solve ... ok
+test test_evaluator_trait_and_native_backend ... ok
+test test_extensible_unit_system_and_compound_algebra ... ok
+test test_dimensional_checker_propagation_and_homogeneity ... ok
+test test_concurrent_50_threads_frontier_cache_and_simultaneous_stale_taint ... ok
+test test_external_evaluator_subprocess ... ok
+test test_first_class_ipc_relation_syntax ... ok
+test test_freshness_metadata_ttl_decay_and_stale_detection ... ok
+test test_freshness_zero_ttl_and_stale_enforcement ... ok
+test test_frontier_cache_and_epsilon_box_dominance ... ok
+test test_inequality_and_objective_parsing ... ok
+test test_json_schema_file_validation_and_bound_enforcement ... ok
+test test_kubernetes_multi_objective_pareto_convergence_and_knee_point ... ok
+test test_lexer_and_parser ... ok
+test test_microbenchmark_frontier_rebuild_under_mutating_external_facts ... ok
+test test_mixed_integer_capacity_sizing_branch_and_bound ... ok
+test test_mixed_integer_infeasible_constraints ... ok
+test test_mixed_integer_provenance_and_ledger ... ok
+test test_mixed_integer_worker_ceiling_inequality ... ok
+test test_nan_and_inf_robustness_in_derivatives_and_solver ... ok
+test test_external_adapter_schema_validation_and_malformed_handling ... ok
+test test_optimizer_minimum_away_from_bounds ... ok
+test test_optimizer_two_integer_variables_nodes_and_drives ... ok
+test test_optimizer_unconstrained_without_inequalities ... ok
+test test_pareto_frontier_and_knee_point_detection ... ok
+test test_parser_inequality_constraints_with_numeric_bindings ... ok
+test test_randomized_ledger_key_generation_and_cli_verification ... ok
+test test_real_production_traffic_trace_replay_and_capacity_tracking ... ok
+test test_sha256_spec_hashing ... ok
+test test_solver_underdetermined_error_handling ... ok
+test test_symbolic_differentiation ... ok
+test test_symmetric_system_coupled_solving ... ok
+test test_underdetermination_diagnostics ... ok
+test test_underdetermination_rank_deficiency_and_minimal_fixes ... ok
+test test_unit_error_preserves_source_line_and_col ... ok
+test test_units_and_dimensions ... ok
+test test_openplc_external_adapter_and_stream_varmap ... ok
+test test_first_class_external_relation_syntax_and_autobinding ... ok
+test test_external_evaluator_flame_contract_and_diagnostic_integrity ... ok
+
+test result: ok. 51 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.63s
+
+     Running tests/toolchain_aeric_shim.rs (target/release/deps/toolchain_aeric_shim-594e1d1c4bee0476)
+
+running 6 tests
+test test_aeric_shim_randomized_2_domain_fault_guards ... ok
+test test_aeric_shim_aerodynamics_golden ... ok
+test test_aeric_shim_randomized_1_polynomial_generation ... ok
+test test_aeric_shim_server_capacity_golden ... ok
+test test_aeric_shim_randomized_3_rapid_model_cycling ... ok
+Successfully emitted AERIC bundle to '/tmp/aven_aeric_test_24010' (model_server_capacity.c, model_server_capacity.h, aven_shim.c) [SHA256: 76829705239db6fd727fd19d21f3d2c0009bd9b41a680d42d61353cc6f663996]
+test test_aeric_shim_cli_out_dir_emission ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/units_runtime.rs (target/release/deps/units_runtime-8c568838ca872c0d)
+
+running 18 tests
+test binding_unit_must_match_the_declared_signal_unit ... ok
+test bare_numbers_take_the_declared_unit ... ok
+test celsius_and_fahrenheit_are_absolute_temperatures ... ok
+test currencies_do_not_convert_at_hidden_exchange_rates ... ok
+test debug_what_if_reads_values_in_the_declared_unit ... ok
+test declared_units_without_a_scale_never_equal_a_base_unit ... ok
+test debug_what_if_rejects_a_value_that_is_not_a_number ... ok
+test fractional_powers_have_the_right_dimension_or_are_refused ... ok
+test json_output_is_base_units_with_a_units_map ... ok
+test openplc_supervisor_example_alarms_and_never_fills_in_missing_readings ... ok
+test shipped_aerodynamics_example_converts_km_per_hour ... ok
+test pareto_range_is_in_the_declared_unit_and_required ... ok
+test shipped_units_tutorial_converts_to_metres ... ok
+test stream_converts_input_and_reports_derived_values ... ok
+test stream_does_not_claim_convergence_when_the_solve_fails ... ok
+test stream_reports_broken_limits_as_alarms ... ok
+test adapters_exchange_values_in_declared_units ... ok
+test adapters_start_when_the_model_is_named_without_a_directory ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+   Doc-tests avenc
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+TEST_EXIT:0

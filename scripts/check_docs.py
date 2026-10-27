@@ -17,6 +17,9 @@ every page in web/public/:
   * A ```bash block holding a single `avenc run <file>` for a file in this repository,
     followed by a ```text block with a "Settled Environment:" section, must match what
     `avenc run` prints: same variables, same numbers, same unit labels.
+  * `rust-toolchain.toml` pins a fixed compiler, both linter workflows install that
+    file, `docs/proof/lint-toolchain-1.99.1.txt` records exit 0 for fmt and clippy
+    on that same channel, and `cargo fmt --check` passes.
 
 Exits non-zero when anything does not match.
 """
@@ -33,6 +36,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 AVENC = ROOT / "target" / "release" / ("avenc.exe" if os.name == "nt" else "avenc")
 SKIP_DIRS = {"target", "node_modules", "archive", ".git", ".wrangler", "evaluations"}
+TOOLCHAIN = ROOT / "rust-toolchain.toml"
+PROOF_LOG = ROOT / "docs" / "proof" / "lint-toolchain-1.99.1.txt"
+LINTER_WORKFLOWS = (
+    ROOT / ".github" / "workflows" / "linter.yml",
+    ROOT / ".forgejo" / "workflows" / "linter.yml",
+)
+FLOATING_CHANNELS = {"stable", "beta", "nightly"}
 
 FENCE = re.compile(r"^([ \t]*)```([\w-]*)[^\n]*\n(.*?)^\1```", re.S | re.M)
 PRE = re.compile(r'<pre data-lang="(aven(?:-error)?)">(.*?)</pre>', re.S)
@@ -83,12 +93,50 @@ def settled(output):
     return env
 
 
+def toolchain_problems():
+    """The lint pin is a file, the workflows read that file, and fmt still passes."""
+    problems = []
+    if not TOOLCHAIN.exists():
+        return ["rust-toolchain.toml is missing"]
+    text = TOOLCHAIN.read_text(encoding="utf-8")
+    match = re.search(r'(?m)^channel\s*=\s*"([^"]+)"', text)
+    if not match:
+        return ["rust-toolchain.toml has no channel pin"]
+    channel = match.group(1)
+    if channel in FLOATING_CHANNELS:
+        problems.append(f"rust-toolchain.toml channel {channel} is not a fixed compiler")
+    for path in LINTER_WORKFLOWS:
+        rel = path.relative_to(ROOT)
+        body = path.read_text(encoding="utf-8") if path.exists() else ""
+        if "rust-toolchain.toml" not in body:
+            problems.append(f"{rel} does not install the rust-toolchain.toml pin")
+    if not PROOF_LOG.exists():
+        problems.append(f"{PROOF_LOG.relative_to(ROOT)} is missing")
+    else:
+        log = PROOF_LOG.read_text(encoding="utf-8")
+        if f"channel: {channel}" not in log:
+            problems.append(f"{PROOF_LOG.relative_to(ROOT)} does not record channel {channel}")
+        for command in ("cargo fmt --check", "cargo clippy --all-targets -- -D warnings"):
+            if f"command: {command}\nexit: 0\n" not in log:
+                problems.append(
+                    f"{PROOF_LOG.relative_to(ROOT)} does not record exit 0 for `{command}`"
+                )
+    fmt = subprocess.run(
+        ["cargo", "fmt", "--check"], cwd=ROOT, capture_output=True, text=True
+    )
+    if fmt.returncode != 0:
+        tail = (fmt.stdout or fmt.stderr).strip().splitlines()
+        detail = tail[-1] if tail else "no output"
+        problems.append(f"cargo fmt --check failed: {detail}")
+    return problems
+
+
 def main():
     if not AVENC.exists():
         sys.exit(f"{AVENC} not found; run `cargo build --release` first")
     subcommands = set(re.findall(r"^\s+avenc ([a-z][a-z-]*)", avenc("--help").stdout, re.M))
 
-    problems, compiled, fragments, outputs = [], 0, 0, 0
+    problems, compiled, fragments, outputs = toolchain_problems(), 0, 0, 0
 
     for path in doc_files():
         rel = path.relative_to(ROOT)

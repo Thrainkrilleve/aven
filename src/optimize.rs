@@ -210,12 +210,20 @@ impl Problem {
         let mut rows = Vec::new();
         for h in &self.eqs {
             let (a, k) = affine(h)?;
-            rows.push(LinRow { a, sense: Sense::Eq, b: -k });
+            rows.push(LinRow {
+                a,
+                sense: Sense::Eq,
+                b: -k,
+            });
         }
         for g in &self.ineqs {
             let (a, k) = affine(&g.expr)?;
             let margin = if g.strict { STRICT_MARGIN } else { 0.0 };
-            rows.push(LinRow { a, sense: Sense::Le, b: -k - margin });
+            rows.push(LinRow {
+                a,
+                sense: Sense::Le,
+                b: -k - margin,
+            });
         }
         let (c, c0) = match &self.objective {
             Some(o) => affine(o)?,
@@ -310,16 +318,25 @@ fn solve_lp(lf: &LinearForm, lo: &[f64], hi: &[f64]) -> LpResult {
     let mut extra_rows: Vec<(usize, f64)> = Vec::new(); // (column, upper limit on y)
     for j in 0..n {
         if lo[j].is_finite() {
-            maps.push(ColMap::Shift { col: ncol, offset: lo[j] });
+            maps.push(ColMap::Shift {
+                col: ncol,
+                offset: lo[j],
+            });
             if hi[j].is_finite() {
                 extra_rows.push((ncol, hi[j] - lo[j]));
             }
             ncol += 1;
         } else if hi[j].is_finite() {
-            maps.push(ColMap::Reflect { col: ncol, offset: hi[j] });
+            maps.push(ColMap::Reflect {
+                col: ncol,
+                offset: hi[j],
+            });
             ncol += 1;
         } else {
-            maps.push(ColMap::Free { pos: ncol, neg: ncol + 1 });
+            maps.push(ColMap::Free {
+                pos: ncol,
+                neg: ncol + 1,
+            });
             ncol += 2;
         }
     }
@@ -638,8 +655,14 @@ fn dive(
             LpResult::Optimal(x, _) => x,
             // Unbounded relaxation: clamp to look for a nearby feasible point
             LpResult::Unbounded => {
-                let clo: Vec<f64> = lo.iter().map(|&b| if b.is_finite() { b } else { -1e6 }).collect();
-                let chi: Vec<f64> = hi.iter().map(|&b| if b.is_finite() { b } else { 1e6 }).collect();
+                let clo: Vec<f64> = lo
+                    .iter()
+                    .map(|&b| if b.is_finite() { b } else { -1e6 })
+                    .collect();
+                let chi: Vec<f64> = hi
+                    .iter()
+                    .map(|&b| if b.is_finite() { b } else { 1e6 })
+                    .collect();
                 match solve_lp_scaled(lf, &clo, &chi, col_scales, integer_mask).0 {
                     LpResult::Optimal(x, _) => x,
                     _ => return None,
@@ -661,7 +684,11 @@ fn dive(
             }
             Some((j, _)) => {
                 let near = x[j].round();
-                let far = if x[j] - x[j].floor() < 0.5 { x[j].ceil() } else { x[j].floor() };
+                let far = if x[j] - x[j].floor() < 0.5 {
+                    x[j].ceil()
+                } else {
+                    x[j].floor()
+                };
                 for val in [near, far] {
                     if val < lo0[j] - 1e-9 || val > hi0[j] + 1e-9 {
                         continue;
@@ -670,7 +697,17 @@ fn dive(
                     let mut nhi = hi.to_vec();
                     nlo[j] = val;
                     nhi[j] = val;
-                    if let Some(r) = search(lf, &nlo, &nhi, lo0, hi0, col_scales, int_idx, integer_mask, budget) {
+                    if let Some(r) = search(
+                        lf,
+                        &nlo,
+                        &nhi,
+                        lo0,
+                        hi0,
+                        col_scales,
+                        int_idx,
+                        integer_mask,
+                        budget,
+                    ) {
                         return Some(r);
                     }
                     if *budget <= 0 {
@@ -682,7 +719,17 @@ fn dive(
         }
     }
     let mut budget = 4000;
-    search(lf, lo0, hi0, lo0, hi0, col_scales, int_idx, integer_mask, &mut budget)
+    search(
+        lf,
+        lo0,
+        hi0,
+        lo0,
+        hi0,
+        col_scales,
+        int_idx,
+        integer_mask,
+        &mut budget,
+    )
 }
 
 /// Tests whether a value is integer within absolute tolerance 1e-6 or relative tolerance 1e-9.
@@ -758,7 +805,11 @@ fn scale_linear_form(lf: &LinearForm, s: &[f64]) -> LinearForm {
         for j in 0..n {
             a[j] = r.a[j] * s[j];
         }
-        rows.push(LinRow { a, sense: r.sense, b: r.b });
+        rows.push(LinRow {
+            a,
+            sense: r.sense,
+            b: r.b,
+        });
     }
     let mut c = vec![0.0; n];
     for j in 0..n {
@@ -803,11 +854,9 @@ fn solve_lp_scaled(
         other => other,
     };
     let state_unscaled = state.map(|mut st| {
-        for aff_opt in st.col_affine.iter_mut() {
-            if let Some(aff) = aff_opt {
-                for k in 0..aff.coeffs.len() {
-                    aff.coeffs[k] /= col_scales[k];
-                }
+        for aff in st.col_affine.iter_mut().flatten() {
+            for k in 0..aff.coeffs.len() {
+                aff.coeffs[k] /= col_scales[k];
             }
         }
         st
@@ -835,16 +884,25 @@ fn solve_lp_capture(
     let mut extra_rows: Vec<(usize, f64, usize)> = Vec::new(); // (column, limit, original var)
     for j in 0..n {
         if lo[j].is_finite() {
-            maps.push(ColMap::Shift { col: ncol, offset: lo[j] });
+            maps.push(ColMap::Shift {
+                col: ncol,
+                offset: lo[j],
+            });
             if hi[j].is_finite() {
                 extra_rows.push((ncol, hi[j] - lo[j], j));
             }
             ncol += 1;
         } else if hi[j].is_finite() {
-            maps.push(ColMap::Reflect { col: ncol, offset: hi[j] });
+            maps.push(ColMap::Reflect {
+                col: ncol,
+                offset: hi[j],
+            });
             ncol += 1;
         } else {
-            maps.push(ColMap::Free { pos: ncol, neg: ncol + 1 });
+            maps.push(ColMap::Free {
+                pos: ncol,
+                neg: ncol + 1,
+            });
             ncol += 2;
         }
     }
@@ -856,12 +914,20 @@ fn solve_lp_capture(
             ColMap::Shift { col, offset } => {
                 let mut coeffs = vec![0.0; n];
                 coeffs[j] = 1.0;
-                col_affine[col] = Some(ColAffine { coeffs, constant: -offset, integer: integer_mask[j] });
+                col_affine[col] = Some(ColAffine {
+                    coeffs,
+                    constant: -offset,
+                    integer: integer_mask[j],
+                });
             }
             ColMap::Reflect { col, offset } => {
                 let mut coeffs = vec![0.0; n];
                 coeffs[j] = -1.0;
-                col_affine[col] = Some(ColAffine { coeffs, constant: offset, integer: integer_mask[j] });
+                col_affine[col] = Some(ColAffine {
+                    coeffs,
+                    constant: offset,
+                    integer: integer_mask[j],
+                });
             }
             ColMap::Free { .. } => {}
         }
@@ -882,7 +948,11 @@ fn solve_lp_capture(
             Sense::Ge => (r.a.clone(), -r.b),
             Sense::Eq => (vec![0.0; n], 0.0),
         };
-        row_slack.push(ColAffine { coeffs, constant, integer: int_coeffs(&r.a, r.b) });
+        row_slack.push(ColAffine {
+            coeffs,
+            constant,
+            integer: int_coeffs(&r.a, r.b),
+        });
         // Build the y-space row (same as solve_lp)
         let mut a = vec![0.0; ncol];
         let mut b = r.b;
@@ -912,7 +982,11 @@ fn solve_lp_capture(
         // x_j <= hi_j : slack = hi_j - x_j
         let mut coeffs = vec![0.0; n];
         coeffs[*j] = -1.0;
-        row_slack.push(ColAffine { coeffs, constant: hi[*j], integer: integer_mask[*j] });
+        row_slack.push(ColAffine {
+            coeffs,
+            constant: hi[*j],
+            integer: integer_mask[*j],
+        });
         let mut a = vec![0.0; ncol];
         a[*col] = 1.0;
         rows.push((a, Sense::Le, *limit));
@@ -1068,12 +1142,7 @@ fn solve_lp_capture(
 /// Each cut is valid for every integer-feasible point. Filters near-parallel cuts using
 /// cosine similarity (> 0.99) against existing cuts in physical geometry, and returns
 /// at most `max_cuts` of the most-violated cuts.
-fn gmi_cuts(
-    state: &LpState,
-    x: &[f64],
-    max_cuts: usize,
-    existing_cuts: &[LinRow],
-) -> Vec<LinRow> {
+fn gmi_cuts(state: &LpState, x: &[f64], max_cuts: usize, existing_cuts: &[LinRow]) -> Vec<LinRow> {
     let n = x.len();
     let frac = |v: f64| v - v.floor();
     // Which structural/slack columns are integer (for GMI's integer-column rule)?
@@ -1171,7 +1240,14 @@ fn gmi_cuts(
         let violation = b - lhs_at_x; // > 0 means the cut removes x*
         let scale = 1.0 + max_c;
         if violation > 1e-5 * scale && max_c > 1e-9 {
-            cuts.push((violation, LinRow { a: coeffs, sense: Sense::Ge, b }));
+            cuts.push((
+                violation,
+                LinRow {
+                    a: coeffs,
+                    sense: Sense::Ge,
+                    b,
+                },
+            ));
         }
     }
 
@@ -1342,7 +1418,9 @@ fn solve_milp(p: &Problem, lf: &LinearForm) -> Outcome {
                     let clamp = |b: f64, d: f64| if b.is_finite() { b } else { d };
                     let clo: Vec<f64> = lo.iter().map(|&b| clamp(b, -1e6)).collect();
                     let chi: Vec<f64> = hi.iter().map(|&b| clamp(b, 1e6)).collect();
-                    if let Some(xr) = dive(&lf_feas, &clo, &chi, &col_scales, &int_idx, &integer_mask) {
+                    if let Some(xr) =
+                        dive(&lf_feas, &clo, &chi, &col_scales, &int_idx, &integer_mask)
+                    {
                         let obj = objective_at(lf, &xr);
                         if point_feasible(lf, &xr, &root_lo, &root_hi) {
                             best = Some((xr, obj));
@@ -1400,7 +1478,11 @@ fn solve_milp(p: &Problem, lf: &LinearForm) -> Outcome {
             let dual = if complete {
                 *best_obj
             } else if !stack.is_empty() {
-                stack.iter().map(|(_, _, b)| *b).fold(f64::INFINITY, f64::min).min(*best_obj)
+                stack
+                    .iter()
+                    .map(|(_, _, b)| *b)
+                    .fold(f64::INFINITY, f64::min)
+                    .min(*best_obj)
             } else {
                 root_obj.min(*best_obj)
             };
@@ -1462,7 +1544,9 @@ fn solve_milp(p: &Problem, lf: &LinearForm) -> Outcome {
                         .to_string(),
                 )
             } else if complete {
-                Outcome::Infeasible("no point satisfies every constraint (proven by branch-and-bound)".to_string())
+                Outcome::Infeasible(
+                    "no point satisfies every constraint (proven by branch-and-bound)".to_string(),
+                )
             } else {
                 Outcome::Undetermined(format!(
                     "no feasible point found within the branch-and-bound node limit ({} nodes)",
@@ -1530,7 +1614,13 @@ impl CExpr {
             }
             CExpr::Call(f, arg) => {
                 let v = arg.eval(x);
-                let snap = |v: f64, r: f64| if (v - v.round()).abs() < 1e-9 { v.round() } else { r };
+                let snap = |v: f64, r: f64| {
+                    if (v - v.round()).abs() < 1e-9 {
+                        v.round()
+                    } else {
+                        r
+                    }
+                };
                 match f.as_str() {
                     "sqrt" if v >= 0.0 => v.sqrt(),
                     "ceil" => snap(v, v.ceil()),
@@ -1571,7 +1661,11 @@ impl CFun {
             partials: p
                 .vars
                 .iter()
-                .map(|v| diff(e, &v.name).ok().map(|d| CExpr::compile(&d, index, &p.env)))
+                .map(|v| {
+                    diff(e, &v.name)
+                        .ok()
+                        .map(|d| CExpr::compile(&d, index, &p.env))
+                })
                 .collect(),
         }
     }
@@ -1597,7 +1691,10 @@ impl CFun {
     fn grad_norm(&self, x: &[f64]) -> f64 {
         let mut g = vec![0.0; x.len()];
         self.grad_into(x, 1.0, &mut g);
-        g.iter().map(|v| v.abs()).filter(|v| v.is_finite()).fold(0.0, f64::max)
+        g.iter()
+            .map(|v| v.abs())
+            .filter(|v| v.is_finite())
+            .fold(0.0, f64::max)
     }
 }
 
@@ -1613,8 +1710,12 @@ struct Compiled {
 
 impl Compiled {
     fn new(p: &Problem) -> Self {
-        let index: HashMap<String, usize> =
-            p.vars.iter().enumerate().map(|(i, v)| (v.name.clone(), i)).collect();
+        let index: HashMap<String, usize> = p
+            .vars
+            .iter()
+            .enumerate()
+            .map(|(i, v)| (v.name.clone(), i))
+            .collect();
         let obj = p.objective.as_ref().map(|o| CFun::new(o, p, &index));
         let eqs: Vec<CFun> = p.eqs.iter().map(|h| CFun::new(h, p, &index)).collect();
         let ineqs: Vec<(CFun, bool)> = p
@@ -1689,7 +1790,9 @@ impl Compiled {
             let gv = self.s_in[i] * self.ineq_value(i, x);
             if gv > 0.0 {
                 val += gv * gv;
-                self.ineqs[i].0.grad_into(x, 2.0 * gv * self.s_in[i], &mut grad);
+                self.ineqs[i]
+                    .0
+                    .grad_into(x, 2.0 * gv * self.s_in[i], &mut grad);
             }
         }
         (val, grad)
@@ -1700,11 +1803,19 @@ impl Compiled {
         let mut v: f64 = 0.0;
         for h in &self.eqs {
             let hv = h.f.eval(x);
-            v = v.max(if hv.is_finite() { hv.abs() } else { f64::INFINITY });
+            v = v.max(if hv.is_finite() {
+                hv.abs()
+            } else {
+                f64::INFINITY
+            });
         }
         for i in 0..self.ineqs.len() {
             let gv = self.ineq_value(i, x);
-            v = v.max(if gv.is_finite() { gv.max(0.0) } else { f64::INFINITY });
+            v = v.max(if gv.is_finite() {
+                gv.max(0.0)
+            } else {
+                f64::INFINITY
+            });
         }
         v
     }
@@ -1747,7 +1858,11 @@ fn spg<F: Fn(&[f64]) -> (f64, Vec<f64>)>(
     };
     let mut lambda = {
         let pn = pg_norm(&x, &g);
-        if pn > 0.0 { (1.0 / pn).clamp(1e-10, 1e10) } else { 1.0 }
+        if pn > 0.0 {
+            (1.0 / pn).clamp(1e-10, 1e10)
+        } else {
+            1.0
+        }
     };
     for _ in 0..max_iter {
         if pg_norm(&x, &g) <= tol {
@@ -1777,7 +1892,11 @@ fn spg<F: Fn(&[f64]) -> (f64, Vec<f64>)>(
         let y: Vec<f64> = (0..n).map(|j| gn[j] - g[j]).collect();
         let sy: f64 = (0..n).map(|j| s[j] * y[j]).sum();
         let ss: f64 = (0..n).map(|j| s[j] * s[j]).sum();
-        lambda = if sy > 0.0 { (ss / sy).clamp(1e-10, 1e10) } else { 1e10 };
+        lambda = if sy > 0.0 {
+            (ss / sy).clamp(1e-10, 1e10)
+        } else {
+            1e10
+        };
         x = xn;
         fx = fn_;
         g = gn;
@@ -1802,7 +1921,14 @@ fn augmented_lagrangian(c: &Compiled, x0: &[f64], lo: &[f64], hi: &[f64]) -> (Ve
     let mut prev_obj = f64::INFINITY;
     for outer in 0..40 {
         let tol = if outer < 3 { 1e-5 } else { 1e-9 };
-        x = spg(&|z: &[f64]| c.lagrangian(z, &lam, &mu, rho), &x, lo, hi, tol, 800);
+        x = spg(
+            &|z: &[f64]| c.lagrangian(z, &lam, &mu, rho),
+            &x,
+            lo,
+            hi,
+            tol,
+            800,
+        );
         let infeas = c.infeasibility(&x);
         for (i, h) in c.eqs.iter().enumerate() {
             lam[i] += rho * c.s_eq[i] * h.f.eval(&x);
@@ -1832,7 +1958,10 @@ fn augmented_lagrangian(c: &Compiled, x0: &[f64], lo: &[f64], hi: &[f64]) -> (Ve
 struct Lcg(u64);
 impl Lcg {
     fn next(&mut self) -> f64 {
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         ((self.0 >> 11) as f64) / ((1u64 << 53) as f64)
     }
 }
@@ -1890,7 +2019,11 @@ fn relax_nonlinear(c: &mut Compiled, lo: &[f64], hi: &[f64]) -> Option<(Vec<f64>
             return;
         }
         let obj = c.objective(&x);
-        if obj.is_finite() && best.as_ref().map_or(true, |(_, b)| obj < b - 1e-12 * (1.0 + b.abs())) {
+        if obj.is_finite()
+            && best
+                .as_ref()
+                .map_or(true, |(_, b)| obj < b - 1e-12 * (1.0 + b.abs()))
+        {
             *best = Some((x, obj));
         }
     };
@@ -2175,7 +2308,10 @@ impl Iv {
         }
         let (l, h) = (a.lo.abs().powi(n), a.hi.abs().powi(n));
         if a.contains_zero() {
-            Iv { lo: 0.0, hi: l.max(h) }
+            Iv {
+                lo: 0.0,
+                hi: l.max(h),
+            }
         } else {
             Iv {
                 lo: l.min(h),
@@ -2187,7 +2323,7 @@ impl Iv {
     /// Range of sin over the interval (cos uses a phase shift).
     fn sin(a: Iv) -> Iv {
         use std::f64::consts::{FRAC_PI_2, TAU};
-        if !(a.hi - a.lo < TAU) {
+        if (a.hi - a.lo).partial_cmp(&TAU) != Some(std::cmp::Ordering::Less) {
             return Iv { lo: -1.0, hi: 1.0 };
         }
         let mut lo = a.lo.sin().min(a.hi.sin());
@@ -2215,7 +2351,10 @@ impl CExpr {
             CExpr::Var(i) => b[*i],
             CExpr::Neg(a) => {
                 let v = a.ieval(b);
-                Iv { lo: -v.hi, hi: -v.lo }
+                Iv {
+                    lo: -v.hi,
+                    hi: -v.lo,
+                }
             }
             CExpr::Bin(op, l, r) => {
                 let (x, y) = (l.ieval(b), r.ieval(b));
@@ -2304,7 +2443,10 @@ impl CExpr {
                     "abs" => {
                         let (l, h) = (a.lo.abs(), a.hi.abs());
                         if a.contains_zero() {
-                            Iv { lo: 0.0, hi: l.max(h) }
+                            Iv {
+                                lo: 0.0,
+                                hi: l.max(h),
+                            }
                         } else {
                             Iv {
                                 lo: l.min(h),
@@ -2329,7 +2471,8 @@ impl CExpr {
                     }),
                     "tan" => {
                         // monotone between poles; a pole inside gives no bound
-                        let k = ((a.lo - std::f64::consts::FRAC_PI_2) / std::f64::consts::PI).ceil();
+                        let k =
+                            ((a.lo - std::f64::consts::FRAC_PI_2) / std::f64::consts::PI).ceil();
                         if std::f64::consts::FRAC_PI_2 + k * std::f64::consts::PI <= a.hi {
                             Iv::ENTIRE
                         } else {
@@ -2384,7 +2527,11 @@ fn interval_global_search(
             .iter()
             .flat_map(|v| [v.lo.abs(), v.hi.abs()])
             .fold(0.0, f64::max);
-        if big.is_finite() { 1e-7 * (1.0 + big) } else { 0.0 }
+        if big.is_finite() {
+            1e-7 * (1.0 + big)
+        } else {
+            0.0
+        }
     };
 
     let mut best = incumbent;
@@ -2398,7 +2545,10 @@ fn interval_global_search(
                     hi: (hi[j] + 1e-9).floor(),
                 }
             } else {
-                Iv { lo: lo[j], hi: hi[j] }
+                Iv {
+                    lo: lo[j],
+                    hi: hi[j],
+                }
             }
         })
         .collect();
@@ -2558,23 +2708,49 @@ impl CExpr {
                 b[*i] = b[*i].meet(z);
                 !b[*i].is_empty()
             }
-            CExpr::Neg(a) => a.narrow(b, Iv { lo: -z.hi, hi: -z.lo }),
+            CExpr::Neg(a) => a.narrow(
+                b,
+                Iv {
+                    lo: -z.hi,
+                    hi: -z.lo,
+                },
+            ),
             CExpr::Bin(op, l, r) => {
                 let (lv, rv) = (l.ieval(b), r.ieval(b));
                 match op {
                     BinaryOp::Add => {
-                        l.narrow(b, Iv { lo: z.lo - rv.hi, hi: z.hi - rv.lo }.widen())
-                            && r.narrow(b, {
-                                let lv = l.ieval(b);
-                                Iv { lo: z.lo - lv.hi, hi: z.hi - lv.lo }.widen()
-                            })
+                        l.narrow(
+                            b,
+                            Iv {
+                                lo: z.lo - rv.hi,
+                                hi: z.hi - rv.lo,
+                            }
+                            .widen(),
+                        ) && r.narrow(b, {
+                            let lv = l.ieval(b);
+                            Iv {
+                                lo: z.lo - lv.hi,
+                                hi: z.hi - lv.lo,
+                            }
+                            .widen()
+                        })
                     }
                     BinaryOp::Sub => {
-                        l.narrow(b, Iv { lo: z.lo + rv.lo, hi: z.hi + rv.hi }.widen())
-                            && r.narrow(b, {
-                                let lv = l.ieval(b);
-                                Iv { lo: lv.lo - z.hi, hi: lv.hi - z.lo }.widen()
-                            })
+                        l.narrow(
+                            b,
+                            Iv {
+                                lo: z.lo + rv.lo,
+                                hi: z.hi + rv.hi,
+                            }
+                            .widen(),
+                        ) && r.narrow(b, {
+                            let lv = l.ieval(b);
+                            Iv {
+                                lo: lv.lo - z.hi,
+                                hi: lv.hi - z.lo,
+                            }
+                            .widen()
+                        })
                     }
                     BinaryOp::Mul => {
                         if let Some(t) = Iv::div(z, rv) {
@@ -2599,7 +2775,9 @@ impl CExpr {
                     }
                     BinaryOp::Pow => {
                         let n = match r.as_ref() {
-                            CExpr::Const(c) if c.fract() == 0.0 && *c >= 1.0 && *c < 64.0 => *c as i32,
+                            CExpr::Const(c) if c.fract() == 0.0 && *c >= 1.0 && *c < 64.0 => {
+                                *c as i32
+                            }
                             _ => return true,
                         };
                         let root = |v: f64| {
@@ -2612,7 +2790,14 @@ impl CExpr {
                             }
                         };
                         if n % 2 == 1 {
-                            l.narrow(b, Iv { lo: root(z.lo), hi: root(z.hi) }.widen())
+                            l.narrow(
+                                b,
+                                Iv {
+                                    lo: root(z.lo),
+                                    hi: root(z.hi),
+                                }
+                                .widen(),
+                            )
                         } else {
                             if z.hi < 0.0 {
                                 return false;
@@ -2628,7 +2813,11 @@ impl CExpr {
                     if z.hi <= 0.0 {
                         return false;
                     }
-                    let lo = if z.lo > 0.0 { z.lo.ln() } else { f64::NEG_INFINITY };
+                    let lo = if z.lo > 0.0 {
+                        z.lo.ln()
+                    } else {
+                        f64::NEG_INFINITY
+                    };
                     a.narrow(b, Iv { lo, hi: z.hi.ln() }.widen())
                 }
                 "ln" | "log" => a.narrow(b, z.monotone(f64::exp).widen()),
@@ -2637,7 +2826,14 @@ impl CExpr {
                         return false;
                     }
                     let lo = z.lo.max(0.0);
-                    a.narrow(b, Iv { lo: lo * lo, hi: z.hi * z.hi }.widen())
+                    a.narrow(
+                        b,
+                        Iv {
+                            lo: lo * lo,
+                            hi: z.hi * z.hi,
+                        }
+                        .widen(),
+                    )
                 }
                 _ => true,
             },
@@ -2657,12 +2853,24 @@ fn contract(c: &Compiled, b: &mut [Iv], is_int: &[bool], tol: f64, cut: Option<f
         }
         for (g, strict) in &c.ineqs {
             let limit = tol - if *strict { STRICT_MARGIN } else { 0.0 };
-            if !g.f.narrow(b, Iv { lo: f64::NEG_INFINITY, hi: limit }) {
+            if !g.f.narrow(
+                b,
+                Iv {
+                    lo: f64::NEG_INFINITY,
+                    hi: limit,
+                },
+            ) {
                 return false;
             }
         }
         if let (Some(o), Some(ub)) = (&c.obj, cut) {
-            if !o.f.narrow(b, Iv { lo: f64::NEG_INFINITY, hi: ub }) {
+            if !o.f.narrow(
+                b,
+                Iv {
+                    lo: f64::NEG_INFINITY,
+                    hi: ub,
+                },
+            ) {
                 return false;
             }
         }

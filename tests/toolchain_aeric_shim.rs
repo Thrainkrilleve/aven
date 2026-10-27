@@ -61,8 +61,8 @@ fn test_aeric_shim_server_capacity_golden() {
         .find(|b| b.kind == BlockKind::Forward)
         .expect("forward block");
 
-    let bundle = CTranspiler::generate_aeric_shim(blk, "server_capacity")
-        .expect("generate_aeric_shim");
+    let bundle =
+        CTranspiler::generate_aeric_shim(blk, "server_capacity").expect("generate_aeric_shim");
 
     // 1. Check exact arities
     assert_eq!(bundle.n_in, 8);
@@ -93,48 +93,67 @@ fn test_aeric_shim_server_capacity_golden() {
 
     // 4. Model SHA-256 identity hash verification
     assert_eq!(bundle.model_hash.len(), 64);
-    assert!(bundle
-        .model_hash
-        .chars()
-        .all(|c| c.is_ascii_hexdigit()));
+    assert!(bundle.model_hash.chars().all(|c| c.is_ascii_hexdigit()));
 
     // 5. Header checks
-    assert!(bundle
-        .header_h
-        .contains("#define MODEL_SERVER_CAPACITY_N_IN   8"));
-    assert!(bundle
-        .header_h
-        .contains("#define MODEL_SERVER_CAPACITY_N_OUT  5"));
-    assert!(bundle
-        .header_h
-        .contains(&format!("\"{}\"", bundle.model_hash)));
-    assert!(bundle
-        .header_h
-        .contains("int aven_solve(const double *in, size_t n_in, double *out, size_t n_out);"));
-    assert!(bundle
-        .header_h
-        .contains("const char* aven_model_hash(void);"));
+    assert!(
+        bundle
+            .header_h
+            .contains("#define MODEL_SERVER_CAPACITY_N_IN   8")
+    );
+    assert!(
+        bundle
+            .header_h
+            .contains("#define MODEL_SERVER_CAPACITY_N_OUT  5")
+    );
+    assert!(
+        bundle
+            .header_h
+            .contains(&format!("\"{}\"", bundle.model_hash))
+    );
+    assert!(
+        bundle
+            .header_h
+            .contains("int aven_solve(const double *in, size_t n_in, double *out, size_t n_out);")
+    );
+    assert!(
+        bundle
+            .header_h
+            .contains("const char* aven_model_hash(void);")
+    );
 
     // 6. Shim checks
-    assert!(bundle
-        .shim_c
-        .contains("#include \"model_server_capacity.h\""));
-    assert!(bundle
-        .shim_c
-        .contains("int aven_solve(const double *in, size_t n_in, double *out, size_t n_out)"));
-    assert!(bundle.shim_c.contains("if (n_in != 8 || n_out != 5) return 1;"));
+    assert!(
+        bundle
+            .shim_c
+            .contains("#include \"model_server_capacity.h\"")
+    );
+    assert!(
+        bundle
+            .shim_c
+            .contains("int aven_solve(const double *in, size_t n_in, double *out, size_t n_out)")
+    );
+    assert!(
+        bundle
+            .shim_c
+            .contains("if (n_in != 8 || n_out != 5) return 1;")
+    );
     assert!(bundle.shim_c.contains("aven_ProductionProfile("));
     assert!(bundle.shim_c.contains("isfinite(r_allocated_workers)"));
     assert!(bundle.shim_c.contains("return 2;"));
 
     // 7. Single unit C checks
     assert!(bundle.single_unit_c.contains("aven_ceil"));
-    assert!(bundle
-        .single_unit_c
-        .contains("AVEN_EXPORT void aven_ProductionProfile"));
-    assert!(bundle
-        .single_unit_c
-        .contains("int aven_solve(const double *in, size_t n_in, double *out, size_t n_out)"));
+    assert!(
+        bundle
+            .single_unit_c
+            .contains("AVEN_EXPORT void aven_ProductionProfile")
+    );
+    assert!(
+        bundle
+            .single_unit_c
+            .contains("int aven_solve(const double *in, size_t n_in, double *out, size_t n_out)")
+    );
 }
 
 #[test]
@@ -143,8 +162,8 @@ fn test_aeric_shim_aerodynamics_golden() {
     let module = parse_module_from_str(&src, "aerodynamics");
     let blk = &module.blocks[0];
 
-    let bundle = CTranspiler::generate_aeric_shim(blk, "aerodynamics")
-        .expect("generate_aeric_shim");
+    let bundle =
+        CTranspiler::generate_aeric_shim(blk, "aerodynamics").expect("generate_aeric_shim");
 
     assert_eq!(bundle.n_in, 4);
     assert_eq!(bundle.n_out, 2);
@@ -156,12 +175,16 @@ fn test_aeric_shim_aerodynamics_golden() {
     assert_eq!(bundle.output_names, expected_outputs);
 
     assert_eq!(bundle.model_hash.len(), 64);
-    assert!(bundle
-        .header_h
-        .contains("#define MODEL_AERODYNAMICS_N_IN   4"));
-    assert!(bundle
-        .header_h
-        .contains("#define MODEL_AERODYNAMICS_N_OUT  2"));
+    assert!(
+        bundle
+            .header_h
+            .contains("#define MODEL_AERODYNAMICS_N_IN   4")
+    );
+    assert!(
+        bundle
+            .header_h
+            .contains("#define MODEL_AERODYNAMICS_N_OUT  2")
+    );
 }
 
 #[test]
@@ -207,15 +230,20 @@ fn test_aeric_shim_randomized_1_polynomial_generation() {
     assert_eq!(bundle.model_hash, bundle2.model_hash);
 
     // Single unit C must contain correct definitions and arities
-    assert!(bundle
-        .single_unit_c
-        .contains(&format!("MODEL_DYNAMIC_POLY_N_IN   {}", bundle.n_in)));
-    assert!(bundle
-        .single_unit_c
-        .contains(&format!("MODEL_DYNAMIC_POLY_N_OUT  {}", bundle.n_out)));
-    assert!(bundle
-        .single_unit_c
-        .contains(&format!("if (n_in != {} || n_out != {}) return 1;", bundle.n_in, bundle.n_out)));
+    assert!(
+        bundle
+            .single_unit_c
+            .contains(&format!("MODEL_DYNAMIC_POLY_N_IN   {}", bundle.n_in))
+    );
+    assert!(
+        bundle
+            .single_unit_c
+            .contains(&format!("MODEL_DYNAMIC_POLY_N_OUT  {}", bundle.n_out))
+    );
+    assert!(bundle.single_unit_c.contains(&format!(
+        "if (n_in != {} || n_out != {}) return 1;",
+        bundle.n_in, bundle.n_out
+    )));
 }
 
 #[test]
@@ -243,9 +271,11 @@ fn test_aeric_shim_randomized_2_domain_fault_guards() {
     assert!(bundle.single_unit_c.contains("aven_ceil"));
 
     // Finiteness check must guard the actuator output
-    assert!(bundle
-        .single_unit_c
-        .contains(&format!("isfinite(r_{})", out_ratio)));
+    assert!(
+        bundle
+            .single_unit_c
+            .contains(&format!("isfinite(r_{})", out_ratio))
+    );
     assert!(bundle.single_unit_c.contains("return 2;"));
 
     // Verify differential math against diff::eval_expr
@@ -286,8 +316,8 @@ fn test_aeric_shim_randomized_3_rapid_model_cycling() {
         let module = parse_module_from_str(&model_src, &format!("rapid_{}", cycle));
         let blk = &module.blocks[0];
 
-        let bundle = CTranspiler::generate_aeric_shim(blk, &format!("rapid_{}", cycle))
-            .expect("rapid shim");
+        let bundle =
+            CTranspiler::generate_aeric_shim(blk, &format!("rapid_{}", cycle)).expect("rapid shim");
 
         assert_eq!(bundle.n_in, 3);
         assert_eq!(bundle.n_out, 2);
@@ -323,7 +353,10 @@ fn test_aeric_shim_cli_out_dir_emission() {
         .status()
         .expect("execute avenc");
 
-    assert!(status.success(), "avenc emit-c --aeric-shim --out-dir failed");
+    assert!(
+        status.success(),
+        "avenc emit-c --aeric-shim --out-dir failed"
+    );
 
     let model_c_path = temp_dir.join("model_server_capacity.c");
     let model_h_path = temp_dir.join("model_server_capacity.h");
@@ -338,7 +371,10 @@ fn test_aeric_shim_cli_out_dir_emission() {
     let shim_content = fs::read_to_string(&shim_c_path).expect("read shim");
 
     assert!(c_content.contains("aven_ProductionProfile"));
-    assert!(!c_content.contains("int main(void)"), "library C file must not contain main()");
+    assert!(
+        !c_content.contains("int main(void)"),
+        "library C file must not contain main()"
+    );
 
     assert!(h_content.contains("MODEL_SERVER_CAPACITY_N_IN"));
     assert!(h_content.contains("MODEL_SERVER_CAPACITY_N_OUT"));

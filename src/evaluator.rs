@@ -636,13 +636,14 @@ impl IpcEvaluator {
             EvalError::DomainError(format!("Invalid IPC socket address '{}': {}", addr_str, e))
         })?;
 
-        let mut stream = TcpStream::connect_timeout(&socket_addr, std::time::Duration::from_millis(500))
-            .map_err(|e| {
-                EvalError::BlackBoxFailure(format!(
-                    "Failed to connect to IPC daemon at '{}' for actuation: {}",
-                    addr_str, e
-                ))
-            })?;
+        let mut stream =
+            TcpStream::connect_timeout(&socket_addr, std::time::Duration::from_millis(500))
+                .map_err(|e| {
+                    EvalError::BlackBoxFailure(format!(
+                        "Failed to connect to IPC daemon at '{}' for actuation: {}",
+                        addr_str, e
+                    ))
+                })?;
         let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(1)));
 
         let mut json_str = String::from("{\"action\": \"actuate\", \"commands\": {");
@@ -846,7 +847,11 @@ impl ShmRingBuffer {
     /// Resolves an SHM name or path to an absolute path.
     pub fn resolve_path(path_str: &str) -> PathBuf {
         let p = Path::new(path_str);
-        if p.is_absolute() || path_str.contains('/') || path_str.contains('\\') || path_str.contains(':') {
+        if p.is_absolute()
+            || path_str.contains('/')
+            || path_str.contains('\\')
+            || path_str.contains(':')
+        {
             p.to_path_buf()
         } else {
             std::env::temp_dir().join(format!("{}.shm", path_str))
@@ -883,10 +888,16 @@ impl ShmRingBuffer {
             init_buf[24..28].copy_from_slice(&slot_size.to_le_bytes());
 
             file.seek(SeekFrom::Start(0)).map_err(|e| {
-                EvalError::BlackBoxFailure(format!("Failed to seek in SHM file '{:?}': {}", path, e))
+                EvalError::BlackBoxFailure(format!(
+                    "Failed to seek in SHM file '{:?}': {}",
+                    path, e
+                ))
             })?;
             file.write_all(&init_buf).map_err(|e| {
-                EvalError::BlackBoxFailure(format!("Failed to initialize SHM file '{:?}': {}", path, e))
+                EvalError::BlackBoxFailure(format!(
+                    "Failed to initialize SHM file '{:?}': {}",
+                    path, e
+                ))
             })?;
             file.flush().map_err(|e| {
                 EvalError::BlackBoxFailure(format!("Failed to flush SHM file '{:?}': {}", path, e))
@@ -920,7 +931,10 @@ impl ShmRingBuffer {
             EvalError::BlackBoxFailure(format!("Failed to seek header in SHM '{:?}': {}", path, e))
         })?;
         file.read_exact(&mut header).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to read header from SHM '{:?}': {}", path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to read header from SHM '{:?}': {}",
+                path, e
+            ))
         })?;
 
         if &header[0..16] != Self::MAGIC {
@@ -952,7 +966,11 @@ impl ShmRingBuffer {
     }
 
     /// Producer writes a new telemetry frame into the next circular slot.
-    pub fn write_telemetry(&mut self, json_payload: &str, timestamp_ns: u64) -> Result<u64, EvalError> {
+    pub fn write_telemetry(
+        &mut self,
+        json_payload: &str,
+        timestamp_ns: u64,
+    ) -> Result<u64, EvalError> {
         let payload_bytes = json_payload.as_bytes();
         if payload_bytes.len() + 20 > self.slot_size {
             return Err(EvalError::DomainError(format!(
@@ -964,11 +982,17 @@ impl ShmRingBuffer {
 
         // Read current write_seq
         self.file.seek(SeekFrom::Start(28)).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to seek write_seq in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to seek write_seq in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         let mut seq_buf = [0u8; 8];
         self.file.read_exact(&mut seq_buf).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to read write_seq in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to read write_seq in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         let next_seq = u64::from_le_bytes(seq_buf).wrapping_add(1);
 
@@ -976,31 +1000,61 @@ impl ShmRingBuffer {
         let slot_offset = Self::SLOTS_OFFSET + slot_idx * self.slot_size;
 
         // Write slot payload: slot_seq (8), timestamp_ns (8), payload_len (4), payload_bytes
-        self.file.seek(SeekFrom::Start(slot_offset as u64)).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to seek slot in '{:?}': {}", self.file_path, e))
-        })?;
+        self.file
+            .seek(SeekFrom::Start(slot_offset as u64))
+            .map_err(|e| {
+                EvalError::BlackBoxFailure(format!(
+                    "Failed to seek slot in '{:?}': {}",
+                    self.file_path, e
+                ))
+            })?;
         self.file.write_all(&next_seq.to_le_bytes()).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to write slot seq in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to write slot seq in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
-        self.file.write_all(&timestamp_ns.to_le_bytes()).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to write slot timestamp in '{:?}': {}", self.file_path, e))
-        })?;
-        self.file.write_all(&(payload_bytes.len() as u32).to_le_bytes()).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to write slot payload length in '{:?}': {}", self.file_path, e))
-        })?;
+        self.file
+            .write_all(&timestamp_ns.to_le_bytes())
+            .map_err(|e| {
+                EvalError::BlackBoxFailure(format!(
+                    "Failed to write slot timestamp in '{:?}': {}",
+                    self.file_path, e
+                ))
+            })?;
+        self.file
+            .write_all(&(payload_bytes.len() as u32).to_le_bytes())
+            .map_err(|e| {
+                EvalError::BlackBoxFailure(format!(
+                    "Failed to write slot payload length in '{:?}': {}",
+                    self.file_path, e
+                ))
+            })?;
         self.file.write_all(payload_bytes).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to write slot payload in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to write slot payload in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
 
         // Update header write_seq
         self.file.seek(SeekFrom::Start(28)).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to seek write_seq header in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to seek write_seq header in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         self.file.write_all(&next_seq.to_le_bytes()).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to commit write_seq in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to commit write_seq in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         self.file.flush().map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to flush SHM write in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to flush SHM write in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
 
         Ok(next_seq)
@@ -1009,15 +1063,24 @@ impl ShmRingBuffer {
     /// Consumer reads the latest telemetry frame from the circular slot buffer.
     pub fn read_latest(&self) -> Result<(u64, u64, String), EvalError> {
         let mut file = self.file.try_clone().map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to clone file handle for SHM '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to clone file handle for SHM '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
 
         file.seek(SeekFrom::Start(28)).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to seek write_seq in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to seek write_seq in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         let mut seq_buf = [0u8; 8];
         file.read_exact(&mut seq_buf).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to read write_seq in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to read write_seq in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         let write_seq = u64::from_le_bytes(seq_buf);
 
@@ -1031,25 +1094,38 @@ impl ShmRingBuffer {
         let slot_idx = (write_seq % (self.slot_count as u64)) as usize;
         let slot_offset = Self::SLOTS_OFFSET + slot_idx * self.slot_size;
 
-        file.seek(SeekFrom::Start(slot_offset as u64)).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to seek slot in '{:?}': {}", self.file_path, e))
-        })?;
+        file.seek(SeekFrom::Start(slot_offset as u64))
+            .map_err(|e| {
+                EvalError::BlackBoxFailure(format!(
+                    "Failed to seek slot in '{:?}': {}",
+                    self.file_path, e
+                ))
+            })?;
 
         let mut slot_seq_buf = [0u8; 8];
         file.read_exact(&mut slot_seq_buf).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to read slot_seq in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to read slot_seq in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         let slot_seq = u64::from_le_bytes(slot_seq_buf);
 
         let mut ts_buf = [0u8; 8];
         file.read_exact(&mut ts_buf).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to read slot timestamp in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to read slot timestamp in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         let timestamp_ns = u64::from_le_bytes(ts_buf);
 
         let mut len_buf = [0u8; 4];
         file.read_exact(&mut len_buf).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to read slot len in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to read slot len in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         let payload_len = u32::from_le_bytes(len_buf) as usize;
 
@@ -1062,11 +1138,17 @@ impl ShmRingBuffer {
 
         let mut payload_buf = vec![0u8; payload_len];
         file.read_exact(&mut payload_buf).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to read slot payload in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to read slot payload in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
 
         let payload_str = String::from_utf8(payload_buf).map_err(|e| {
-            EvalError::MalformedOutput(format!("Invalid UTF-8 in SHM telemetry frame {}: {}", slot_seq, e))
+            EvalError::MalformedOutput(format!(
+                "Invalid UTF-8 in SHM telemetry frame {}: {}",
+                slot_seq, e
+            ))
         })?;
 
         Ok((slot_seq, timestamp_ns, payload_str))
@@ -1085,34 +1167,64 @@ impl ShmRingBuffer {
 
         // Read current actuation_seq
         self.file.seek(SeekFrom::Start(36)).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to seek actuation_seq in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to seek actuation_seq in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         let mut seq_buf = [0u8; 8];
         self.file.read_exact(&mut seq_buf).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to read actuation_seq in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to read actuation_seq in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         let next_act_seq = u64::from_le_bytes(seq_buf).wrapping_add(1);
 
         // Write actuation payload into offset 64..512
-        self.file.seek(SeekFrom::Start(Self::HEADER_SIZE as u64)).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to seek actuation zone in '{:?}': {}", self.file_path, e))
-        })?;
+        self.file
+            .seek(SeekFrom::Start(Self::HEADER_SIZE as u64))
+            .map_err(|e| {
+                EvalError::BlackBoxFailure(format!(
+                    "Failed to seek actuation zone in '{:?}': {}",
+                    self.file_path, e
+                ))
+            })?;
         self.file.write_all(payload_bytes).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to write actuation payload in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to write actuation payload in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
 
         // Update actuation_seq and actuation_len
         self.file.seek(SeekFrom::Start(36)).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to seek actuation_seq header in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to seek actuation_seq header in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
-        self.file.write_all(&next_act_seq.to_le_bytes()).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to commit actuation_seq in '{:?}': {}", self.file_path, e))
-        })?;
-        self.file.write_all(&(payload_bytes.len() as u32).to_le_bytes()).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to commit actuation_len in '{:?}': {}", self.file_path, e))
-        })?;
+        self.file
+            .write_all(&next_act_seq.to_le_bytes())
+            .map_err(|e| {
+                EvalError::BlackBoxFailure(format!(
+                    "Failed to commit actuation_seq in '{:?}': {}",
+                    self.file_path, e
+                ))
+            })?;
+        self.file
+            .write_all(&(payload_bytes.len() as u32).to_le_bytes())
+            .map_err(|e| {
+                EvalError::BlackBoxFailure(format!(
+                    "Failed to commit actuation_len in '{:?}': {}",
+                    self.file_path, e
+                ))
+            })?;
         self.file.flush().map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to flush actuation in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to flush actuation in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
 
         Ok(next_act_seq)
@@ -1121,21 +1233,33 @@ impl ShmRingBuffer {
     /// Reads the latest reverse actuation commands from the SHM actuation zone.
     pub fn read_latest_actuation(&self) -> Result<(u64, String), EvalError> {
         let mut file = self.file.try_clone().map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to clone file for SHM '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to clone file for SHM '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
 
         file.seek(SeekFrom::Start(36)).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to seek actuation_seq in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to seek actuation_seq in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         let mut seq_buf = [0u8; 8];
         file.read_exact(&mut seq_buf).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to read actuation_seq in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to read actuation_seq in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         let act_seq = u64::from_le_bytes(seq_buf);
 
         let mut len_buf = [0u8; 4];
         file.read_exact(&mut len_buf).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to read actuation_len in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to read actuation_len in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         let act_len = u32::from_le_bytes(len_buf) as usize;
 
@@ -1150,12 +1274,19 @@ impl ShmRingBuffer {
             )));
         }
 
-        file.seek(SeekFrom::Start(Self::HEADER_SIZE as u64)).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to seek actuation zone in '{:?}': {}", self.file_path, e))
-        })?;
+        file.seek(SeekFrom::Start(Self::HEADER_SIZE as u64))
+            .map_err(|e| {
+                EvalError::BlackBoxFailure(format!(
+                    "Failed to seek actuation zone in '{:?}': {}",
+                    self.file_path, e
+                ))
+            })?;
         let mut payload_buf = vec![0u8; act_len];
         file.read_exact(&mut payload_buf).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to read actuation payload in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to read actuation payload in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
 
         let payload_str = String::from_utf8(payload_buf).map_err(|e| {
@@ -1209,7 +1340,7 @@ impl ShmEvaluator {
             let _ = write!(json_str, "\"{}\": {}", k, commands[k]);
             first = false;
         }
-        json_str.push_str("}");
+        json_str.push('}');
 
         let mut guard = self.ring.lock().map_err(|e| {
             EvalError::BlackBoxFailure(format!("Failed to lock SHM ring buffer mutex: {}", e))
@@ -1270,7 +1401,7 @@ impl Evaluator for ShmEvaluator {
 
         let timestamp_ms = parse_json_u64(trimmed, "timestamp_ms")
             .or_else(|| parse_json_u64(trimmed, "timestamp"))
-            .or_else(|| if ts_ns > 0 { Some(ts_ns / 1_000_000) } else { None });
+            .or((ts_ns > 0).then_some(ts_ns / 1_000_000));
         let ttl_ms = parse_json_u64(trimmed, "ttl_ms")
             .or_else(|| parse_json_float(trimmed, "ttl").map(|s| (s * 1000.0) as u64));
         let warnings = parse_json_string_array(trimmed, "warnings");
@@ -1340,7 +1471,11 @@ impl DynamicLibrary {
         #[cfg(windows)]
         {
             use std::os::windows::ffi::OsStrExt;
-            let wide: Vec<u16> = p.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+            let wide: Vec<u16> = p
+                .as_os_str()
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect();
             let handle = unsafe { os_ffi::LoadLibraryW(wide.as_ptr()) };
             if handle.is_null() {
                 let err_code = unsafe { os_ffi::GetLastError() };
@@ -1363,7 +1498,9 @@ impl DynamicLibrary {
                     if err_ptr.is_null() {
                         "Unknown dlopen error".to_string()
                     } else {
-                        std::ffi::CStr::from_ptr(err_ptr).to_string_lossy().into_owned()
+                        std::ffi::CStr::from_ptr(err_ptr)
+                            .to_string_lossy()
+                            .into_owned()
                     }
                 };
                 return Err(EvalError::BlackBoxFailure(format!(
@@ -1375,6 +1512,14 @@ impl DynamicLibrary {
         }
     }
 
+    /// Copy the named symbol out of this library as a `T`.
+    ///
+    /// # Safety
+    ///
+    /// `symbol_name` must name a symbol whose stored value is a valid `T`.
+    /// `T` is the symbol's real type, usually a function pointer, and the
+    /// caller must not use the value after this library is dropped. A
+    /// mismatched `T` is undefined behavior.
     pub unsafe fn get_symbol<T: Copy>(&self, symbol_name: &str) -> Result<T, EvalError> {
         #[cfg(windows)]
         {
@@ -1401,7 +1546,9 @@ impl DynamicLibrary {
                     if err_ptr.is_null() {
                         "Symbol not found".to_string()
                     } else {
-                        std::ffi::CStr::from_ptr(err_ptr).to_string_lossy().into_owned()
+                        std::ffi::CStr::from_ptr(err_ptr)
+                            .to_string_lossy()
+                            .into_owned()
                     }
                 };
                 return Err(EvalError::BlackBoxFailure(format!(

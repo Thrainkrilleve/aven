@@ -1442,7 +1442,7 @@ fn test_diagnostics_scale_invariance_across_disparate_physical_units() {
 
 #[test]
 fn test_randomized_ledger_key_generation_and_cli_verification() {
-    use avenc::ledger::{generate_random_key, verify_jsonl, Fact, Ledger};
+    use avenc::ledger::{Fact, Ledger, generate_random_key, verify_jsonl};
 
     // 1. Generate two independent keys from OS entropy and system clocks
     let k1 = generate_random_key();
@@ -1482,7 +1482,8 @@ fn test_randomized_ledger_key_generation_and_cli_verification() {
     let jsonl = ledger.to_jsonl();
 
     // 5. Verification with the correct key k1 must succeed and confirm every signature valid
-    let verified = verify_jsonl(&jsonl, Some(k1.as_bytes())).expect("valid key must verify signatures");
+    let verified =
+        verify_jsonl(&jsonl, Some(k1.as_bytes())).expect("valid key must verify signatures");
     assert_eq!(verified.facts, 2);
     assert!(verified.signed);
 

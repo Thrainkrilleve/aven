@@ -234,7 +234,11 @@ fn spec_objective_without_parentheses() {
 fn toolchain_emit_c_command_exists() {
     let run = avenc(&["emit-c", "examples/server_capacity.aven"]);
     assert_eq!(run.code, 0, "stderr: {}", run.stderr);
-    assert!(run.stdout.contains("#include"), "no C emitted: {}", run.stdout);
+    assert!(
+        run.stdout.contains("#include"),
+        "no C emitted: {}",
+        run.stdout
+    );
 }
 
 #[test]
@@ -245,7 +249,13 @@ fn toolchain_bench_command_exists() {
 
 #[test]
 fn toolchain_pareto_command_exists() {
-    let run = avenc(&["pareto", "examples/server_capacity.aven", "reqs_per_second", "100", "50000"]);
+    let run = avenc(&[
+        "pareto",
+        "examples/server_capacity.aven",
+        "reqs_per_second",
+        "100",
+        "50000",
+    ]);
     assert_eq!(run.code, 0, "stderr: {}", run.stderr);
 }
 
@@ -264,7 +274,11 @@ fn toolchain_exit_code_0_only_when_fully_settled() {
 fn toolchain_exit_code_2_on_constraint_violation() {
     let src = "relation R {\n y = 2 * x\n}\nsolve R with {\n x = 10\n y <= 5\n}\n";
     let run = run_model(src, &[]);
-    assert_eq!(run.code, 2, "stdout: {}\nstderr: {}", run.stdout, run.stderr);
+    assert_eq!(
+        run.code, 2,
+        "stdout: {}\nstderr: {}",
+        run.stdout, run.stderr
+    );
 }
 
 fn stale_adapter_model(ttl_ms: u64, timestamp_ms: u64) -> String {
@@ -283,15 +297,27 @@ fn stale_adapter_model(ttl_ms: u64, timestamp_ms: u64) -> String {
 #[test]
 fn toolchain_exit_code_3_on_stale_input() {
     let run = run_model(&stale_adapter_model(0, 0), &[]);
-    assert_eq!(run.code, 3, "stdout: {}\nstderr: {}", run.stdout, run.stderr);
-    assert!(run.stderr.contains("DECISION BLOCKED"), "stderr: {}", run.stderr);
+    assert_eq!(
+        run.code, 3,
+        "stdout: {}\nstderr: {}",
+        run.stdout, run.stderr
+    );
+    assert!(
+        run.stderr.contains("DECISION BLOCKED"),
+        "stderr: {}",
+        run.stderr
+    );
 }
 
 #[test]
 fn freshness_expired_timestamp_blocks_decision() {
     // timestamp in 1970 with a one-minute TTL: long expired
     let run = run_model(&stale_adapter_model(60_000, 1_000), &[]);
-    assert_eq!(run.code, 3, "stdout: {}\nstderr: {}", run.stdout, run.stderr);
+    assert_eq!(
+        run.code, 3,
+        "stdout: {}\nstderr: {}",
+        run.stdout, run.stderr
+    );
 }
 
 #[test]
@@ -301,7 +327,11 @@ fn freshness_fresh_data_is_actionable() {
         .unwrap()
         .as_millis() as u64;
     let run = run_model(&stale_adapter_model(600_000, now), &[]);
-    assert_eq!(run.code, 0, "stdout: {}\nstderr: {}", run.stdout, run.stderr);
+    assert_eq!(
+        run.code, 0,
+        "stdout: {}\nstderr: {}",
+        run.stdout, run.stderr
+    );
     let env = settled(&run);
     assert_close(&env, "z", 9.0, 1e-9);
 }
@@ -383,7 +413,11 @@ solve ServerSizing with {
 #[test]
 fn readme_forward_results_feed_relations() {
     let run = avenc(&["run", "examples/fleet.aven"]);
-    assert_eq!(run.code, 0, "stdout: {}\nstderr: {}", run.stdout, run.stderr);
+    assert_eq!(
+        run.code, 0,
+        "stdout: {}\nstderr: {}",
+        run.stdout, run.stderr
+    );
     let env = settled(&run);
     assert_close(&env, "cost", 360.0 * 0.07 * 1.75, 1e-4);
     assert_close(&env, "units", (500.0 + 44.1) / 25.0, 1e-4);
@@ -394,7 +428,7 @@ fn readme_forward_results_feed_relations() {
 fn examples_all_settle() {
     for entry in std::fs::read_dir("examples").unwrap() {
         let path = entry.unwrap().path();
-        if path.extension().map_or(false, |e| e == "aven") {
+        if path.extension().is_some_and(|e| e == "aven") {
             let p = path.to_string_lossy().into_owned();
             // flame_eval.py fails 5% of calls by design (hostile black box), so external
             // backends get up to three attempts
@@ -413,12 +447,23 @@ fn examples_all_settle() {
 // Robustness: pathological input is rejected with an error, never a crash
 #[test]
 fn deeply_nested_expression_is_a_clean_error() {
-    let deep = format!("relation R {{\n y = {}x{}\n}}\nsolve R with {{\n x = 1\n}}\n", "(".repeat(20000), ")".repeat(20000));
+    let deep = format!(
+        "relation R {{\n y = {}x{}\n}}\nsolve R with {{\n x = 1\n}}\n",
+        "(".repeat(20000),
+        ")".repeat(20000)
+    );
     let run = run_model(&deep, &[]);
     assert_eq!(run.code, 1, "stderr: {}", run.stderr);
-    assert!(run.stderr.contains("nested more than"), "stderr: {}", run.stderr);
+    assert!(
+        run.stderr.contains("nested more than"),
+        "stderr: {}",
+        run.stderr
+    );
 
-    let chain = format!("relation R {{\n y = {}\n}}\nsolve R with {{\n x = 1\n}}\n", vec!["x"; 20000].join(" + "));
+    let chain = format!(
+        "relation R {{\n y = {}\n}}\nsolve R with {{\n x = 1\n}}\n",
+        vec!["x"; 20000].join(" + ")
+    );
     let run = run_model(&chain, &[]);
     assert_eq!(run.code, 1, "stderr: {}", run.stderr);
 }
@@ -452,13 +497,34 @@ fn flight_model_matches_us_standard_atmosphere_1976() {
         let line = run.stdout.lines().last().unwrap_or("");
         let get = |k: &str| -> f64 {
             let pat = format!("\"{}\": ", k);
-            let i = line.find(&pat).unwrap_or_else(|| panic!("{} missing: {}", k, line)) + pat.len();
-            line[i..].split(|c| c == ',' || c == '}').next().unwrap().trim().parse().unwrap()
+            let i = line
+                .find(&pat)
+                .unwrap_or_else(|| panic!("{} missing: {}", k, line))
+                + pat.len();
+            line[i..]
+                .split([',', '}'])
+                .next()
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap()
         };
         let t = get("ambient_temp_k");
         let p = get("ambient_pressure_pa");
-        assert!((t - t_ref).abs() < 0.01, "h={} m: T={} K, USSA76 {} K", h, t, t_ref);
-        assert!((p - p_ref).abs() / p_ref < 1e-3, "h={} m: p={} Pa, USSA76 {} Pa", h, p, p_ref);
+        assert!(
+            (t - t_ref).abs() < 0.01,
+            "h={} m: T={} K, USSA76 {} K",
+            h,
+            t,
+            t_ref
+        );
+        assert!(
+            (p - p_ref).abs() / p_ref < 1e-3,
+            "h={} m: p={} Pa, USSA76 {} Pa",
+            h,
+            p,
+            p_ref
+        );
     }
 }
 
@@ -474,7 +540,7 @@ fn ledger_hmac_matches_rfc4231_vector() {
 
 #[test]
 fn ledger_chain_is_deterministic_and_verifies() {
-    use avenc::ledger::{verify_jsonl, Fact, Ledger};
+    use avenc::ledger::{Fact, Ledger, verify_jsonl};
     let build = |key: Option<&[u8]>| {
         let mut l = key.map_or_else(Ledger::new, Ledger::with_key);
         for i in 1..=4 {
@@ -492,7 +558,11 @@ fn ledger_chain_is_deterministic_and_verifies() {
         l
     };
     let a = build(None);
-    assert_eq!(a.head(), build(None).head(), "same facts must give the same head hash");
+    assert_eq!(
+        a.head(),
+        build(None).head(),
+        "same facts must give the same head hash"
+    );
     assert!(a.verify().is_ok());
     let v = verify_jsonl(&a.to_jsonl(), None).expect("exported log must verify");
     assert_eq!(v.facts, 4);
@@ -501,7 +571,10 @@ fn ledger_chain_is_deterministic_and_verifies() {
     let signed = build(Some(b"k"));
     assert!(verify_jsonl(&signed.to_jsonl(), Some(b"k")).is_ok());
     assert!(verify_jsonl(&signed.to_jsonl(), Some(b"wrong key")).is_err());
-    assert!(verify_jsonl(&a.to_jsonl(), Some(b"k")).is_err(), "unsigned log must fail a signed check");
+    assert!(
+        verify_jsonl(&a.to_jsonl(), Some(b"k")).is_err(),
+        "unsigned log must fail a signed check"
+    );
 }
 
 #[test]
@@ -515,12 +588,20 @@ fn ledger_cli_detects_tampering() {
     assert_eq!(avenc(&["verify-ledger", log_s.as_str()]).code, 0);
 
     let text = std::fs::read_to_string(&log).unwrap();
-    let forged = text.replacen("\"name\": \"cost\", \"value\": 44.10000000000001", "\"name\": \"cost\", \"value\": 40", 1);
+    let forged = text.replacen(
+        "\"name\": \"cost\", \"value\": 44.10000000000001",
+        "\"name\": \"cost\", \"value\": 40",
+        1,
+    );
     assert_ne!(forged, text, "test must actually change the log");
     std::fs::write(&log, forged).unwrap();
     let check = avenc(&["verify-ledger", log_s.as_str()]);
     assert_eq!(check.code, 1, "forged log accepted: {}", check.stdout);
-    assert!(check.stderr.contains("TAMPERED"), "stderr: {}", check.stderr);
+    assert!(
+        check.stderr.contains("TAMPERED"),
+        "stderr: {}",
+        check.stderr
+    );
 }
 
 // Non-convex integer models are certified globally optimal by interval branch-and-bound
@@ -540,7 +621,11 @@ solve Cluster with {
 ";
     let run = run_model(src, &["--json"]);
     assert_eq!(run.code, 0, "stderr: {}", run.stderr);
-    assert!(run.stdout.contains("\"optimality\": \"proven\""), "{}", run.stdout);
+    assert!(
+        run.stdout.contains("\"optimality\": \"proven\""),
+        "{}",
+        run.stdout
+    );
     assert!(run.stdout.contains("\"cost\": 6800"), "{}", run.stdout);
 }
 
@@ -563,7 +648,11 @@ fn adapter_is_not_asked_for_values_other_relations_compute() {
         script.replace('"', "\\\"")
     );
     let run = run_model(&src, &[]);
-    assert_eq!(run.code, 0, "stdout: {}\nstderr: {}", run.stdout, run.stderr);
+    assert_eq!(
+        run.code, 0,
+        "stdout: {}\nstderr: {}",
+        run.stdout, run.stderr
+    );
     let env = settled(&run);
     assert_close(&env, "it_kw", 200.0, 1e-9);
     assert_close(&env, "cop", 7.5 - 0.12 * 20.0, 1e-9);
@@ -573,7 +662,10 @@ fn adapter_is_not_asked_for_values_other_relations_compute() {
 // step leaves the domain: 0 dBZ inverts to the Marshall-Palmer rain rate (200 R^1.6 = 1).
 #[test]
 fn backward_solve_is_damped_near_domain_edges() {
-    for (dbz, expected) in [(0.0, (1.0f64 / 200.0).powf(1.0 / 1.6)), (45.0, (10f64.powf(4.5) / 200.0).powf(1.0 / 1.6))] {
+    for (dbz, expected) in [
+        (0.0, (1.0f64 / 200.0).powf(1.0 / 1.6)),
+        (45.0, (10f64.powf(4.5) / 200.0).powf(1.0 / 1.6)),
+    ] {
         let src = format!(
             "relation R {{\n dbz = 10 * log(200 * rain ^ 1.6) / 2.302585092994046\n}}\nsolve R with {{\n dbz = {}\n}}\n",
             dbz
@@ -593,7 +685,11 @@ fn independent_subsystems_solve_separately() {
     assert_eq!(run.code, 1, "the sqrt equation has no real solution");
     let line = run.stdout.lines().last().unwrap_or("");
     assert!(line.contains("\"status\": \"underdetermined\""), "{}", line);
-    assert!(line.contains("\"a\": ") && line.contains("\"b\": "), "a and b must settle: {}", line);
+    assert!(
+        line.contains("\"a\": ") && line.contains("\"b\": "),
+        "a and b must settle: {}",
+        line
+    );
 }
 
 // An integer variable fixed by equations at a fractional value makes the model infeasible
@@ -601,8 +697,16 @@ fn independent_subsystems_solve_separately() {
 fn integer_determined_by_equations_must_be_whole() {
     let src = "relation R {\n int n\n total = 3 * n\n}\nsolve R with {\n total = 10\n}\n";
     let run = run_model(src, &[]);
-    assert_ne!(run.code, 0, "n = 3.333 must not be accepted: {}", run.stdout);
-    assert!(run.stderr.contains("not a whole number"), "stderr: {}", run.stderr);
+    assert_ne!(
+        run.code, 0,
+        "n = 3.333 must not be accepted: {}",
+        run.stdout
+    );
+    assert!(
+        run.stderr.contains("not a whole number"),
+        "stderr: {}",
+        run.stderr
+    );
 }
 
 // evaluations/possible/weather-predict.aven: thermodynamics (Ambaum 2020), kinematics and the
@@ -614,7 +718,13 @@ fn weather_cell_physics() {
     let end = start + model[start..].find("\n}").unwrap() + 2;
     let ambaum = |t_c: f64| {
         let t = t_c + 273.15;
-        let (cpl, cpv, rv, l0, t0) = (4219.4, 1860.078011865639, 461.52311572606084, 2500840.0, 273.16);
+        let (cpl, cpv, rv, l0, t0) = (
+            4219.4,
+            1860.078011865639,
+            461.52311572606084,
+            2500840.0,
+            273.16,
+        );
         let latent = l0 - (cpl - cpv) * (t - t0);
         6.112 * (t0 / t).powf((cpl - cpv) / rv) * ((l0 / t0 - latent / t) / rv).exp()
     };
@@ -629,16 +739,33 @@ fn weather_cell_physics() {
     for (n, (x, y)) in pts.iter().enumerate() {
         let u = 3.0 + 2e-5 * x - 1e-5 * y;
         let v = -1.0 + 3e-5 * x + 4e-5 * y;
-        binds.push_str(&format!(" x{0} = {1}\n y{0} = {2}\n u{0} = {3}\n v{0} = {4}\n", n + 1, x, y, u, v));
+        binds.push_str(&format!(
+            " x{0} = {1}\n y{0} = {2}\n u{0} = {3}\n v{0} = {4}\n",
+            n + 1,
+            x,
+            y,
+            u,
+            v
+        ));
     }
-    let src = format!("{}\nsolve WeatherCell with {{\n{}}}\n", &model[start..end], binds);
+    let src = format!(
+        "{}\nsolve WeatherCell with {{\n{}}}\n",
+        &model[start..end],
+        binds
+    );
     let run = run_model(&src, &["--json"]);
     assert_eq!(run.code, 0, "stderr: {}", run.stderr);
     let line = run.stdout.lines().last().unwrap().to_string();
     let get = |k: &str| -> f64 {
         let pat = format!("\"{}\": ", k);
         let i = line.find(&pat).unwrap_or_else(|| panic!("{} missing", k)) + pat.len();
-        line[i..].split(|c| c == ',' || c == '}').next().unwrap().trim().parse().unwrap()
+        line[i..]
+            .split([',', '}'])
+            .next()
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap()
     };
     assert!((get("e_sat_hpa") - ambaum(t)).abs() < 1e-9);
     assert!((get("relative_humidity") - rh).abs() < 1e-9);
@@ -659,8 +786,16 @@ fn milp_gcd_test_catches_integer_infeasibility() {
     let src = "relation S {\n int x0\n int x1\n r = 2 * x0 + 2 * x1\n r == 3\n obj = 0 - x0\n}\nsolve S with {\n minimize(obj)\n}\n";
     let run = run_model(src, &[]);
     assert_ne!(run.code, 0, "must not settle: {}", run.stdout);
-    assert!(run.stderr.contains("No feasible solution"), "stderr: {}", run.stderr);
-    assert!(!run.stderr.contains("unbounded"), "must not claim unbounded: {}", run.stderr);
+    assert!(
+        run.stderr.contains("No feasible solution"),
+        "stderr: {}",
+        run.stderr
+    );
+    assert!(
+        !run.stderr.contains("unbounded"),
+        "must not claim unbounded: {}",
+        run.stderr
+    );
 }
 
 // A feasible integer model with an unbounded improving direction is correctly unbounded.
@@ -708,7 +843,11 @@ solve S with {
     let run = run_model(src, &["--json"]);
     assert_eq!(run.code, 0, "cuts should solve it: {}", run.stderr);
     let line = run.stdout.lines().last().unwrap();
-    assert!(line.contains("\"optimality\": \"proven\""), "must be proven optimal: {}", line);
+    assert!(
+        line.contains("\"optimality\": \"proven\""),
+        "must be proven optimal: {}",
+        line
+    );
     assert!(line.contains("\"obj\": -8"), "optimum is -8: {}", line);
 }
 
@@ -716,9 +855,21 @@ solve S with {
 #[test]
 fn standards_non_finite_results_are_rejected() {
     for expr in ["exp(x * 1000)", "x / 0", "sqrt(x - 5)", "ln(x - 5)"] {
-        let src = format!("relation R {{\n    y = {}\n}}\nsolve R with {{\n    x = 1\n}}\n", expr);
+        let src = format!(
+            "relation R {{\n    y = {}\n}}\nsolve R with {{\n    x = 1\n}}\n",
+            expr
+        );
         let run = run_model(&src, &[]);
-        assert_eq!(run.code, 1, "{} must fail, got stdout: {}", expr, run.stdout);
-        assert!(!run.stdout.contains("inf") && !run.stdout.contains("NaN"), "{}: {}", expr, run.stdout);
+        assert_eq!(
+            run.code, 1,
+            "{} must fail, got stdout: {}",
+            expr, run.stdout
+        );
+        assert!(
+            !run.stdout.contains("inf") && !run.stdout.contains("NaN"),
+            "{}: {}",
+            expr,
+            run.stdout
+        );
     }
 }

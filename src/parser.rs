@@ -679,7 +679,8 @@ impl Parser {
         }
         let result = if self.peek().kind == TokenKind::Minus {
             self.take();
-            self.parse_unary().map(|operand| Expr::UnaryMinus(Box::new(operand)))
+            self.parse_unary()
+                .map(|operand| Expr::UnaryMinus(Box::new(operand)))
         } else {
             self.parse_power()
         };

@@ -21,7 +21,9 @@ fn get_entropy() -> u64 {
 
 fn parse_aven_string(source: &str, name: &str) -> AvenModule {
     let tokens = Lexer::new(source).tokenize().expect("lexer failed");
-    Parser::new(tokens).parse_module(name).expect("parser failed")
+    Parser::new(tokens)
+        .parse_module(name)
+        .expect("parser failed")
 }
 
 #[test]
@@ -43,9 +45,15 @@ fn test_safety_case_golden_server_capacity() {
     assert_eq!(report.target_block, "ProductionProfile");
     assert_eq!(report.logic, "QF_NIRA");
     assert_eq!(report.satisfiability_status, SmtStatus::Sat);
-    assert!(report.all_passed, "all safety invariants should be discharged");
+    assert!(
+        report.all_passed,
+        "all safety invariants should be discharged"
+    );
     assert_eq!(report.proofs.len(), 1);
-    assert!(report.proofs[0].proven, "wire_rate_gbps <= 50.0 must be proven");
+    assert!(
+        report.proofs[0].proven,
+        "wire_rate_gbps <= 50.0 must be proven"
+    );
     assert_eq!(report.proofs[0].status, SmtStatus::Unsat);
 
     // Verify Markdown generation
@@ -80,7 +88,10 @@ fn test_safety_case_violation_detection_and_counterexample() {
     )
     .expect("safety case generation should complete");
 
-    assert!(!report.all_passed, "violated invariant must fail safety case");
+    assert!(
+        !report.all_passed,
+        "violated invariant must fail safety case"
+    );
     assert_eq!(report.proofs.len(), 1);
     assert!(!report.proofs[0].proven);
     assert_eq!(report.proofs[0].status, SmtStatus::Sat);
@@ -135,7 +146,10 @@ solve AeroForces with {{
         &module,
         &temp_name,
         SafetyStandard::Do178c,
-        &["dynamic_pressure <= 60000.0".to_string(), "lift_force >= 5000.0".to_string()],
+        &[
+            "dynamic_pressure <= 60000.0".to_string(),
+            "lift_force >= 5000.0".to_string(),
+        ],
         None,
     )
     .expect("safety case generation should succeed for aero");
@@ -190,7 +204,10 @@ solve ClusterSizing with {{
         &module,
         &temp_name,
         SafetyStandard::Iso26262,
-        &["total_ram_gb <= 200.0".to_string(), "allocated_workers >= 1.0".to_string()],
+        &[
+            "total_ram_gb <= 200.0".to_string(),
+            "allocated_workers >= 1.0".to_string(),
+        ],
         None,
     )
     .expect("mixed-integer cluster safety case should succeed");
@@ -247,15 +264,24 @@ solve ControlFilter with {{
 
     let _ = fs::remove_file(&temp_path);
 
-    assert!(output.status.success(), "bench --latency-profile should succeed");
+    assert!(
+        output.status.success(),
+        "bench --latency-profile should succeed"
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"min_ns\":"), "json must include min_ns");
     assert!(stdout.contains("\"p50_ns\":"), "json must include p50_ns");
     assert!(stdout.contains("\"p99_ns\":"), "json must include p99_ns");
     assert!(stdout.contains("\"max_ns\":"), "json must include max_ns");
     assert!(stdout.contains("\"mean_ns\":"), "json must include mean_ns");
-    assert!(stdout.contains("\"jitter_range_ns\":"), "json must include jitter_range_ns");
-    assert!(stdout.contains("\"target_deadline_ns\": 10000000"), "100 Hz = 10,000,000 ns");
+    assert!(
+        stdout.contains("\"jitter_range_ns\":"),
+        "json must include jitter_range_ns"
+    );
+    assert!(
+        stdout.contains("\"target_deadline_ns\": 10000000"),
+        "100 Hz = 10,000,000 ns"
+    );
 }
 
 #[test]

@@ -152,7 +152,9 @@ impl PackageManifest {
                                     }
                                 }
                             }
-                            manifest.dependencies.insert(dep_name, DependencySpec { version: ver, path });
+                            manifest
+                                .dependencies
+                                .insert(dep_name, DependencySpec { version: ver, path });
                         } else {
                             let ver = parse_str_val(val_str)?;
                             manifest.dependencies.insert(
@@ -169,7 +171,10 @@ impl PackageManifest {
                             match key {
                                 "name" => last.name = parse_str_val(val_str)?,
                                 "dimension" => last.dimension = parse_str_val(val_str)?,
-                                "scale" => last.scale = val_str.parse::<f64>().map_err(|e| e.to_string())?,
+                                "scale" => {
+                                    last.scale =
+                                        val_str.parse::<f64>().map_err(|e| e.to_string())?
+                                }
                                 _ => {}
                             }
                         }
@@ -225,7 +230,10 @@ impl PackageManager {
 
         let manifest_path = dir.join("Aven.toml");
         if manifest_path.exists() {
-            return Err(format!("package manifest already exists at '{:?}'", manifest_path));
+            return Err(format!(
+                "package manifest already exists at '{:?}'",
+                manifest_path
+            ));
         }
 
         let manifest = PackageManifest {
@@ -236,13 +244,11 @@ impl PackageManager {
             license: "MIT".to_string(),
             entry: "lib.aven".to_string(),
             dependencies: HashMap::new(),
-            units: vec![
-                DeclaredUnitSpec {
-                    name: "kilo_watt".to_string(),
-                    dimension: "Power".to_string(),
-                    scale: 1000.0,
-                },
-            ],
+            units: vec![DeclaredUnitSpec {
+                name: "kilo_watt".to_string(),
+                dimension: "Power".to_string(),
+                scale: 1000.0,
+            }],
         };
 
         fs::write(&manifest_path, manifest.to_toml())
@@ -279,7 +285,10 @@ impl PackageManager {
         // Verify entry file exists and passes dimensional checking
         let entry_path = dir.join(&manifest.entry);
         if !entry_path.exists() {
-            return Err(format!("entry file '{:?}' does not exist in package", entry_path));
+            return Err(format!(
+                "entry file '{:?}' does not exist in package",
+                entry_path
+            ));
         }
         let entry_src = fs::read_to_string(&entry_path)
             .map_err(|e| format!("failed to read entry source: {}", e))?;

@@ -11,8 +11,8 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// High-entropy pseudo-random number generator (pure std XorShift64*).
@@ -325,7 +325,7 @@ pub unsafe extern "C" fn aven_solve_hydro(
 
     // 3. Compile dynamic library using rustc --crate-type cdylib
     let rustc_status = Command::new("rustc")
-        .args(&[
+        .args([
             "--crate-type",
             "cdylib",
             "--crate-name",
@@ -451,9 +451,10 @@ fn test_phase4_randomized_bidirectional_ipc_daemon_control() {
                         if let Some(pos) = trimmed.find("\"actuator_valve\"") {
                             let rest = &trimmed[pos + 16..];
                             if let Some(colon) = rest.find(':') {
-                                let val_part = rest[colon + 1..]
-                                    .trim_start()
-                                    .trim_matches(|c: char| !c.is_ascii_digit() && c != '-' && c != '+' && c != '.');
+                                let val_part =
+                                    rest[colon + 1..].trim_start().trim_matches(|c: char| {
+                                        !c.is_ascii_digit() && c != '-' && c != '+' && c != '.'
+                                    });
                                 let end = val_part
                                     .find(|c: char| c == ',' || c == '}' || c.is_whitespace())
                                     .unwrap_or(val_part.len());
@@ -544,8 +545,8 @@ fn test_phase4_verification_again_rapid_cycling() {
     // Run 5 rapid random cycles through SHM ring buffer to guarantee no state retention
     let shm_name = rng.rand_ident("aven_cycle_shm");
     let shm_path = std::env::temp_dir().join(format!("{}.shm", shm_name));
-    let mut ring = ShmRingBuffer::create_or_open(&shm_path, 16, 1024)
-        .expect("create_or_open failed");
+    let mut ring =
+        ShmRingBuffer::create_or_open(&shm_path, 16, 1024).expect("create_or_open failed");
 
     let shm_eval = ShmEvaluator::new(shm_path.to_str().unwrap());
 

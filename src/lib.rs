@@ -11,18 +11,18 @@
 
 pub mod ast;
 pub mod codegen_c;
+pub mod codegen_wasm;
+pub mod compaction;
+pub mod debugger;
 pub mod diagnostics;
 pub mod diff;
 pub mod evaluator;
 pub mod ledger;
 pub mod lexer;
 pub mod optimize;
-pub mod parser;
-pub mod solver;
-pub mod units;
-pub mod smt;
-pub mod temporal;
-pub mod compaction;
-pub mod debugger;
-pub mod codegen_wasm;
 pub mod package;
+pub mod parser;
+pub mod smt;
+pub mod solver;
+pub mod temporal;
+pub mod units;
