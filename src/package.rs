@@ -444,11 +444,15 @@ impl PackageManager {
 
                 for dir in search_dirs {
                     // Check direct path or pkg_name subdirectory
-                    let mut candidate_paths = vec![
-                        dir.join(pkg_name).join("Aven.toml"),
-                        dir.join(pkg_name).join("lib.aven"),
-                        dir.join(format!("{}.aven", pkg_name)),
-                    ];
+                    let mut candidate_paths = vec![dir.join(pkg_name).join("Aven.toml")];
+                    // `avenc pkg install` lays packages out as <name>/<version>/; newest first
+                    candidate_paths.extend(
+                        installed_versions(&dir.join(pkg_name))
+                            .into_iter()
+                            .map(|v| v.join("Aven.toml")),
+                    );
+                    candidate_paths.push(dir.join(pkg_name).join("lib.aven"));
+                    candidate_paths.push(dir.join(format!("{}.aven", pkg_name)));
                     if dir.join("Aven.toml").exists() {
                         candidate_paths.push(dir.join("Aven.toml"));
                     }
@@ -501,4 +505,24 @@ impl PackageManager {
         }
         Ok(output)
     }
+}
+
+/// Version directories under an installed package's directory, highest version first.
+fn installed_versions(pkg_dir: &std::path::Path) -> Vec<PathBuf> {
+    let parse = |name: &str| -> Option<Vec<u64>> {
+        name.split('.').map(|p| p.parse::<u64>().ok()).collect()
+    };
+    let mut versions: Vec<(Vec<u64>, PathBuf)> = match fs::read_dir(pkg_dir) {
+        Ok(entries) => entries
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_dir())
+            .filter_map(|e| {
+                let v = parse(&e.file_name().to_string_lossy())?;
+                Some((v, e.path()))
+            })
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    versions.sort_by(|a, b| b.0.cmp(&a.0));
+    versions.into_iter().map(|(_, p)| p).collect()
 }

@@ -40,17 +40,11 @@ async function handleApi(request: Request, env: Env, pathname: string): Promise<
     try {
       const pkgCount = await env.DB.prepare("SELECT COUNT(*) as count FROM packages").first<{ count: number }>();
       const modelCount = await env.DB.prepare("SELECT COUNT(*) as count FROM shared_models").first<{ count: number }>();
-      const benchStats = await env.DB.prepare(
-        "SELECT COUNT(*) as solves, AVG(solve_time_us) as avg_latency FROM telemetry_benchmarks"
-      ).first<{ solves: number; avg_latency: number }>();
-
       return new Response(
         JSON.stringify({
           version: env.AVEN_VERSION,
           packages_indexed: pkgCount?.count ?? 0,
           models_shared: modelCount?.count ?? 0,
-          telemetry_solves_logged: benchStats?.solves ?? 0,
-          telemetry_mean_solve_us: benchStats?.avg_latency ?? null,
           status: "healthy",
         }),
         { headers: jsonHeaders }
@@ -64,7 +58,8 @@ async function handleApi(request: Request, env: Env, pathname: string): Promise<
   if (pathname === "/api/v1/packages" && method === "GET") {
     const url = new URL(request.url);
     const search = url.searchParams.get("q") || "";
-    const limit = Math.min(parseInt(url.searchParams.get("limit") || "50"), 100);
+    const requested = parseInt(url.searchParams.get("limit") || "50", 10);
+    const limit = Number.isFinite(requested) ? Math.min(Math.max(requested, 1), 100) : 50;
 
     try {
       let query = "SELECT * FROM packages";
@@ -170,54 +165,13 @@ async function handleApi(request: Request, env: Env, pathname: string): Promise<
     }
   }
 
-  // POST /api/v1/models/share
-  if (pathname === "/api/v1/models/share" && method === "POST") {
-    try {
-      const { title, source_code, category } = await request.json<any>();
-      if (!source_code) {
-        return new Response(JSON.stringify({ error: "Missing source_code" }), { status: 400, headers: jsonHeaders });
-      }
-
-      // Compute SHA-256 in pure Web Crypto API
-      const enc = new TextEncoder().encode(source_code);
-      const hashBuf = await crypto.subtle.digest("SHA-256", enc);
-      const hashArray = Array.from(new Uint8Array(hashBuf));
-      const sha256 = hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
-
-      // Alphanumeric short ID (e.g., first 8 chars of hash or random nano)
-      const id = sha256.slice(0, 8);
-
-      await env.DB.prepare(
-        `INSERT INTO shared_models (id, title, category, source_code, sha256)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET views = views + 1`
-      ).bind(id, title || "Untitled Model", category || "general", source_code, sha256).run();
-
-      const url = new URL(request.url);
-      const shortUrl = `${url.origin}/p/${id}`;
-
-      return new Response(JSON.stringify({ id, shortUrl, sha256 }), { status: 201, headers: jsonHeaders });
-    } catch (err: any) {
-      return new Response(JSON.stringify({ error: err.message }), { status: 400, headers: jsonHeaders });
-    }
-  }
-
-  // POST /api/v1/telemetry
-  if (pathname === "/api/v1/telemetry" && method === "POST") {
-    try {
-      const { model_name, solve_time_us, facts_settled, platform } = await request.json<any>();
-      if (!model_name || solve_time_us === undefined) {
-        return new Response(JSON.stringify({ error: "Missing telemetry params" }), { status: 400, headers: jsonHeaders });
-      }
-
-      await env.DB.prepare(
-        "INSERT INTO telemetry_benchmarks (model_name, solve_time_us, facts_settled, platform) VALUES (?, ?, ?, ?)"
-      ).bind(model_name, solve_time_us, facts_settled || 0, platform || "web-wasm").run();
-
-      return new Response(JSON.stringify({ recorded: true }), { status: 201, headers: jsonHeaders });
-    } catch (err: any) {
-      return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: jsonHeaders });
-    }
+  // Anonymous writes were removed: model sharing now encodes state in the page URL, and
+  // telemetry rows could be inflated by anyone. Old clients get an explicit answer.
+  if ((pathname === "/api/v1/models/share" || pathname === "/api/v1/telemetry") && method === "POST") {
+    return new Response(JSON.stringify({ error: "This endpoint has been removed" }), {
+      status: 410,
+      headers: jsonHeaders,
+    });
   }
 
   return new Response(JSON.stringify({ error: `Not found: ${pathname}` }), { status: 404, headers: jsonHeaders });

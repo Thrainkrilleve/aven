@@ -130,7 +130,7 @@ solve Dynamics with {
           <div class="proof-item">
             <div class="proof-val">4</div>
             <div class="proof-label">Execution targets</div>
-            <div class="proof-src">Native solver, ANSI C, WebAssembly, SMT-LIB2</div>
+            <div class="proof-src">Native solver, C99, WebAssembly, SMT-LIB2</div>
           </div>
         </div>
       </div>
@@ -202,8 +202,8 @@ solve Dynamics with {
           </article>
           <article class="card">
             <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 17 17 3l4 4L7 21H3z"/><path d="m7 13 2 2M10 10l2 2M13 7l2 2"/></svg></div>
-            <h3>Units checked before anything runs</h3>
-            <p>Dimensions are inferred across every equation; adding <code>m/s</code> to <code>s</code> is a compile error. Ten base dimensions: the six SI quantities plus angle, money, data and transactions.</p>
+            <h3>Units checked and converted</h3>
+            <p>Dimensions are inferred across every equation; adding <code>m/s</code> to <code>s</code> is a compile error. Values given in <code>km/h</code>, <code>hPa</code> or <code>MB</code> are converted before solving and shown back in their own units.</p>
             <span class="cmd">avenc check</span>
           </article>
           <article class="card">
@@ -221,7 +221,7 @@ solve Dynamics with {
           <article class="card">
             <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m8 8-5 4 5 4M16 8l5 4-5 4M14 4l-4 16"/></svg></div>
             <h3>Solver-free C and WebAssembly</h3>
-            <p><code>forward</code> blocks compile to branchless ANSI C or WebAssembly 1.0 with no runtime. Generated C is checked to match <code>avenc run</code> exactly.</p>
+            <p><code>forward</code> blocks compile to branchless C99 or WebAssembly 1.0 with no runtime. Generated C is checked to match <code>avenc run</code> exactly.</p>
             <span class="cmd">avenc emit-c · avenc emit-wasm</span>
           </article>
           <article class="card">

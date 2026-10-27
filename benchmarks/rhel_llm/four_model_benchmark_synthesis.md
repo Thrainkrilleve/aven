@@ -70,7 +70,7 @@ Every model validated Aven's mathematical consistency and bidirectional solving 
 
 ### E. Oneshot Systemd Lifecycle & Ansible Idempotency
 * **The Insight (Opus):** A reporting binary exits immediately; `Restart=always` causes crash loops. An Ansible `creates:` rule prevents recompilation when source code changes.
-* **Aven Deployment Upgrade:** Built [deploy_aven_node.yml](file:///f:/aven/examples/deploy_aven_node.yml) using `Type=oneshot` with `RemainAfterExit=yes` and recompile guards `when: aven_src.changed or not aven_bin.stat.exists`.
+* **Aven Deployment Upgrade:** Built [deploy_aven_node.yml](deploy_aven_node.yml) using `Type=oneshot` with `RemainAfterExit=yes` and recompile guards `when: aven_src.changed or not aven_bin.stat.exists`.
 
 ---
 

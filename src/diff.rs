@@ -135,6 +135,12 @@ pub fn eval_expr(expr: &Expr, env: &HashMap<String, f64>) -> Result<f64, DiffErr
                     )));
                 }
             };
+            if !res.is_finite() {
+                return Err(DiffError::EvaluationError(format!(
+                    "math domain error: {}({}) is not finite",
+                    fn_name, val
+                )));
+            }
             Ok(res)
         }
     }

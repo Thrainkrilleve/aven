@@ -17,9 +17,9 @@ relation AtmosphericDynamics using external("python", "evaluations/weather/nws_a
 
 ### 1.2 Execution Protocol
 1. When `avenc` settles the block, it spawns the specified command (`python evaluations/weather/nws_adapter.py`).
-2. Current known variables are serialized to standard input as a JSON object:
+2. Current known variables are serialized to standard input as a JSON object of numbers, each in its declared unit:
    ```json
-   {"station_id": "KDEN"}
+   {"station_index": 0}
    ```
 3. The adapter executes its telemetry fetch and writes a JSON object to standard output:
    ```json
@@ -53,9 +53,9 @@ relation FlightAtmosphericDynamics using ipc("127.0.0.1:9090") {
 }
 ```
 
-### 2.2 Daemon Architecture ([`flight_mesh_daemon.py`](file:///f:/aven/evaluations/flight_mesh/flight_mesh_daemon.py))
+### 2.2 Daemon Architecture ([`flight_mesh_daemon.py`](https://github.com/Thrainkrilleve/aven/blob/main/evaluations/flight_mesh/flight_mesh_daemon.py))
 Instead of booting an interpreter on each solve:
-1. **Permanent RAM Residency:** The daemon runs continuously in the background, keeping 4,700+ active aircraft, NOAA METAR stations, and USGS river basins resident in memory.
+1. **Permanent RAM Residency:** The daemon runs continuously in the background, keeping the latest OpenSky aircraft states, NOAA METARs and USGS river readings resident in memory.
 2. **Asynchronous Background Ingestion:** Telemetry feeds are refreshed in a background thread every 30 seconds. Inbound client queries **never block** on external REST APIs.
 3. **Microsecond Compute Speed:** Correlates flight coordinates, nearest weather stations, and basin proxies in **$130 - 150\,\mu\text{s}$**.
 4. **Persistent Socket Stream:** Listens on `tcp://127.0.0.1:9090`. `avenc` opens a direct TCP loopback stream, exchanges JSON lines, and settles in **$< 3\,\text{ms}$**.
@@ -77,7 +77,7 @@ Client Solver (avenc)                       Persistent Daemon (Python/RAM)
 
 ## 3. Empirical Performance Comparison
 
-Tested across 50 live commercial aircraft transponders:
+Windows workstation, earlier flight model (see [[Multi-Stream Physics Benchmarks|Multi-Stream-Physics-Benchmarks]] §4 for sources and a Linux re-run). Only the IPC row has a report in the repository (`flight_mesh_summary_report.md`):
 
 | Metric | Subprocess (`using external`) | Persistent Daemon (`using ipc`) | Improvement |
 | :--- | :--- | :--- | :--- |
@@ -87,21 +87,15 @@ Tested across 50 live commercial aircraft transponders:
 
 ---
 
-## 4. JSON Schema Contract Standard
+## 4. Adapter Output Fields
 
-All external adapters and IPC daemons emit JSON adhering to the Aven External Contract:
+An adapter or daemon prints one JSON object. Every numeric field the model uses becomes a fact (fields it does not use are ignored). These fields are recognised specially, and all are optional:
 
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "AvenAdapterPayload",
-  "type": "object",
-  "required": ["timestamp_ms", "ttl_ms", "backend_id"],
-  "properties": {
-    "timestamp_ms": { "type": "integer", "description": "Epoch millisecond timestamp" },
-    "ttl_ms": { "type": "integer", "description": "Freshness time-to-live in ms" },
-    "backend_id": { "type": "string", "description": "Unique provider identifier" },
-    "error": { "type": "string", "description": "Optional error message" }
-  }
-}
-```
+| Field | Meaning |
+| :--- | :--- |
+| `timestamp_ms`, `ttl_ms` | Freshness: facts expire `ttl_ms` after `timestamp_ms` (`ttl_ms = 0` means already stale). |
+| `backend_id` | Name shown in traces; defaults to the command. |
+| `warnings` | Array of strings recorded with the facts. |
+| `error` | A message that makes the evaluation fail. |
+
+If a sibling `<adapter>.schema.json` exists, the output is validated against it first.

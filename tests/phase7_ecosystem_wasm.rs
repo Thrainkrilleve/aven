@@ -562,3 +562,37 @@ fn test_wasm_pow_matches_native_evaluation() {
     }
     let _ = fs::remove_dir_all(&dir);
 }
+
+// ---------------------------------------------------------------------------
+// Regression: a package installed with `avenc pkg install` can be imported
+// ---------------------------------------------------------------------------
+#[test]
+fn test_pkg_install_then_import_from_another_project() {
+    let avenc = env!("CARGO_BIN_EXE_avenc");
+    let lib_dir = create_temp_dir("pkg_lib");
+    let app_dir = create_temp_dir("pkg_app");
+
+    let run = |args: &[&str], dir: &PathBuf| {
+        let out = Command::new(avenc).args(args).current_dir(dir).output().unwrap();
+        assert!(out.status.success(), "avenc {:?} failed: {}", args, String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+
+    run(&["pkg", "init", "power_lib"], &lib_dir);
+    run(&["pkg", "pack"], &lib_dir);
+    let archive = lib_dir.join("power_lib-0.1.0.avenpkg");
+    assert!(archive.exists(), "pkg pack must write <name>-<version>.avenpkg");
+    run(&["pkg", "install", archive.to_str().unwrap()], &app_dir);
+
+    // The app directory holds no package source; the import must come from .aven/packages
+    fs::write(
+        app_dir.join("app.aven"),
+        "import power_lib;\n\nsolve power_libRelations with {\n    voltage_v = 230\n    current_a = 10\n    operating_hours = 5\n}\n",
+    )
+    .unwrap();
+    let out = run(&["run", "app.aven"], &app_dir);
+    assert!(out.contains("energy_kwh       = 11.5000"), "{}", out);
+
+    let _ = fs::remove_dir_all(&lib_dir);
+    let _ = fs::remove_dir_all(&app_dir);
+}

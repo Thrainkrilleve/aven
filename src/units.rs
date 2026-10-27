@@ -150,6 +150,35 @@ impl Dim {
 
     /// Square root of a dimension: halves every exponent. Returns None when any exponent is
     /// odd (e.g. sqrt of a plain length has no physical dimension).
+    /// Raises every exponent to the real power `n`, when each result is a whole number
+    /// (e.g. m^2 to the 0.5 is m; m to the 0.5 has no dimension and gives None).
+    pub fn pow_real(&self, n: f64) -> Option<Dim> {
+        let scale = |e: i32| -> Option<i32> {
+            let v = e as f64 * n;
+            ((v - v.round()).abs() < 1e-9 && v.abs() < 1e6).then(|| v.round() as i32)
+        };
+        let mut custom = BTreeMap::new();
+        for (k, e) in &self.custom {
+            let v = scale(*e)?;
+            if v != 0 {
+                custom.insert(k.clone(), v);
+            }
+        }
+        Some(Dim {
+            length: scale(self.length)?,
+            time: scale(self.time)?,
+            mass: scale(self.mass)?,
+            current: scale(self.current)?,
+            money: scale(self.money)?,
+            temperature: scale(self.temperature)?,
+            amount: scale(self.amount)?,
+            angle: scale(self.angle)?,
+            data: scale(self.data)?,
+            transaction: scale(self.transaction)?,
+            custom,
+        })
+    }
+
     pub fn sqrt(&self) -> Option<Dim> {
         let half = |e: i32| if e % 2 == 0 { Some(e / 2) } else { None };
         let mut custom = BTreeMap::new();
@@ -268,28 +297,51 @@ impl fmt::Display for Dim {
 pub struct Unit {
     pub name: String,
     pub dimension: Dim,
+    /// base value = value * to_base + offset
     pub to_base: f64,
+    /// Non-zero only for absolute temperature scales (degC, degF); compound units
+    /// built from them (e.g. degC/s) are rates of change and carry no offset.
+    pub offset: f64,
+}
+
+impl Unit {
+    pub fn to_base_value(&self, v: f64) -> f64 {
+        v * self.to_base + self.offset
+    }
+
+    pub fn from_base_value(&self, v: f64) -> f64 {
+        (v - self.offset) / self.to_base
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct UnitRegistry {
+    /// Units by their exact symbol ("MW" and "mW" are different units)
     pub units: HashMap<String, Unit>,
+    /// Lower-cased symbol -> exact symbols, for case-insensitive lookup when unambiguous
+    folded: HashMap<String, Vec<String>>,
+    /// Lower-cased spellings that are refused outright, with the symbols to write instead
+    reserved: HashMap<String, Vec<String>>,
 }
 
 impl Default for UnitRegistry {
     fn default() -> Self {
         let mut reg = Self {
             units: HashMap::new(),
+            folded: HashMap::new(),
+            reserved: HashMap::new(),
         };
 
-        // Length (base: meter)
+        // Length (base: metre)
         reg.register("m", Dim::LENGTH, 1.0);
         reg.register("km", Dim::LENGTH, 1000.0);
         reg.register("cm", Dim::LENGTH, 0.01);
         reg.register("mm", Dim::LENGTH, 0.001);
+        reg.register("um", Dim::LENGTH, 1e-6);
         reg.register("in", Dim::LENGTH, 0.0254);
         reg.register("ft", Dim::LENGTH, 0.3048);
         reg.register("mi", Dim::LENGTH, 1609.344);
+        reg.register("nmi", Dim::LENGTH, 1852.0);
 
         // Time (base: second)
         reg.register("s", Dim::TIME, 1.0);
@@ -301,85 +353,129 @@ impl Default for UnitRegistry {
         reg.register("hr", Dim::TIME, 3600.0);
         reg.register("day", Dim::TIME, 86400.0);
 
-        // Mass (base: kg)
+        // Mass (base: kilogram)
         reg.register("kg", Dim::MASS, 1.0);
         reg.register("g", Dim::MASS, 0.001);
         reg.register("mg", Dim::MASS, 1e-6);
         reg.register("lb", Dim::MASS, 0.45359237);
 
-        // Electrical Current (base: Ampere)
-        reg.register("a", Dim::CURRENT, 1.0);
-        reg.register("ma", Dim::CURRENT, 0.001);
+        // Electric current (base: ampere)
+        reg.register("A", Dim::CURRENT, 1.0);
+        reg.register("mA", Dim::CURRENT, 0.001);
 
-        // Money / Financial (base: $)
+        // Money (base: US dollar). Other currencies get their own dimension: exchange rates
+        // change daily, so mixing them must go through an explicit rate variable.
         reg.register("$", Dim::MONEY, 1.0);
-        reg.register("usd", Dim::MONEY, 1.0);
-        reg.register("eur", Dim::MONEY, 1.10);
-        reg.register("gbp", Dim::MONEY, 1.28);
+        reg.register("USD", Dim::MONEY, 1.0);
+        reg.register("EUR", Dim::custom("eur"), 1.0);
+        reg.register("GBP", Dim::custom("gbp"), 1.0);
 
-        // Temperature (base: Kelvin)
-        reg.register("k", Dim::TEMPERATURE, 1.0);
-        reg.register("degc", Dim::TEMPERATURE, 1.0);
+        // Temperature (base: kelvin). degC and degF are absolute temperatures; write
+        // temperature differences in K.
+        reg.register("K", Dim::TEMPERATURE, 1.0);
+        reg.register_affine("degC", Dim::TEMPERATURE, 1.0, 273.15);
+        reg.register_affine("degF", Dim::TEMPERATURE, 5.0 / 9.0, 459.67 * 5.0 / 9.0);
 
-        // Amount of Substance (base: mole)
+        // Amount of substance (base: mole)
         reg.register("mol", Dim::AMOUNT, 1.0);
 
         // Angle (base: radian)
         reg.register("rad", Dim::ANGLE, 1.0);
         reg.register("deg", Dim::ANGLE, std::f64::consts::PI / 180.0);
 
-        // Power (W = kg*m^2/s^3)
+        // Force (N = kg·m/s^2)
+        let force_dim = (Dim::MASS * Dim::LENGTH) / (Dim::TIME * Dim::TIME);
+        reg.register("N", force_dim.clone(), 1.0);
+        reg.register("kN", force_dim, 1000.0);
+
+        // Pressure (Pa = N/m^2)
+        let pressure_dim = Dim::MASS / (Dim::LENGTH * Dim::TIME * Dim::TIME);
+        reg.register("Pa", pressure_dim.clone(), 1.0);
+        reg.register("hPa", pressure_dim.clone(), 100.0);
+        reg.register("kPa", pressure_dim.clone(), 1000.0);
+        reg.register("MPa", pressure_dim.clone(), 1e6);
+        reg.register("bar", pressure_dim.clone(), 1e5);
+        reg.register("atm", pressure_dim.clone(), 101_325.0);
+        reg.register("psi", pressure_dim, 6894.757293168361);
+
+        // Energy (J = kg·m^2/s^2)
+        let energy_dim = (Dim::MASS * Dim::LENGTH * Dim::LENGTH) / (Dim::TIME * Dim::TIME);
+        reg.register("J", energy_dim.clone(), 1.0);
+        reg.register("kJ", energy_dim.clone(), 1000.0);
+        reg.register("MJ", energy_dim.clone(), 1e6);
+        reg.register("Wh", energy_dim.clone(), 3600.0);
+        reg.register("kWh", energy_dim.clone(), 3.6e6);
+        reg.register("MWh", energy_dim, 3.6e9);
+
+        // Power (W = J/s)
         let power_dim =
             (Dim::MASS * Dim::LENGTH * Dim::LENGTH) / (Dim::TIME * Dim::TIME * Dim::TIME);
-        reg.register("w", power_dim.clone(), 1.0);
-        reg.register("kw", power_dim.clone(), 1000.0);
-        reg.register("mw", power_dim, 0.001);
+        reg.register("W", power_dim.clone(), 1.0);
+        reg.register("mW", power_dim.clone(), 0.001);
+        reg.register("kW", power_dim.clone(), 1000.0);
+        reg.register("MW", power_dim.clone(), 1e6);
 
-        // Energy (J = W*s)
-        let energy_dim = (Dim::MASS * Dim::LENGTH * Dim::LENGTH) / (Dim::TIME * Dim::TIME);
-        reg.register("j", energy_dim.clone(), 1.0);
-        reg.register("kj", energy_dim.clone(), 1000.0);
-        reg.register("kwh", energy_dim, 3600000.0);
+        // Voltage (V = W/A) and resistance (ohm = V/A)
+        let voltage_dim = power_dim / Dim::CURRENT;
+        reg.register("V", voltage_dim.clone(), 1.0);
+        reg.register("mV", voltage_dim.clone(), 0.001);
+        reg.register("kV", voltage_dim.clone(), 1000.0);
+        reg.register("ohm", voltage_dim / Dim::CURRENT, 1.0);
 
         // Frequency (Hz = 1/s)
         let freq_dim = Dim::SCALAR / Dim::TIME;
-        reg.register("hz", freq_dim.clone(), 1.0);
-        reg.register("khz", freq_dim.clone(), 1000.0);
-        reg.register("mhz", freq_dim.clone(), 1_000_000.0);
-        reg.register("ghz", freq_dim, 1_000_000_000.0);
+        reg.register("Hz", freq_dim.clone(), 1.0);
+        reg.register("kHz", freq_dim.clone(), 1000.0);
+        reg.register("MHz", freq_dim.clone(), 1_000_000.0);
+        reg.register("GHz", freq_dim, 1_000_000_000.0);
 
-        // Systems Engineering: Data & Information (base: bit = 1.0)
+        // Data (base: bit). b = bit, B = byte, per IEC 80000-13.
         reg.register("b", Dim::DATA, 1.0);
         reg.register("bit", Dim::DATA, 1.0);
+        reg.register("B", Dim::DATA, 8.0);
         reg.register("byte", Dim::DATA, 8.0);
         reg.register("bytes", Dim::DATA, 8.0);
-        // Binary prefixes (IEC 60027-2)
-        reg.register("kib", Dim::DATA, 1024.0 * 8.0);
-        reg.register("mib", Dim::DATA, 1024.0 * 1024.0 * 8.0);
-        reg.register("gib", Dim::DATA, 1024.0 * 1024.0 * 1024.0 * 8.0);
-        reg.register("tib", Dim::DATA, 1024.0 * 1024.0 * 1024.0 * 1024.0 * 8.0);
-        // Decimal SI prefixes
-        reg.register("kb", Dim::DATA, 1000.0 * 8.0);
-        reg.register("mb", Dim::DATA, 1000.0 * 1000.0 * 8.0);
-        reg.register("gb", Dim::DATA, 1000.0 * 1000.0 * 1000.0 * 8.0);
-        reg.register("tb", Dim::DATA, 1000.0 * 1000.0 * 1000.0 * 1000.0 * 8.0);
-        reg.register("pb", Dim::DATA, 1e15 * 8.0);
+        reg.register("kbit", Dim::DATA, 1e3);
+        reg.register("Mbit", Dim::DATA, 1e6);
+        reg.register("Gbit", Dim::DATA, 1e9);
+        reg.register("Tbit", Dim::DATA, 1e12);
+        reg.register("kB", Dim::DATA, 1e3 * 8.0);
+        reg.register("KB", Dim::DATA, 1e3 * 8.0);
+        reg.register("MB", Dim::DATA, 1e6 * 8.0);
+        reg.register("GB", Dim::DATA, 1e9 * 8.0);
+        reg.register("TB", Dim::DATA, 1e12 * 8.0);
+        reg.register("PB", Dim::DATA, 1e15 * 8.0);
+        reg.register("KiB", Dim::DATA, 1024.0 * 8.0);
+        reg.register("MiB", Dim::DATA, 1024.0 * 1024.0 * 8.0);
+        reg.register("GiB", Dim::DATA, 1024.0 * 1024.0 * 1024.0 * 8.0);
+        reg.register("TiB", Dim::DATA, 1024.0 * 1024.0 * 1024.0 * 1024.0 * 8.0);
+        // "Mb" is written for both megabits and megabytes, so any spelling other than the
+        // exact byte symbol is refused rather than guessed (an 8x error either way).
+        for (prefix, bytes, bits) in [
+            ("k", "kB", "kbit"),
+            ("m", "MB", "Mbit"),
+            ("g", "GB", "Gbit"),
+            ("t", "TB", "Tbit"),
+            ("p", "PB", "PB"),
+        ] {
+            reg.reserve_spellings(&format!("{}b", prefix), &[bytes, bits]);
+        }
 
-        // Systems Engineering: Transactions & Operations
+        // Transactions & operations
         reg.register("req", Dim::TRANSACTION, 1.0);
         reg.register("iop", Dim::TRANSACTION, 1.0);
         reg.register("pkt", Dim::TRANSACTION, 1.0);
         reg.register("tx", Dim::TRANSACTION, 1.0);
 
-        // Network Bandwidth / Line Rates (Data / Time)
+        // Line rates (bits per second)
         let rate_dim = Dim::DATA / Dim::TIME;
         reg.register("bps", rate_dim.clone(), 1.0);
-        reg.register("kbps", rate_dim.clone(), 1_000.0);
-        reg.register("mbps", rate_dim.clone(), 1_000_000.0);
-        reg.register("gbps", rate_dim.clone(), 1_000_000_000.0);
-        reg.register("tbps", rate_dim, 1_000_000_000_000.0);
+        reg.register("kbps", rate_dim.clone(), 1e3);
+        reg.register("Mbps", rate_dim.clone(), 1e6);
+        reg.register("Gbps", rate_dim.clone(), 1e9);
+        reg.register("Tbps", rate_dim, 1e12);
 
-        // Throughput (Transactions / Time)
+        // Throughput (transactions per time)
         let tx_rate_dim = Dim::TRANSACTION / Dim::TIME;
         reg.register("iops", tx_rate_dim.clone(), 1.0);
         reg.register("rps", tx_rate_dim.clone(), 1.0);
@@ -395,32 +491,45 @@ impl UnitRegistry {
     }
 
     pub fn register(&mut self, name: &str, dimension: Dim, to_base: f64) {
+        self.register_affine(name, dimension, to_base, 0.0);
+    }
+
+    pub fn register_affine(&mut self, name: &str, dimension: Dim, to_base: f64, offset: f64) {
+        let folded = self.folded.entry(name.to_lowercase()).or_default();
+        if !folded.iter().any(|n| n == name) {
+            folded.push(name.to_string());
+        }
         self.units.insert(
-            name.to_lowercase(),
+            name.to_string(),
             Unit {
                 name: name.to_string(),
                 dimension,
                 to_base,
+                offset,
             },
         );
     }
 
+    /// Registers the units of a `unit <dimension> : a, b` declaration. The syntax carries no
+    /// scale, so a declaration can only add units that are interchangeable with each other:
+    /// a custom dimension gets its units at scale 1, and a name that is already a built-in
+    /// unit keeps its built-in meaning. A new name under a built-in dimension (e.g.
+    /// `unit length : furlong`) gets a dimension of its own rather than silently equalling
+    /// the base unit.
     pub fn register_unit_decl(&mut self, decl: &UnitDecl) {
-        let dim = match decl.dimension.to_lowercase().as_str() {
-            "length" => Dim::LENGTH,
-            "time" => Dim::TIME,
-            "mass" => Dim::MASS,
-            "current" => Dim::CURRENT,
-            "money" | "currency" => Dim::MONEY,
-            "temperature" => Dim::TEMPERATURE,
-            "amount" => Dim::AMOUNT,
-            "angle" => Dim::ANGLE,
-            "data" => Dim::DATA,
-            "transaction" => Dim::TRANSACTION,
-            custom_name => Dim::custom(custom_name),
-        };
+        let builtin = matches!(
+            decl.dimension.to_lowercase().as_str(),
+            "length" | "time" | "mass" | "current" | "money" | "currency" | "temperature"
+                | "amount" | "angle" | "data" | "transaction"
+        );
         for u in &decl.units {
-            self.register(u, dim.clone(), 1.0);
+            if builtin {
+                if self.lookup(u).is_none() {
+                    self.register(u, Dim::custom(&u.to_lowercase()), 1.0);
+                }
+            } else {
+                self.register(u, Dim::custom(&decl.dimension), 1.0);
+            }
         }
     }
 
@@ -440,21 +549,56 @@ impl UnitRegistry {
             ));
         }
 
-        let base_val = val * u_from.to_base;
-        let target_val = base_val / u_to.to_base;
-        Ok(target_val)
+        Ok(u_to.from_base_value(u_from.to_base_value(val)))
     }
 
     /// Lookup simple or compound units like "km/h", "m/s^2", "req/s", or "kW*h"
+    /// Refuses every case variant of `spelling` except exact registered symbols, pointing
+    /// users to `instead`.
+    pub fn reserve_spellings(&mut self, spelling: &str, instead: &[&str]) {
+        let mut c: Vec<String> = instead.iter().map(|s| s.to_string()).collect();
+        c.dedup();
+        self.reserved.insert(spelling.to_lowercase(), c);
+    }
+
+    /// The exact symbols a spelling could mean, when it is ambiguous or reserved
+    /// (e.g. "Mb" -> ["MB", "Mbit"], "mw" -> ["MW", "mW"]).
+    pub fn ambiguous(&self, name: &str) -> Option<Vec<String>> {
+        let name = name.trim();
+        if self.units.contains_key(name) {
+            return None;
+        }
+        if let Some(c) = self.reserved.get(&name.to_lowercase()) {
+            return Some(c.clone());
+        }
+        match self.folded.get(&name.to_lowercase()) {
+            Some(c) if c.len() > 1 => {
+                let mut c = c.clone();
+                c.sort();
+                Some(c)
+            }
+            _ => None,
+        }
+    }
+
+    /// Looks up a unit by exact symbol, then case-insensitively when that is unambiguous
+    /// ("gbps" finds Gbps, but "mb" could be Mb or MB and finds nothing). Compound units
+    /// like "km/h", "kg/m^3" and "kW*h" are built from their parts.
     pub fn lookup(&self, name: &str) -> Option<Unit> {
-        let lower = name.to_lowercase().trim().to_string();
-        if let Some(u) = self.units.get(&lower) {
+        let trimmed = name.trim();
+        if let Some(u) = self.units.get(trimmed) {
             return Some(u.clone());
+        }
+        if self.reserved.contains_key(&trimmed.to_lowercase()) {
+            return None;
+        }
+        if let Some([only]) = self.folded.get(&trimmed.to_lowercase()).map(Vec::as_slice) {
+            return self.units.get(only).cloned();
         }
 
         // Parse compound division: num / denom
-        if lower.contains('/') {
-            let parts: Vec<&str> = lower.split('/').collect();
+        if trimmed.contains('/') {
+            let parts: Vec<&str> = trimmed.split('/').collect();
             if parts.len() == 2 {
                 let num = self.lookup(parts[0])?;
                 let den = self.lookup(parts[1])?;
@@ -462,14 +606,15 @@ impl UnitRegistry {
                     name: name.to_string(),
                     dimension: num.dimension / den.dimension,
                     to_base: num.to_base / den.to_base,
+                    offset: 0.0,
                 });
             }
         }
 
         // Parse compound multiplication: u1 * u2 or u1·u2
-        if lower.contains('*') || lower.contains('·') {
-            let sep = if lower.contains('*') { '*' } else { '·' };
-            let parts: Vec<&str> = lower.split(sep).collect();
+        if trimmed.contains('*') || trimmed.contains('·') {
+            let sep = if trimmed.contains('*') { '*' } else { '·' };
+            let parts: Vec<&str> = trimmed.split(sep).collect();
             if parts.len() == 2 {
                 let u1 = self.lookup(parts[0])?;
                 let u2 = self.lookup(parts[1])?;
@@ -477,13 +622,14 @@ impl UnitRegistry {
                     name: name.to_string(),
                     dimension: u1.dimension * u2.dimension,
                     to_base: u1.to_base * u2.to_base,
+                    offset: 0.0,
                 });
             }
         }
 
         // Parse exponents: e.g. s^2 or m^3
-        if lower.contains('^') {
-            let parts: Vec<&str> = lower.split('^').collect();
+        if trimmed.contains('^') {
+            let parts: Vec<&str> = trimmed.split('^').collect();
             if parts.len() == 2 {
                 let base_u = self.lookup(parts[0])?;
                 let exp = parts[1].parse::<i32>().ok()?;
@@ -491,12 +637,140 @@ impl UnitRegistry {
                     name: name.to_string(),
                     dimension: base_u.dimension.pow(exp),
                     to_base: base_u.to_base.powi(exp),
+                    offset: 0.0,
                 });
             }
         }
 
         None
     }
+}
+
+/// The unit each variable is read and shown in: its `signal` declaration's unit, or the
+/// base unit of its dimension when it has none.
+///
+/// Values inside the solver are always in coherent base units (SI, plus bit, radian,
+/// transaction and US dollar), so equations written with SI constants hold whatever unit an
+/// input arrives in. Numbers cross that boundary in the variable's own unit: solve-block
+/// bindings, adapter and stream facts, and command-line values on the way in, and printed
+/// results on the way out.
+#[derive(Debug, Clone, Default)]
+pub struct UnitScale {
+    declared: HashMap<String, (Unit, String)>,
+}
+
+impl UnitScale {
+    pub fn for_module(module: &AvenModule) -> Result<Self, TypeError> {
+        let registry = module_registry(module);
+        let mut declared = HashMap::new();
+        for sig in &module.signals {
+            if let Some(ref u_str) = sig.unit {
+                let unit = registry
+                    .lookup(u_str)
+                    .ok_or_else(|| unknown_unit(&registry, u_str, sig.line, sig.col))?;
+                declared.insert(sig.name.clone(), (unit, u_str.clone()));
+            }
+        }
+        Ok(Self { declared })
+    }
+
+    /// Converts a value given in `name`'s declared unit to base units.
+    pub fn to_base(&self, name: &str, v: f64) -> f64 {
+        match self.declared.get(name) {
+            Some((u, _)) => u.to_base_value(v),
+            None => v,
+        }
+    }
+
+    /// Converts a base-unit value to `name`'s declared unit.
+    pub fn from_base(&self, name: &str, v: f64) -> f64 {
+        match self.declared.get(name) {
+            Some((u, _)) => u.from_base_value(v),
+            None => v,
+        }
+    }
+
+    /// The unit label for `name` as shown to users: the declared unit as written, else the
+    /// base unit of its inferred dimension, else empty (dimensionless or unknown).
+    pub fn label(&self, name: &str, inferred: Option<&Dim>) -> String {
+        if let Some((_, written)) = self.declared.get(name) {
+            return written.clone();
+        }
+        match inferred {
+            Some(d) if !d.is_dimensionless() => derived_symbol(d).unwrap_or_else(|| d.to_string()),
+            _ => String::new(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.declared.is_empty()
+    }
+}
+
+/// The built-in unit registry plus the module's own `unit` declarations.
+/// The SI symbol for a coherent derived dimension (N, Pa, J, W, V, ohm), if it is one.
+pub fn derived_symbol(d: &Dim) -> Option<String> {
+    let m2 = Dim::LENGTH * Dim::LENGTH;
+    let s2 = Dim::TIME * Dim::TIME;
+    let s3 = s2.clone() * Dim::TIME;
+    let named = [
+        ("N", (Dim::MASS * Dim::LENGTH) / s2.clone()),
+        ("Pa", Dim::MASS / (Dim::LENGTH * s2.clone())),
+        ("J", (Dim::MASS * m2.clone()) / s2),
+        ("W", (Dim::MASS * m2.clone()) / s3.clone()),
+        ("V", (Dim::MASS * m2.clone()) / (s3.clone() * Dim::CURRENT)),
+        ("ohm", (Dim::MASS * m2) / (s3 * Dim::CURRENT * Dim::CURRENT)),
+    ];
+    named
+        .into_iter()
+        .find(|(_, dim)| dim == d)
+        .map(|(sym, _)| sym.to_string())
+}
+
+/// The error for a unit the registry cannot resolve, naming the candidates when the
+/// spelling only differs from known units by case.
+fn unknown_unit(registry: &UnitRegistry, unit: &str, line: usize, col: usize) -> TypeError {
+    match registry.ambiguous(unit) {
+        Some(candidates) => TypeError::AmbiguousUnit {
+            unit: unit.to_string(),
+            candidates,
+            line,
+            col,
+        },
+        None => TypeError::UnknownUnit {
+            unit: unit.to_string(),
+            line,
+            col,
+        },
+    }
+}
+
+pub fn module_registry(module: &AvenModule) -> UnitRegistry {
+    let mut registry = UnitRegistry::new();
+    for u in &module.units {
+        registry.register_unit_decl(u);
+    }
+    registry
+}
+
+/// Converts every solve-block binding to base units, reading it in the unit written after
+/// the number, else in the variable's declared signal unit. Returns the module's scale for
+/// converting values that arrive or leave later.
+pub fn normalize_bindings(module: &mut AvenModule) -> Result<UnitScale, TypeError> {
+    let scale = UnitScale::for_module(module)?;
+    let registry = module_registry(module);
+    for solve in &mut module.solves {
+        for b in &mut solve.bindings {
+            b.value = match b.unit {
+                Some(ref u_str) => registry
+                    .lookup(u_str)
+                    .ok_or_else(|| unknown_unit(&registry, u_str, b.line, b.col))?
+                    .to_base_value(b.value),
+                None => scale.to_base(&b.name, b.value),
+            };
+        }
+    }
+    Ok(scale)
 }
 
 #[derive(Debug, Clone)]
@@ -518,6 +792,12 @@ pub enum TypeError {
     },
     UnknownUnit {
         unit: String,
+        line: usize,
+        col: usize,
+    },
+    AmbiguousUnit {
+        unit: String,
+        candidates: Vec<String>,
         line: usize,
         col: usize,
     },
@@ -553,6 +833,14 @@ impl fmt::Display for TypeError {
                 f,
                 "Type Error at line {}, col {}: unrecognized unit '{}'",
                 line, col, unit
+            ),
+            TypeError::AmbiguousUnit { unit, candidates, line, col } => write!(
+                f,
+                "Type Error at line {}, col {}: ambiguous unit '{}' — write one of {} (unit symbols are case-sensitive)",
+                line,
+                col,
+                unit,
+                candidates.join(", ")
             ),
         }
     }
@@ -602,11 +890,7 @@ impl DimensionalChecker {
                 if let Some(u) = self.registry.lookup(u_str) {
                     var_dims.insert(sig.name.clone(), u.dimension);
                 } else {
-                    return Err(TypeError::UnknownUnit {
-                        unit: u_str.clone(),
-                        line: sig.line,
-                        col: sig.col,
-                    });
+                    return Err(unknown_unit(&self.registry, u_str, sig.line, sig.col));
                 }
             }
         }
@@ -616,13 +900,21 @@ impl DimensionalChecker {
             for b in &solve.bindings {
                 if let Some(ref u_str) = b.unit {
                     if let Some(u) = self.registry.lookup(u_str) {
+                        if let Some(declared) = var_dims.get(&b.name) {
+                            if *declared != u.dimension {
+                                return Err(TypeError::DimensionalMismatch {
+                                    context: format!("binding '{} = {} {}'", b.name, b.value, u_str),
+                                    left_dim: declared.clone(),
+                                    right_dim: u.dimension,
+                                    op: "=".to_string(),
+                                    line: b.line,
+                                    col: b.col,
+                                });
+                            }
+                        }
                         var_dims.insert(b.name.clone(), u.dimension);
                     } else {
-                        return Err(TypeError::UnknownUnit {
-                            unit: u_str.clone(),
-                            line: b.line,
-                            col: b.col,
-                        });
+                        return Err(unknown_unit(&self.registry, u_str, b.line, b.col));
                     }
                 }
             }
@@ -764,14 +1056,33 @@ impl DimensionalChecker {
                         });
                     }
                 }
-                if let Expr::Num(n) = **exp {
-                    if (n.fract() == 0.0) && (n.abs() < 100.0) {
-                        if let Some(db) = d_base {
-                            return Ok(Some(db.pow(n as i32)));
-                        }
-                    }
+                let Some(db) = d_base else {
+                    return Ok(None);
+                };
+                if db.is_dimensionless() {
+                    return Ok(Some(Dim::SCALAR));
                 }
-                Ok(d_base)
+                let constant = match exp.as_ref() {
+                    Expr::Num(n) => Some(*n),
+                    Expr::UnaryMinus(inner) => match inner.as_ref() {
+                        Expr::Num(n) => Some(-*n),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                // A dimensioned base needs a constant exponent that keeps every exponent whole
+                // (m^2 ^ 0.5 = m); otherwise the result has no well-defined dimension.
+                match constant.and_then(|n| db.pow_real(n)) {
+                    Some(d) => Ok(Some(d)),
+                    None => Err(TypeError::DimensionalMismatch {
+                        context: format!("power '({} ^ {})'", base, exp),
+                        left_dim: db,
+                        right_dim: Dim::SCALAR,
+                        op: "^ (exponent must be a constant giving whole-number dimensions)".to_string(),
+                        line,
+                        col,
+                    }),
+                }
             }
             Expr::Call(fn_name, inner) => {
                 let d_inner = self.infer_expr(inner, var_dims, line, col)?;

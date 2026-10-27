@@ -77,7 +77,7 @@ function setupNav() {
 }
 
 function setupCodeBlocks() {
-  document.querySelectorAll('pre[data-lang="aven"]').forEach((pre) => {
+  document.querySelectorAll('pre[data-lang="aven"], pre[data-lang="aven-error"]').forEach((pre) => {
     pre.innerHTML = highlight(pre.textContent.replace(/^\n/, ""));
   });
   document.querySelectorAll(".code").forEach((block) => {

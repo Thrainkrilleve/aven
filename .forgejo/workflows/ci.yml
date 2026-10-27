@@ -18,7 +18,7 @@ jobs:
       - name: Install System Dependencies
         run: |
           SUDO=$(command -v sudo || true)
-          $SUDO apt-get update && $SUDO apt-get install -y --no-install-recommends curl ca-certificates build-essential gcc
+          $SUDO apt-get update && $SUDO apt-get install -y --no-install-recommends curl ca-certificates build-essential gcc z3 python3
 
       - name: Install Rust Toolchain
         run: |
@@ -40,3 +40,6 @@ jobs:
 
       - name: Run Multi-Pillar Core Demo
         run: ./target/release/avenc demo
+
+      - name: Check Documentation Against the Compiler
+        run: python3 scripts/check_docs.py

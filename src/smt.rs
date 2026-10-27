@@ -459,9 +459,11 @@ fn expr_uses_integers(expr: &Expr) -> bool {
     }
 }
 
+/// True when `cmd` can be launched from PATH (portable: asks the solver for its version
+/// instead of relying on `where.exe` or `which`).
 fn is_cmd_available(cmd: &str) -> bool {
-    Command::new("where.exe")
-        .arg(cmd)
+    Command::new(cmd)
+        .arg("--version")
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
@@ -477,8 +479,13 @@ fn is_python_z3_available() -> bool {
 }
 
 fn get_python_exe() -> String {
-    if Path::new(".venv/Scripts/python.exe").exists() {
-        ".venv/Scripts/python.exe".to_string()
+    for venv in [".venv/Scripts/python.exe", ".venv/bin/python"] {
+        if Path::new(venv).exists() {
+            return venv.to_string();
+        }
+    }
+    if is_cmd_available("python3") {
+        "python3".to_string()
     } else {
         "python".to_string()
     }
@@ -490,7 +497,11 @@ fn run_cmd_solver(cmd: &str, smt_script: &str) -> Result<(String, String), SmtEr
         return Err(SmtError("empty solver command".to_string()));
     }
 
-    let temp_file = std::env::temp_dir().join(format!("aven_smt_{}.smt2", std::process::id()));
+    // Unique per call: several solves can run concurrently in one process
+    static NEXT_SCRIPT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT_SCRIPT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let temp_file =
+        std::env::temp_dir().join(format!("aven_smt_{}_{}.smt2", std::process::id(), n));
     fs::write(&temp_file, smt_script)
         .map_err(|e| SmtError(format!("failed to write temp smt file: {}", e)))?;
 
@@ -526,7 +537,14 @@ try:
         print("sat")
         m = s.model()
         for d in m.decls():
-            print(f"(define-fun {d.name()} () Real {m[d]})")
+            v = m[d]
+            if z3.is_int_value(v):
+                text = str(v)
+            elif z3.is_rational_value(v) or z3.is_algebraic_value(v):
+                text = v.as_decimal(17).rstrip("?")
+            else:
+                text = str(v)
+            print(f"(define-fun {d.name()} () Real {text})")
     elif res == z3.unsat:
         print("unsat")
     else:
@@ -562,19 +580,109 @@ except Exception as e:
 }
 
 /// Parses variable assignments from SMT `(get-model)` output.
+///
+/// Accepts the multi-line S-expressions solvers print, e.g.
+/// `(define-fun ratio () Real\n    (/ 26.0 25.0))`, and returns each value as a decimal
+/// string: whole numbers without a fraction ("1429"), others in shortest round-trip form.
+/// Values that are not numeric (e.g. functions) are returned as written.
 pub fn parse_smt_model(output: &str) -> HashMap<String, String> {
-    let mut map = HashMap::new();
-    for line in output.lines() {
-        let trimmed = line.trim();
-        // Patterns like: (define-fun x () Real 6.0) or (define-fun y () Int 10)
-        if trimmed.starts_with("(define-fun ") {
-            let parts: Vec<&str> = trimmed.split_whitespace().collect();
-            if parts.len() >= 5 {
-                let name = parts[1].to_string();
-                let val_part = parts[4..].join(" ");
-                let clean_val = val_part.trim_end_matches(')').trim().to_string();
-                map.insert(name, clean_val);
+    #[derive(Debug)]
+    enum Sexp {
+        Atom(String),
+        List(Vec<Sexp>),
+    }
+
+    fn tokenize(s: &str) -> Vec<String> {
+        let mut tokens = Vec::new();
+        let mut cur = String::new();
+        for c in s.chars() {
+            match c {
+                '(' | ')' => {
+                    if !cur.is_empty() {
+                        tokens.push(std::mem::take(&mut cur));
+                    }
+                    tokens.push(c.to_string());
+                }
+                c if c.is_whitespace() => {
+                    if !cur.is_empty() {
+                        tokens.push(std::mem::take(&mut cur));
+                    }
+                }
+                c => cur.push(c),
             }
+        }
+        if !cur.is_empty() {
+            tokens.push(cur);
+        }
+        tokens
+    }
+
+    fn parse(tokens: &[String], pos: &mut usize) -> Option<Sexp> {
+        let tok = tokens.get(*pos)?;
+        *pos += 1;
+        match tok.as_str() {
+            "(" => {
+                let mut items = Vec::new();
+                while tokens.get(*pos).map(String::as_str) != Some(")") {
+                    items.push(parse(tokens, pos)?);
+                }
+                *pos += 1;
+                Some(Sexp::List(items))
+            }
+            ")" => None,
+            atom => Some(Sexp::Atom(atom.to_string())),
+        }
+    }
+
+    fn eval(e: &Sexp) -> Option<f64> {
+        match e {
+            Sexp::Atom(a) => a.trim_end_matches('?').parse().ok(),
+            Sexp::List(items) => match items.as_slice() {
+                [Sexp::Atom(op), x] if op == "-" => eval(x).map(|v| -v),
+                [Sexp::Atom(op), a, b] if op == "/" => Some(eval(a)? / eval(b)?),
+                [Sexp::Atom(op), a, b] if op == "-" => Some(eval(a)? - eval(b)?),
+                _ => None,
+            },
+        }
+    }
+
+    fn render(e: &Sexp) -> String {
+        match e {
+            Sexp::Atom(a) => a.clone(),
+            Sexp::List(items) => {
+                format!("({})", items.iter().map(render).collect::<Vec<_>>().join(" "))
+            }
+        }
+    }
+
+    fn collect(e: &Sexp, map: &mut HashMap<String, String>) {
+        if let Sexp::List(items) = e {
+            if let [Sexp::Atom(head), Sexp::Atom(name), Sexp::List(params), _sort, value] =
+                items.as_slice()
+            {
+                if head == "define-fun" && params.is_empty() {
+                    let text = match eval(value) {
+                        Some(v) if v.fract() == 0.0 && v.abs() < 1e15 => format!("{}", v as i64),
+                        Some(v) => format!("{}", v),
+                        None => render(value),
+                    };
+                    map.insert(name.clone(), text);
+                    return;
+                }
+            }
+            for item in items {
+                collect(item, map);
+            }
+        }
+    }
+
+    let tokens = tokenize(output);
+    let mut map = HashMap::new();
+    let mut pos = 0;
+    while pos < tokens.len() {
+        match parse(&tokens, &mut pos) {
+            Some(e) => collect(&e, &mut map),
+            None => continue,
         }
     }
     map

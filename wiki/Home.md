@@ -2,7 +2,7 @@
 
 **Aven** is a relational, invariant-driven programming language and deterministic solver engine designed for complex multi-physics systems, telemetry ingestion, automated control, and multi-objective optimization.
 
-Unlike traditional imperative languages where functions require hardcoded input/output parameters, Aven relations represent **omnidirectional mathematical invariants**. Write your physical laws once, and Aven dynamically solves for any unknown variable via symbolic differentiation, analytical substitution, and Newton-Raphson relaxation—or transpiles directly to branchless, solver-free ANSI C code.
+Unlike traditional imperative languages where functions require hardcoded input/output parameters, Aven relations represent **omnidirectional mathematical invariants**. Write your physical laws once, and Aven solves for any unknown variable with Newton–Raphson using exact symbolic derivatives—or transpiles `forward` blocks directly to branchless, solver-free C99.
 
 ---
 
@@ -41,7 +41,7 @@ Unlike traditional imperative languages where functions require hardcoded input/
                      ┌────────────────────────┴────────────────────────┐
                      ▼                                                 ▼
 ┌───────────────────────────────────────────┐     ┌───────────────────────────────────────────┐
-│         Relational Solver Engine          │     │        ANSI C Emitter (avenc emit-c)      │
+│         Relational Solver Engine          │     │        C99 Emitter (avenc emit-c)         │
 │  • Omnidirectional equation solving       │     │  • Pure forward evaluation                │
 │  • Guarded Newton-Raphson relaxation      │     │  • Branchless, zero-solver C code         │
 │  • Inequality & domain bound enforcement  │     │  • Embedded & hard real-time ready        │

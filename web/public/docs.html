@@ -173,7 +173,7 @@ forward ProductionProfile {
         <section id="units">
           <h2>Units and dimensions</h2>
           <p>Declare a signal's unit with <code>signal name : unit</code>, or attach a unit to a value in a solve block. <code>avenc check</code> infers the dimension of every variable and rejects equations that mix incompatible dimensions:</p>
-          <div class="code"><pre data-lang="aven">
+          <div class="code"><pre data-lang="aven-error">
 signal speed : km/h
 signal t : s
 
@@ -182,29 +182,30 @@ relation Mixed {
 }</pre></div>
           <div class="code output"><pre>✗ Type Error at line 5, col 5: dimensional mismatch in expression '(speed + t)'
   — cannot perform '+/-' between [m·s^-1] and [s]</pre></div>
-          <p>The checker tracks ten base dimensions: length, time, mass, electric current, temperature and amount of substance from SI, plus angle, money, data and transactions. Built-in units include:</p>
+          <p>The checker tracks ten base dimensions: length, time, mass, electric current, temperature and amount of substance from SI, plus angle, money, data and transactions. Values are <strong>converted</strong> to base units before solving and shown back in each variable's declared unit, so <code>velocity = 250 km/h</code> is solved as 69.44 m/s and printed as 250 km/h.</p>
           <div class="table-wrap">
             <table>
               <thead><tr><th>Dimension</th><th>Units</th></tr></thead>
               <tbody>
-                <tr><td>Length</td><td><code>m</code> <code>km</code> <code>cm</code> <code>mm</code> <code>in</code> <code>ft</code> <code>mi</code></td></tr>
+                <tr><td>Length</td><td><code>m</code> <code>km</code> <code>cm</code> <code>mm</code> <code>um</code> <code>in</code> <code>ft</code> <code>mi</code> <code>nmi</code></td></tr>
                 <tr><td>Time</td><td><code>s</code> <code>ms</code> <code>us</code> <code>ns</code> <code>min</code> <code>h</code> <code>hr</code> <code>day</code></td></tr>
                 <tr><td>Mass</td><td><code>kg</code> <code>g</code> <code>mg</code> <code>lb</code></td></tr>
                 <tr><td>Current</td><td><code>A</code> <code>mA</code></td></tr>
-                <tr><td>Temperature</td><td><code>K</code> <code>degC</code></td></tr>
-                <tr><td>Amount</td><td><code>mol</code></td></tr>
-                <tr><td>Angle</td><td><code>rad</code> <code>deg</code></td></tr>
-                <tr><td>Money</td><td><code>$</code> <code>usd</code> <code>eur</code> <code>gbp</code></td></tr>
-                <tr><td>Data</td><td><code>b</code> <code>bit</code> <code>byte</code> <code>KB</code> <code>MB</code> <code>GB</code> <code>TB</code> <code>PB</code> <code>KiB</code> <code>MiB</code> <code>GiB</code> <code>TiB</code></td></tr>
-                <tr><td>Transactions</td><td><code>req</code> <code>iop</code> <code>pkt</code> <code>tx</code></td></tr>
-                <tr><td>Derived</td><td><code>W</code> <code>kW</code> <code>J</code> <code>kJ</code> <code>kWh</code> <code>Hz</code> <code>kHz</code> <code>MHz</code> <code>GHz</code> <code>bps</code> … <code>Tbps</code> <code>iops</code> <code>rps</code> <code>pph</code></td></tr>
+                <tr><td>Temperature</td><td><code>K</code> <code>degC</code> <code>degF</code> (absolute; write differences in <code>K</code>)</td></tr>
+                <tr><td>Amount, angle</td><td><code>mol</code>, <code>rad</code> <code>deg</code></td></tr>
+                <tr><td>Force, pressure</td><td><code>N</code> <code>kN</code>, <code>Pa</code> <code>hPa</code> <code>kPa</code> <code>MPa</code> <code>bar</code> <code>atm</code> <code>psi</code></td></tr>
+                <tr><td>Energy, power</td><td><code>J</code> <code>kJ</code> <code>MJ</code> <code>Wh</code> <code>kWh</code> <code>MWh</code>, <code>W</code> <code>mW</code> <code>kW</code> <code>MW</code></td></tr>
+                <tr><td>Electrical, frequency</td><td><code>V</code> <code>mV</code> <code>kV</code> <code>ohm</code>, <code>Hz</code> <code>kHz</code> <code>MHz</code> <code>GHz</code></td></tr>
+                <tr><td>Data</td><td><code>b</code>/<code>bit</code> <code>B</code>/<code>byte</code> <code>kB</code> <code>MB</code> <code>GB</code> <code>TB</code> <code>PB</code> <code>KiB</code> … <code>TiB</code> <code>kbit</code> <code>Mbit</code> <code>Gbit</code> <code>Tbit</code></td></tr>
+                <tr><td>Rates, transactions</td><td><code>bps</code> … <code>Tbps</code> <code>iops</code> <code>rps</code> <code>pph</code>, <code>req</code> <code>iop</code> <code>pkt</code> <code>tx</code></td></tr>
+                <tr><td>Money</td><td><code>$</code> <code>USD</code>; <code>EUR</code> and <code>GBP</code> are separate dimensions (no built-in exchange rates)</td></tr>
               </tbody>
             </table>
           </div>
-          <p>Compound units are written with <code>/</code>, as in <code>km/h</code>. Unit names are case-insensitive.</p>
+          <p>Compound units use <code>/</code>, <code>*</code> and integer <code>^</code>: <code>km/h</code>, <code>kg/m^3</code>. Symbols are case-sensitive where it matters (<code>MW</code> megawatt, <code>mW</code> milliwatt); ambiguous spellings such as <code>Mb</code> (megabit or megabyte?) are rejected with the valid choices.</p>
           <div class="notice">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3 2 21h20z"/><path d="M12 10v4M12 17h.01"/></svg>
-            <p>Units are checked for consistency, but <code>avenc run</code> does not currently rescale numbers between units. Write the values in a model in one consistent set of units.</p>
+            <p>Because annotated values become SI, a formula written for other units gives wrong answers with them: <code>cop = 7.5 - 0.12 * outside_c</code> with <code>outside_c = 28 degC</code> sees 301.15. For such formulas, give plain numbers and let the variable name carry the unit.</p>
           </div>
         </section>
 

@@ -56,10 +56,10 @@ fn print_usage() {
         "                                        (enforces fact freshness; blocks decision on stale/zero-TTL data)"
     );
     println!(
-        "  avenc pareto <file.aven> [var] [min] [max] [--steps N] [--backend native|external] [--cmd <command>]"
+        "  avenc pareto <file.aven> <var> <min> <max> [--steps N] [--backend native|external] [--cmd <command>]"
     );
     println!(
-        "                                        Generate Pareto trade-off frontier & detect knee point"
+        "                                        Sweep a variable, tabulate every output, and mark the knee point"
     );
     println!("  avenc stream <file.aven> [--limit N]");
     println!(
@@ -69,6 +69,8 @@ fn print_usage() {
     println!(
         "                                        Show causal derivation tree (default depth: 20; 0 for unlimited)"
     );
+    println!("  avenc emit-c <file.aven> [-o out.c] [--traceable] [--checked-c] [--no-main] [--aeric-shim] [--out-dir <dir>]");
+    println!("                                        Transpile the forward block to standalone C (same as build --emit-c)");
     println!("  avenc build <file.aven> [--emit-c] [-o out.c] [--traceable] [--checked-c] [--no-main] [--aeric-shim] [--out-dir <dir>]");
     println!("                                        Transpile pinned relations to standalone C or AERIC deployment bundle");
     println!("  avenc emit-smt <file.aven> [-o out.smt2] [--prove] [--logic <LOGIC>]");
@@ -511,18 +513,21 @@ fn real_main() {
                 eprintln!("Error: missing file argument for 'pareto'");
                 process::exit(1);
             }
-            let sweep_var = args
-                .get(3)
-                .filter(|s| !s.starts_with("--"))
-                .map(|s| s.as_str());
-            let min_val = args
-                .get(4)
-                .filter(|s| !s.starts_with("--"))
-                .and_then(|s| s.parse::<f64>().ok());
-            let max_val = args
-                .get(5)
-                .filter(|s| !s.starts_with("--"))
-                .and_then(|s| s.parse::<f64>().ok());
+            let positional: Vec<&String> =
+                args.iter().skip(3).take(3).take_while(|s| !s.starts_with("--")).collect();
+            let (sweep_var, min_val, max_val) = match positional.as_slice() {
+                [v, lo, hi] => match (lo.parse::<f64>(), hi.parse::<f64>()) {
+                    (Ok(lo), Ok(hi)) if lo < hi => (v.as_str(), lo, hi),
+                    _ => {
+                        eprintln!("Error: pareto range must be two numbers with min < max, got '{}' '{}'", lo, hi);
+                        process::exit(1);
+                    }
+                },
+                _ => {
+                    eprintln!("Usage: avenc pareto <file.aven> <var> <min> <max> [--steps N] [--backend native|external] [--cmd <command>]");
+                    process::exit(1);
+                }
+            };
             let backend_arg = args
                 .windows(2)
                 .find(|w| w[0] == "--backend")
@@ -661,13 +666,32 @@ fn parse_file(path: &str) -> AvenModule {
     };
 
     let mut parser = Parser::new(tokens);
-    match parser.parse_module(path) {
+    let mut module = match parser.parse_module(path) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("{}", e);
             process::exit(1);
         }
+    };
+    // Every command works in base units; see units::UnitScale.
+    if let Err(e) = units::normalize_bindings(&mut module) {
+        eprintln!("{}", e);
+        process::exit(1);
     }
+    module
+}
+
+/// The directory adapters run in: the model file's directory. A bare file name has an
+/// empty parent, which means the current directory (None), not a directory named "".
+fn model_dir(path: &str) -> Option<&std::path::Path> {
+    std::path::Path::new(path)
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+}
+
+/// The module's unit scale. parse_file has already validated every declared unit.
+fn unit_scale(module: &AvenModule) -> units::UnitScale {
+    units::UnitScale::for_module(module).unwrap_or_default()
 }
 
 fn cmd_check(path: &str) {
@@ -761,7 +785,7 @@ fn cmd_run(
     random_key: bool,
 ) {
     let module = parse_file(path);
-    let work_dir = std::path::Path::new(path).parent();
+    let work_dir = model_dir(path);
 
     let mut generated_key_hex: Option<String> = None;
     let signing_key: Option<Vec<u8>> = if let Some(k) = cli_key {
@@ -824,7 +848,7 @@ fn cmd_run(
             eprintln!("    • {}", f);
         }
         eprintln!(
-            "\n  Refusing to settle actionable decision on unrefreshed metrics to prevent automated scaling on bad data."
+            "\n  Refusing to settle a decision on expired inputs."
         );
         eprintln!("  Pass --allow-stale to explicitly override in non-production environments.");
         process::exit(EXIT_DECISION_BLOCKED);
@@ -846,6 +870,12 @@ fn cmd_run(
     let mut sorted_keys: Vec<&String> = res.env.keys().collect();
     sorted_keys.sort();
 
+    let scale = unit_scale(&module);
+    let dims = units::DimensionalChecker::new()
+        .check_module(&module)
+        .map(|r| r.variable_dimensions)
+        .unwrap_or_default();
+
     if json {
         // Full-precision machine-readable output (f64 Display is the shortest round-trip form)
         let status = if res.diagnosis.is_some() {
@@ -865,11 +895,21 @@ fn cmd_run(
             Some(k) => format!(", \"ledger_key\": \"{}\"", k),
             None => String::new(),
         };
+        // env values are in base units; "units" names the unit of each dimensioned one
+        let unit_fields: Vec<String> = sorted_keys
+            .iter()
+            .filter_map(|k| {
+                dims.get(*k)
+                    .filter(|d| !d.is_dimensionless())
+                    .map(|d| format!("\"{}\": \"{}\"", k, d))
+            })
+            .collect();
         println!(
-            "{{\"status\": \"{}\", \"optimality\": {}, \"env\": {{{}}}{}}}",
+            "{{\"status\": \"{}\", \"optimality\": {}, \"env\": {{{}}}, \"units\": {{{}}}{}}}",
             status,
             optimality,
             fields.join(", "),
+            unit_fields.join(", "),
             ledger_key_field
         );
         if res.diagnosis.is_some() {
@@ -883,7 +923,7 @@ fn cmd_run(
         if integer_vars.contains(k) {
             println!("  {:<16} = {:.0} (int)", k, res.env[k]);
         } else {
-            println!("  {:<16} = {:.4}", k, res.env[k]);
+            println!("  {:<16} = {}", k, show_value(&scale, &dims, k, res.env[k]));
         }
     }
 
@@ -953,7 +993,7 @@ fn cmd_bench(path: &str, iterations: usize) {
         }
     };
     let module = parse_file(path);
-    let work_dir = std::path::Path::new(path).parent();
+    let work_dir = model_dir(path);
 
     let stats = |mut samples: Vec<f64>| -> (f64, f64, f64) {
         samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -1164,10 +1204,19 @@ fn cmd_bench_latency_profile(
 
 fn cmd_why(path: &str, var: &str, depth: Option<usize>) {
     let module = parse_file(path);
-    let work_dir = std::path::Path::new(path).parent();
+    let work_dir = model_dir(path);
     let res = execute_module(&module, false, work_dir);
+    let scale = unit_scale(&module);
+    let dims = units::DimensionalChecker::new()
+        .check_module(&module)
+        .map(|r| r.variable_dimensions)
+        .unwrap_or_default();
     println!("Causal Derivation Tree for '{}':", var);
-    println!("{}", res.ledger.why_with_depth(var, depth));
+    println!(
+        "{}",
+        res.ledger
+            .why_formatted(var, depth, &|name, v| show_value(&scale, &dims, name, v))
+    );
     res.exit_on_error();
 }
 
@@ -1270,7 +1319,7 @@ fn cmd_build(
         }
     }
 
-    let work_dir = std::path::Path::new(path).parent();
+    let work_dir = model_dir(path);
     let res = execute_module(&module, false, work_dir);
     res.exit_on_error();
     let mut bindings = HashMap::new();
@@ -1447,7 +1496,7 @@ fn cmd_debug(
     diff_ticks: Option<(usize, usize)>,
 ) {
     let module = parse_file(model_path);
-    let work_dir = std::path::Path::new(model_path).parent();
+    let work_dir = model_dir(model_path);
 
     let ledger = if let Some(lp) = ledger_path {
         let text = match fs::read_to_string(lp) {
@@ -1478,9 +1527,8 @@ fn cmd_debug(
             println!("  No variable changes.");
         } else {
             for d in diffs {
-                let old_s = d.old_value.map_or("None".to_string(), |v| format!("{:.4}", v));
-                let new_s = d.new_value.map_or("None".to_string(), |v| format!("{:.4}", v));
-                let delta_s = d.delta.map_or(String::new(), |v| format!(" (Δ {:+.4})", v));
+                let (old_s, new_s, delta_s) = session.show_diff(&d);
+                let delta_s = if delta_s == "None" { String::new() } else { format!(" (Δ {})", delta_s) };
                 println!("  {:<24} : {} -> {}{}", d.name, old_s, new_s, delta_s);
             }
         }
@@ -1490,12 +1538,20 @@ fn cmd_debug(
     if let Some(wi) = what_if {
         if let Some(pos) = wi.find('=') {
             let var = wi[..pos].trim();
-            let val: f64 = wi[pos + 1..].trim().parse().unwrap_or(0.0);
+            let val = match session.parse_value(var, &wi[pos + 1..]) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("What-if error: {}", e);
+                    process::exit(EXIT_ERROR);
+                }
+            };
             match session.what_if(&[(var.to_string(), val)]) {
                 Ok(res) => {
                     println!(
                         "Counterfactual What-If Result (mutating '{}' = {} at t{}):",
-                        var, val, res.baseline_tick
+                        var,
+                        session.show(var, val),
+                        res.baseline_tick
                     );
                     println!(
                         "  {:<24} {:>14} {:>14} {:>14}",
@@ -1503,13 +1559,14 @@ fn cmd_debug(
                     );
                     println!("  --------------------------------------------------------------------");
                     for d in res.diffs {
-                        let old_s = d.old_value.map_or("None".to_string(), |v| format!("{:.4}", v));
-                        let new_s = d.new_value.map_or("None".to_string(), |v| format!("{:.4}", v));
-                        let delta_s = d.delta.map_or("None".to_string(), |v| format!("{:+.4}", v));
+                        let (old_s, new_s, delta_s) = session.show_diff(&d);
                         println!("  {:<24} {:>14} {:>14} {:>14}", d.name, old_s, new_s, delta_s);
                     }
                 }
-                Err(e) => eprintln!("What-if error: {}", e),
+                Err(e) => {
+                    eprintln!("What-if error: {}", e);
+                    process::exit(EXIT_ERROR);
+                }
             }
         }
         return;
@@ -1523,7 +1580,7 @@ fn cmd_debug(
                 keys.sort();
                 for k in keys {
                     let v = &st.vars[k];
-                    println!("  {:<24} = {:>14.4}  ({})", v.name, v.value, v.kind);
+                    println!("  {:<24} = {:>20}  ({})", v.name, session.show(&v.name, v.value), v.kind);
                 }
             }
             Err(e) => eprintln!("Error jumping to tick {}: {}", t, e),
@@ -1598,6 +1655,7 @@ fn execute_module_with_key(
         eprintln!("\n{}", e);
         process::exit(1);
     }
+    let scale = unit_scale(module);
 
     let mut env = HashMap::new();
     let mut ledger = match signing_key {
@@ -1673,9 +1731,10 @@ fn execute_module_with_key(
             }
         }
 
+        // Adapters exchange values in each variable's declared unit
         let mut varmap = evaluator::VarMap::new();
         for (k, v) in &env {
-            varmap.set(k, *v);
+            varmap.set(k, scale.from_base(k, *v));
         }
 
         let (eval_res, backend_type) = match &blk.backend {
@@ -1787,6 +1846,10 @@ fn execute_module_with_key(
                     .values
                     .into_iter()
                     .filter(|(k, _)| model_vars.contains(k))
+                    .map(|(k, v)| {
+                        let base = scale.to_base(&k, v);
+                        (k, base)
+                    })
                     .collect();
                 values.sort_by(|a, b| a.0.cmp(&b.0));
                 for (k, v) in values {
@@ -2203,7 +2266,7 @@ fn cmd_demo() {
     println!("why cost:\n{}\n", ledger3.why("cost"));
 
     // 5. Multi-Objective Pareto Frontier & Knee-Point Optimization
-    println!("Pillar 5: Multi-Objective Pareto Frontier & Knee Detection");
+    println!("Pillar 5: Trade-off sweep & knee detection");
     println!("------------------------------------------------------------");
     let src5 = r#"
         relation Capacity {
@@ -2248,7 +2311,7 @@ fn cmd_demo() {
     }
     if let Some(k) = evaluator::Orchestrator::find_knee_point(&frontier5) {
         println!(
-            "  => Knee Point: Point {} (Optimal trade-off balance)\n",
+            "  => Knee point: Point {}\n",
             k + 1
         );
     }
@@ -2260,9 +2323,9 @@ fn cmd_demo() {
 
 fn cmd_pareto(
     path: &str,
-    sweep_var: Option<&str>,
-    min_val: Option<f64>,
-    max_val: Option<f64>,
+    var: &str,
+    min_val: f64,
+    max_val: f64,
     backend_arg: Option<&str>,
     cmd_arg: Option<&str>,
     steps: usize,
@@ -2324,15 +2387,31 @@ fn cmd_pareto(
 
     let orchestrator = evaluator::Orchestrator::from_config(&config, rel_block.equations.clone());
 
-    let var = sweep_var.unwrap_or("reqs_per_second");
-    let min = min_val.unwrap_or(10000.0);
-    let max = max_val.unwrap_or(50000.0);
+    let scale = unit_scale(&module);
+    let dims = units::DimensionalChecker::new()
+        .check_module(&module)
+        .map(|r| r.variable_dimensions)
+        .unwrap_or_default();
+    if !module_variables(&module).contains(var) {
+        eprintln!("Error: '{}' is not a variable of '{}'", var, path);
+        process::exit(1);
+    }
+    // The range is given in the swept variable's own unit
+    let min = scale.to_base(var, min_val);
+    let max = scale.to_base(var, max_val);
+    let header = |name: &str| {
+        let label = scale.label(name, dims.get(name));
+        if label.is_empty() { name.to_string() } else { format!("{} [{}]", name, label) }
+    };
 
     println!("============================================================");
-    println!(" Aven Pareto Multi-Objective Frontier Engine");
+    println!(" Aven trade-off sweep");
     println!(
-        " Relation: '{}' | Sweep: {} in [{:.1}, {:.1}]",
-        rel_block.name, var, min, max
+        " Relation: '{}' | Sweep: {} in [{}, {}]",
+        rel_block.name,
+        var,
+        show_value(&scale, &dims, var, min),
+        show_value(&scale, &dims, var, max)
     );
     println!("============================================================");
 
@@ -2357,18 +2436,18 @@ fn cmd_pareto(
                     .collect();
                 display_vars.sort();
 
-                print!("\n{:<6} {:<18}", "Step", var);
+                print!("\n{:<6} {:<18}", "Step", header(var));
                 for vname in &display_vars {
-                    print!(" {:<18}", vname);
+                    print!(" {:<18}", header(vname));
                 }
                 println!();
                 println!("{}", "-".repeat(24 + 19 * display_vars.len()));
 
                 for (idx, pt) in frontier.iter().enumerate() {
-                    let v_sweep = pt.vars.get(var).unwrap_or(0.0);
+                    let v_sweep = scale.from_base(var, pt.vars.get(var).unwrap_or(0.0));
                     print!("{:<6} {:<18.2}", idx + 1, v_sweep);
                     for vname in &display_vars {
-                        let val = pt.vars.get(vname).unwrap_or(0.0);
+                        let val = scale.from_base(vname, pt.vars.get(vname).unwrap_or(0.0));
                         if val.fract() == 0.0 && val.abs() < 1e9 {
                             print!(" {:<18.0}", val);
                         } else {
@@ -2379,9 +2458,17 @@ fn cmd_pareto(
                 }
             }
 
+            let requested = steps.max(2) + 1;
+            if frontier.len() < requested {
+                println!(
+                    "\n{} of {} sweep points shown; the others failed to solve or duplicated a shown point.",
+                    frontier.len(),
+                    requested
+                );
+            }
             if let Some(knee) = evaluator::Orchestrator::find_knee_point(&frontier) {
                 println!(
-                    "\nOptimal Knee Point Detected: Step {} (Best trade-off balance)",
+                    "\nKnee point: step {} (largest normalized trade-off between the two most strongly conflicting outputs)",
                     knee + 1
                 );
             }
@@ -2398,23 +2485,33 @@ fn cmd_stream(path: &str, limit: usize) {
     use std::io::BufRead;
 
     let module = parse_file(path);
+    let scale = unit_scale(&module);
+    let dims = units::DimensionalChecker::new()
+        .check_module(&module)
+        .map(|r| r.variable_dimensions)
+        .unwrap_or_else(|e| {
+            eprintln!("{}", e);
+            process::exit(EXIT_ERROR);
+        });
 
-    println!("============================================================");
-    println!(" Aven Relational Stream Supervisor");
-    println!(" Model: '{}' | Ingesting live JSON stream from STDIN", path);
-    println!("============================================================");
+    // Solve-block values are fixed parameters; each stdin line supplies or overrides facts.
+    let mut parameters = HashMap::new();
+    for solve in &module.solves {
+        for b in &solve.bindings {
+            parameters.insert(b.name.clone(), b.value);
+        }
+    }
 
-    println!(
-        "{:<7} | {:<16} | {:<10} | {:<10} | {:<8} | {:<7} | {:<4} | Status",
-        "Cycle", "Spec Hash", "Scan(ms)", "Power(W)", "Temp(C)", "Qual(%)", "Rank"
-    );
-    println!("{}", "-".repeat(88));
+    println!("Aven stream supervisor — model '{}', reading one JSON object per line from stdin", path);
+    println!("{:<7} | {:<16} | Status", "Cycle", "Spec hash");
+    println!("{}", "-".repeat(72));
 
     let stdin = std::io::stdin();
     let reader = stdin.lock();
     let mut cycle = 0;
     let mut ledger = new_ledger();
     let mut seq = 0;
+    let mut failures = 0;
 
     for line_res in reader.lines() {
         let line = match line_res {
@@ -2433,12 +2530,14 @@ fn cmd_stream(path: &str, limit: usize) {
 
         cycle += 1;
 
-        // Build VarMap and env
-        let mut env = HashMap::new();
-        let mut varmap = evaluator::VarMap::new();
-        for (k, v) in &parsed_numbers {
+        let mut env = parameters.clone();
+        let mut inputs: Vec<(String, f64)> = parsed_numbers
+            .iter()
+            .map(|(k, v)| (k.clone(), scale.to_base(k, *v)))
+            .collect();
+        inputs.sort_by(|a, b| a.0.cmp(&b.0));
+        for (k, v) in &inputs {
             env.insert(k.clone(), *v);
-            varmap.set(k, *v);
             seq += 1;
             ledger.append(Fact {
                 seq,
@@ -2451,6 +2550,7 @@ fn cmd_stream(path: &str, limit: usize) {
                 metadata: None,
             });
         }
+        let given: std::collections::HashSet<String> = env.keys().cloned().collect();
 
         // Solve relations declared in the module
         let mut solver = SolverEngine::new();
@@ -2476,13 +2576,19 @@ fn cmd_stream(path: &str, limit: usize) {
             }
         }
 
-        let residual = 0.0;
-        if let Ok(solved_env) = solver.solve(&env) {
-            for (k, v) in solved_env {
-                if let std::collections::hash_map::Entry::Vacant(entry) = env.entry(k.clone()) {
-                    varmap.set(&k, v);
-                    entry.insert(v);
+        let mut failure = match solver.solve(&env) {
+            Ok(solved_env) => {
+                for (k, v) in solved_env {
+                    env.entry(k).or_insert(v);
                 }
+                None
+            }
+            Err(e) => Some(e.to_string()),
+        };
+        if failure.is_none() {
+            let mut stale = Vec::new();
+            if let Err(e) = eval_forward_blocks(&module, &mut env, &mut ledger, &mut seq, &mut stale, false) {
+                failure = Some(e.to_string());
             }
         }
 
@@ -2501,42 +2607,72 @@ fn cmd_stream(path: &str, limit: usize) {
                             ConstraintOp::Greater => lhs_val > rhs_val,
                         };
                         if !satisfied {
-                            alarms
-                                .push(format!("{}: {:.2} {} {:.2}", c.lhs, lhs_val, c.op, rhs_val));
+                            alarms.push(format!(
+                                "{}: {} {} {}",
+                                c.lhs,
+                                show_value(&scale, &dims, &c.lhs, lhs_val),
+                                c.op,
+                                show_value(&scale, &dims, &c.lhs, rhs_val)
+                            ));
                         }
                     }
                 }
             }
         }
 
-        let spec_hash = varmap.compute_hash();
-        let scan_ms = env.get("scan_ms").copied().unwrap_or(0.0);
-        let power_w = env.get("power_w").copied().unwrap_or(0.0);
-        let temp_c = env.get("temp_c").copied().unwrap_or(0.0);
-        let quality_pct = env.get("quality_pct").copied().unwrap_or(0.0);
-        let rank = env.len();
+        let mut varmap = evaluator::VarMap::new();
+        for (k, v) in &env {
+            varmap.set(k, *v);
+        }
+        let mut derived: Vec<&String> = env.keys().filter(|k| !given.contains(*k)).collect();
+        derived.sort();
+        let derived_str: Vec<String> = derived
+            .iter()
+            .map(|k| format!("{} = {}", k, show_value(&scale, &dims, k, env[*k])))
+            .collect();
 
-        let status_str = if alarms.is_empty() {
-            format!("CONVERGED (Res: {:.4})", residual)
-        } else {
+        let status = if let Some(e) = &failure {
+            failures += 1;
+            format!("UNSOLVED: {}", e)
+        } else if !alarms.is_empty() {
             format!("ALARM: {}", alarms.join("; "))
+        } else {
+            "SETTLED".to_string()
         };
-
-        println!(
-            "#{:<6} | {:<16} | {:<10.2} | {:<10.1} | {:<8.1} | {:<7.2} | {:<4} | {}",
-            cycle, spec_hash, scan_ms, power_w, temp_c, quality_pct, rank, status_str
-        );
+        println!("#{:<6} | {:<16} | {}", cycle, varmap.compute_hash(), status);
+        if !derived_str.is_empty() {
+            println!("        {}", derived_str.join(", "));
+        }
 
         if limit > 0 && cycle >= limit {
             break;
         }
     }
 
-    println!("{}", "-".repeat(88));
+    println!("{}", "-".repeat(72));
     println!(
-        "Stream completed: {} telemetry cycles verified by Aven.",
-        cycle
+        "Stream completed: {} cycle(s), {} settled, {} unsolved.",
+        cycle,
+        cycle - failures,
+        failures
     );
+}
+
+/// Formats a base-unit value in the variable's display unit, e.g. "69.4444 m·s^-1" or
+/// "250.0000 km/h" for a variable declared in km/h.
+fn show_value(
+    scale: &units::UnitScale,
+    dims: &HashMap<String, units::Dim>,
+    name: &str,
+    base: f64,
+) -> String {
+    let label = scale.label(name, dims.get(name));
+    let v = scale.from_base(name, base);
+    if label.is_empty() {
+        format!("{:.4}", v)
+    } else {
+        format!("{:.4} {}", v, label)
+    }
 }
 
 /// Evaluates `forward` blocks strictly forward in dependency order (the order the C emitter

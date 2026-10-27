@@ -61,7 +61,8 @@ fn settled(run: &Run) -> HashMap<String, f64> {
                 break;
             }
             if let Some((k, v)) = t.split_once('=') {
-                let v = v.trim().trim_end_matches("(int)").trim();
+                // "1429 (int)" or "250.0000 km/h": the number is the first field
+                let v = v.split_whitespace().next().unwrap_or("");
                 if let Ok(x) = v.parse::<f64>() {
                     env.insert(k.trim().to_string(), x);
                 }
@@ -709,4 +710,15 @@ solve S with {
     let line = run.stdout.lines().last().unwrap();
     assert!(line.contains("\"optimality\": \"proven\""), "must be proven optimal: {}", line);
     assert!(line.contains("\"obj\": -8"), "optimum is -8: {}", line);
+}
+
+// STANDARDS.md §2.1: non-finite values are rejected, never reported as results
+#[test]
+fn standards_non_finite_results_are_rejected() {
+    for expr in ["exp(x * 1000)", "x / 0", "sqrt(x - 5)", "ln(x - 5)"] {
+        let src = format!("relation R {{\n    y = {}\n}}\nsolve R with {{\n    x = 1\n}}\n", expr);
+        let run = run_model(&src, &[]);
+        assert_eq!(run.code, 1, "{} must fail, got stdout: {}", expr, run.stdout);
+        assert!(!run.stdout.contains("inf") && !run.stdout.contains("NaN"), "{}: {}", expr, run.stdout);
+    }
 }

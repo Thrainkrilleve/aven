@@ -50,18 +50,58 @@ pub struct DebuggerSession {
     pub ledger: Ledger,
     pub current_tick: usize,
     pub max_tick: usize,
+    /// Ledger values are in base units; these render them in each variable's own unit.
+    units: crate::units::UnitScale,
+    dims: HashMap<String, crate::units::Dim>,
 }
 
 impl DebuggerSession {
     pub fn new(module_path: &str, module: AvenModule, ledger: Ledger) -> Self {
         let max_tick = ledger.facts().iter().map(|f| f.tick).max().unwrap_or(0);
+        let units = crate::units::UnitScale::for_module(&module).unwrap_or_default();
+        let dims = crate::units::DimensionalChecker::new()
+            .check_module(&module)
+            .map(|r| r.variable_dimensions)
+            .unwrap_or_default();
         Self {
             module_path: module_path.to_string(),
             module,
             ledger,
             current_tick: max_tick,
             max_tick,
+            units,
+            dims,
         }
+    }
+
+    /// Renders a base-unit value in `name`'s own unit, with its label.
+    pub fn show(&self, name: &str, base: f64) -> String {
+        let label = self.units.label(name, self.dims.get(name));
+        let v = self.units.from_base(name, base);
+        if label.is_empty() { format!("{:.4}", v) } else { format!("{:.4} {}", v, label) }
+    }
+
+    /// Old value, new value and signed change of a diff, each in `d.name`'s own unit.
+    pub fn show_diff(&self, d: &VarDiff) -> (String, String, String) {
+        let old_s = d.old_value.map_or("None".to_string(), |v| self.show(&d.name, v));
+        let new_s = d.new_value.map_or("None".to_string(), |v| self.show(&d.name, v));
+        let delta_s = match (d.old_value, d.new_value) {
+            (Some(o), Some(n)) => {
+                let delta = self.units.from_base(&d.name, n) - self.units.from_base(&d.name, o);
+                format!("{:+.4}", delta)
+            }
+            _ => "None".to_string(),
+        };
+        (old_s, new_s, delta_s)
+    }
+
+    /// Parses a what-if value typed by the user, in `var`'s own unit, into base units.
+    pub fn parse_value(&self, var: &str, text: &str) -> Result<f64, String> {
+        let v: f64 = text
+            .trim()
+            .parse()
+            .map_err(|_| format!("invalid number '{}'", text.trim()))?;
+        Ok(self.units.to_base(var, v))
     }
 
     /// Retrieves all variables in state at the current logical tick cursor.
@@ -313,7 +353,7 @@ impl DebuggerSession {
                         for k in keys {
                             let v = &st.vars[k];
                             let stale_tag = if v.is_stale { " [STALE]" } else { "" };
-                            writeln!(writer, "  {:<24} = {:>14.4}  ({:<8}){}", v.name, v.value, v.kind, stale_tag)?;
+                            writeln!(writer, "  {:<24} = {:>20}  ({:<8}){}", v.name, self.show(&v.name, v.value), v.kind, stale_tag)?;
                         }
                     }
                 }
@@ -373,9 +413,8 @@ impl DebuggerSession {
                         writeln!(writer, "  No variable changes.")?;
                     } else {
                         for d in diffs {
-                            let old_s = d.old_value.map_or("None".to_string(), |v| format!("{:.4}", v));
-                            let new_s = d.new_value.map_or("None".to_string(), |v| format!("{:.4}", v));
-                            let delta_s = d.delta.map_or(String::new(), |v| format!(" (Δ {:+.4})", v));
+                            let (old_s, new_s, delta_s) = self.show_diff(&d);
+                            let delta_s = if delta_s == "None" { String::new() } else { format!(" (Δ {})", delta_s) };
                             writeln!(writer, "  {:<24} : {} -> {}{}", d.name, old_s, new_s, delta_s)?;
                         }
                     }
@@ -392,20 +431,21 @@ impl DebuggerSession {
                         continue;
                     }
                     let var = split[0].trim();
-                    let Ok(val) = split[1].trim().parse::<f64>() else {
-                        writeln!(writer, "Invalid number '{}'", split[1])?;
-                        continue;
+                    let val = match self.parse_value(var, split[1]) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            writeln!(writer, "What-If Error: {}", e)?;
+                            continue;
+                        }
                     };
 
                     match self.what_if(&[(var.to_string(), val)]) {
                         Ok(res) => {
-                            writeln!(writer, "Counterfactual Branch Result (mutating '{}' = {} at t{}):", var, val, res.baseline_tick)?;
+                            writeln!(writer, "Counterfactual Branch Result (mutating '{}' = {} at t{}):", var, self.show(var, val), res.baseline_tick)?;
                             writeln!(writer, "  {:<24} {:>14} {:>14} {:>14}", "Output Variable", "Nominal", "Branch", "Delta")?;
                             writeln!(writer, "  --------------------------------------------------------------------")?;
                             for d in res.diffs {
-                                let old_s = d.old_value.map_or("None".to_string(), |v| format!("{:.4}", v));
-                                let new_s = d.new_value.map_or("None".to_string(), |v| format!("{:.4}", v));
-                                let delta_s = d.delta.map_or("None".to_string(), |v| format!("{:+.4}", v));
+                                let (old_s, new_s, delta_s) = self.show_diff(&d);
                                 writeln!(writer, "  {:<24} {:>14} {:>14} {:>14}", d.name, old_s, new_s, delta_s)?;
                             }
                         }

@@ -17,7 +17,7 @@ Aven bridges this gap by enforcing **relational capacity invariants** directly o
 
 ## 2. Relational Datacenter Sizing Model
 
-From [`examples/server_capacity.aven`](file:///f:/aven/examples/server_capacity.aven):
+From [`examples/server_capacity.aven`](https://github.com/Thrainkrilleve/aven/blob/main/examples/server_capacity.aven):
 
 ```aven
 relation ServerScaling {
@@ -65,7 +65,7 @@ When cold air margins open up in Denver (`KDEN`, $4.0^\circ\text{C}$), Aven sign
 
 ## 4. Production Replay: Wikimedia Traces
 
-In [`evaluations/traces/traffic_replay.aven`](file:///f:/aven/evaluations/traces/traffic_replay.aven), Aven continuously ingested real production traffic traces from the **Wikimedia Foundation**:
+In [`evaluations/traces/traffic_replay.aven`](https://github.com/Thrainkrilleve/aven/blob/main/evaluations/traces/traffic_replay.aven), Aven continuously ingested real production traffic traces from the **Wikimedia Foundation**:
 - Evaluated step-by-step scaling across 10-minute traffic windows.
 - Maintained exact target utilization ($70\%$) while strictly respecting pod ceilings.
 - Verified zero staleness blocks during sustained real-world replay.

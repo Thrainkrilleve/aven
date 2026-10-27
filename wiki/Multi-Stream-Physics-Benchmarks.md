@@ -6,9 +6,9 @@ To validate Aven under heavy real-world loads, the toolchain was subjected to co
 
 ## 1. Multi-Stream Ingestion Architecture
 
-The stress harness ([`stream_ringer.py`](file:///f:/aven/evaluations/flight_mesh/stream_ringer.py)) integrates three disparate public feeds into a single unified physical state space:
+The stress harness ([`stream_ringer.py`](https://github.com/Thrainkrilleve/aven/blob/main/evaluations/flight_mesh/stream_ringer.py)) integrates three disparate public feeds into a single unified physical state space:
 
-1. **OpenSky Network ADS-B Transponders:** Real-time spatial positions, barometric altitudes, true airspeed, and vertical rates from **4,700+ active cruising aircraft**.
+1. **OpenSky Network ADS-B Transponders:** Real-time spatial positions, barometric altitudes, true airspeed, and vertical rates from the aircraft currently reporting.
 2. **NOAA Aviation Weather Center (AWC METARs):** Live ground altimeter pressure settings and ambient surface temperatures across major US airport hubs (KATL, KORD, KDEN, KDFW, KJFK, KSEA, KLAX, KSFO, KMIA, KBOS).
 3. **USGS Water Services:** Real-time streamflow discharge and gauge station elevations across regional watersheds (Colorado, Mississippi, and Atlantic basins).
 
@@ -22,12 +22,12 @@ USGS Water Services ──────┘      (Pre-warmed RAM)          (Physic
 
 ## 2. Physical Invariants Modeled
 
-The model ([`flight_mesh_ipc.aven`](file:///f:/aven/evaluations/flight_mesh/flight_mesh_ipc.aven)) simultaneously enforces 8 physical laws:
+The model ([`flight_mesh_ipc.aven`](https://github.com/Thrainkrilleve/aven/blob/main/evaluations/flight_mesh/flight_mesh_ipc.aven)) enforces:
 
-- **ISA Tropospheric Lapse Rate:**  
-  $$T(h) = T_0 - \Gamma \cdot h \quad (\Gamma = 0.0065\,\text{K/m})$$
-- **Barometric Pressure at Altitude:**  
-  $$p(h) = p_0 \cdot \left(1 - \frac{\Gamma \cdot h}{T_0}\right)^{5.2561}$$
+- **ISA temperature, troposphere capped at the 11 km tropopause:**  
+  $$T(h) = T_0 - \Gamma \cdot \min(h, 11\,000) \quad (\Gamma = 0.0065\,\text{K/m}),\ \text{isothermal above}$$
+- **Barometric pressure, with isothermal decay above the tropopause:**  
+  $$p(h) = p_0 \left(1 - \frac{\Gamma \min(h, 11\,000)}{T_0}\right)^{5.2561} \exp\!\left(-\frac{g\,(h - \min(h, 11\,000))}{R\,T}\right)$$
 - **Ideal Gas Air Density:**  
   $$\rho = \frac{p}{R_{\text{specific}} \cdot T} \quad (R = 287.058\,\text{J/(kg}\cdot\text{K)})$$
 - **Speed of Sound & Mach Number:**  
@@ -39,9 +39,13 @@ The model ([`flight_mesh_ipc.aven`](file:///f:/aven/evaluations/flight_mesh/flig
 - **Terrain Clearance:**  
   $$h_{\text{clearance}} = h_{\text{baro}} - h_{\text{gauge}}$$
 
+`verify/live_atmosphere.py` checks temperature, pressure and Mach against an independent two-layer ISA computation on live aircraft (150 checked, 30 above the tropopause, all matching).
+
 ---
 
 ## 3. Benchmark Results (50 Live Commercial Flights)
+
+> These results were recorded with an **earlier model** that extended the tropospheric lapse rate above 11 km (see §5); the run log is `evaluations/flight_mesh/flight_mesh_audit_ledger.jsonl`. Timings were measured on a Windows workstation.
 
 Executed using `python evaluations/flight_mesh/stream_ringer.py --count 50 --concurrency 4`:
 
@@ -71,20 +75,22 @@ Executed using `python evaluations/flight_mesh/stream_ringer.py --count 50 --con
 
 ## 4. Latency Evolution Breakdown
 
-| Optimization Phase | Median Latency | Multi-Worker Throughput | Key Architectural Change |
+| Optimization Phase | Median Latency | Multi-Worker Throughput | Source |
 | :--- | :--- | :--- | :--- |
-| **1. Uncached Subprocess** | `125.1 ms` | $7.4\,\text{solves/sec}$ | Base `subprocess.run` with on-demand API fetches |
-| **2. Lazy-Import Subprocess** | `71.5 ms` | $54.1\,\text{solves/sec}$ | Deferred `urllib.request` import graph |
-| **3. Persistent IPC Daemon** | **`9.7 ms`** | **`352.9 solves/sec`** | Native `avenc` TCP socket stream + RAM cache |
+| **1. Uncached Subprocess** | `125.1 ms` | 7.4 solves/sec | Windows run; no log in the repository |
+| **2. Lazy-Import Subprocess** | `71.5 ms` | 54.1 solves/sec | Windows run; no log in the repository |
+| **3. Persistent IPC Daemon** | `9.7 ms` | 352.9 solves/sec | Windows run; `flight_mesh_summary_report.md` |
+| Subprocess (`flight_mesh.aven`), re-run | `34.5 ms` | 107.2 solves/sec | 4-vCPU Linux container, 2026-10-27, 20 vectors |
+| IPC daemon (`flight_mesh_ipc.aven`), re-run | `5.8 ms` | 561.0 solves/sec | Same container and date |
+
+The 2026-10-27 re-runs had no access to the live feeds, so the harness used its synthetic cruise vector; they measure pipeline overhead, not live data. Process start-up is much cheaper on Linux than on Windows, which narrows the subprocess/IPC gap (6× here against 13× on Windows).
 
 ---
 
-## 5. Constraint Violation Case Study: Flight EJA582
+## 5. Case Study: Flight EJA582 — a Model Error, Since Fixed
 
-During evaluation, flight vector #1 (NetJets `EJA582`, Bombardier Global 7500) reported an altitude of **43,000 ft** ($13,106\,\text{m}$) at 480 kts.
-
-Because the linear tropospheric lapse rate assumption ($6.5^\circ\text{C}/\text{km}$) cools air down to $-81.2^\circ\text{C}$ at this altitude (exceeding the safety boundary of $-80^\circ\text{C}$ before reaching the isothermal stratosphere), Aven immediately halted execution:
+During the §3 run, flight vector #1 (NetJets `EJA582`) reported **43,000 ft** ($13,106\,\text{m}$). The model of the time applied the $6.5^\circ\text{C}/\text{km}$ lapse rate all the way up, giving $-81.2^\circ\text{C}$ and tripping the $-80^\circ\text{C}$ bound:
 ```text
 ⚠️ BOUND_EXCEEDED: ambient_temp_c >= -80 (-81.2°C violates bound -80°C)
 ```
-Rather than masking the anomaly, Aven preserved the raw flight state vector in the ledger and surfaced the physical hazard in the audit trail.
+The violation was real behaviour of the solver (it refused to settle a state outside the declared bounds), but the cause was the model, not the atmosphere: above 11 km the standard atmosphere is isothermal at about $-56.5^\circ\text{C}$. The model now caps the lapse at the tropopause, and `verify/live_atmosphere.py` confirms it against an independent ISA computation.

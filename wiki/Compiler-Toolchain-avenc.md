@@ -29,7 +29,7 @@ Parses, type-checks, evaluates external/IPC backends, and solves all relational 
 avenc run evaluations/flight_mesh/flight_mesh_ipc.aven
 ```
 
-Sample output:
+Sample output (needs `evaluations/flight_mesh/flight_mesh_daemon.py` running and live feeds):
 ```text
 Connecting to persistent IPC evaluator at '127.0.0.1:9090' for relation 'FlightAtmosphericDynamics'...
   [ipc] FlightAtmosphericDynamics settled in 2950.5 µs (backend: ipc_UAL605_KORD_MissBasin)
@@ -49,34 +49,36 @@ Fact Ledger: 25 facts settled.
 ```
 
 Options:
-- `--json`: print `{"status", "optimality", "env"}` with full-precision values instead of the table.
+- `--json`: print `{"status", "optimality", "env", "units"}` with full-precision base-unit values instead of the table.
 - `--ledger out.jsonl`: write the hash-chained audit log (signed when `AVEN_LEDGER_KEY` is set).
 - `--allow-stale`: settle even when an input's TTL has expired (non-production use).
 
 ### 2.2 `avenc check <file.aven>`
 Performs static analysis without solving:
-- Validates syntax, token spans, and equation structure.
-- Verifies that external adapters declare valid sibling schemas (`*.schema.json`).
-- Checks equation solvability and warns on unbound cycles.
+- Validates syntax and equation structure.
+- Infers and checks the dimension of every variable, printing each one.
+- Reports under-determined relations (free variables and the bindings that would fix them).
+
+Adapter output is validated against a sibling `*.schema.json` when the adapter runs (`avenc run`), not by `check`.
 
 ```bash
 avenc check examples/server_capacity.aven
 ```
 
 ### 2.3 `avenc emit-c <file.aven>`
-Transpiles direction-pinned relations and forward blocks into lean, branchless, zero-overhead ANSI C code:
+Transpiles direction-pinned relations and forward blocks into branchless, solver-free C99:
 
 ```bash
 avenc emit-c examples/server_capacity.aven > server_capacity.c
 ```
 
 Emitted C code includes:
-- Topological forward dependency evaluation.
-- Inclusion of `<math.h>` for `sqrt`, `ceil`, `floor`, `pow`.
-- Zero runtime solver overhead (suitable for bare-metal microcontrollers and automotive ECUs).
+- Topological forward dependency evaluation of the model's first `forward` block.
+- `<math.h>` for `sqrt`, `ceil`, `floor`, `pow` and friends, and a demo `main` (omit with `--no-main`).
+- No runtime solver: straight-line code suited to microcontrollers and fixed-rate control loops. Values are in base units.
 
-### 2.4 `avenc pareto <file.aven> [var] [min] [max]`
-Explores multi-objective trade-off frontiers across competing objectives:
+### 2.4 `avenc pareto <file.aven> <var> <min> <max>`
+Sweeps `<var>` from `<min>` to `<max>` (in its declared unit), tabulates every output at each step, and marks the knee point of the trade-off between the two most strongly conflicting outputs:
 
 ```bash
 avenc pareto examples/server_capacity.aven reqs_per_second 100 50000
@@ -88,7 +90,7 @@ Flags:
 - `--cmd <command>`: Specifies command for external Pareto sweeps.
 
 ### 2.5 `avenc bench <file.aven>`
-Runs microsecond-precision benchmarks across relation solving, parsing, and IPC evaluations:
+Times parsing and solving (including external/IPC round trips) over many iterations and prints min, median and p95. `--latency-profile` and `--target-hz` measure single-tick latency and jitter; `--json` / `--markdown` change the format:
 
 ```bash
 avenc bench evaluations/flight_mesh/flight_mesh_ipc.aven
@@ -101,14 +103,14 @@ Recomputes an audit log's hash chain, seal and (with `AVEN_LEDGER_KEY`) signatur
 
 ## 3. Environment Variables
 
-| Variable | Description | Default |
-| :--- | :--- | :--- |
-| `AVEN_WORKSPACE` | Canonical root directory for resolving sibling schemas and scripts. | Current working directory |
-| `AVEN_SNAPSHOT_FILE` | Path to pre-warmed telemetry snapshot JSON for zero-lock solves. | Unset |
-| `AVEN_FLIGHT_INDEX` | Target aircraft index when querying multi-stream flight meshes. | `0` |
-| `AVEN_FLIGHT_CALLSIGN` | Target flight callsign filter (e.g. `UAL605`). | Unset |
-| `AVEN_LEDGER_KEY` | Key for HMAC-SHA256 signing of ledgers and for `verify-ledger` signature checks. | Unset (unsigned) |
-| `AVENC_BIN` | Explicit path to compiled `avenc` binary for testing harnesses. | Auto-discovered |
+| Variable | Read by | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `AVEN_LEDGER_KEY` | `avenc` | Key for HMAC-SHA256 signing of ledgers and for `verify-ledger` signature checks. | Unset (unsigned) |
+| `AVEN_WORKSPACE` | `avenc`, harnesses | Root directory for resolving adapter scripts and sibling schemas. | Current working directory |
+| `AVEN_FLIGHT_INDEX` | `avenc`, flight-mesh adapter | Aircraft index to query in the flight-mesh benchmark. | `0` |
+| `AVEN_FLIGHT_CALLSIGN` | `avenc`, flight-mesh adapter | Callsign filter for the flight-mesh benchmark (e.g. `UAL605`). | Unset |
+| `AVEN_SNAPSHOT_FILE` | flight-mesh harnesses | Pre-warmed telemetry snapshot JSON. | Unset |
+| `AVENC_BIN` | Python harnesses | Path to the `avenc` binary under test. | Auto-discovered |
 
 ---
 
