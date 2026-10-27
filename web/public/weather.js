@@ -170,23 +170,69 @@ function check(label, value, verdict) {
 }
 
 /** "Will it rain here?": one row per forecaster, one column per lead, then the radar's answer */
-function forecastTable(run) {
+/** Every forecaster's prediction and the radar outcome for one lead time of a run */
+function leadData(run, lead) {
   const i = run.inputs ?? {};
   const rec = run.record ?? {};
-  const byLead = (lead) => {
-    const rows = (run.forecasts ?? []).filter((x) => x.lead_min === lead);
-    const f = { predicted: {}, nws_pop_pct: rows[0]?.nws_pop_pct ?? null, observed: rows[0]?.observed_dbz ?? null,
-                radar_ms: rows[0]?.radar_ms ?? null, valid_ms: rows[0]?.valid_ms ?? null };
-    for (const r of rows) f.predicted[r.method] = r.predicted_dbz;
-    if (!rows.length) {
-      // No forecast rows (a run stopped by a data check): show what the model computed
-      f.predicted = { steering: i[`upstream_dbz_${lead}`], cell_motion: i[`cell_upstream_dbz_${lead}`], persistence: i.radar_dbz };
-      const t = (rec.radar?.site_ms ?? run.created_ms) + lead * 60000;
-      f.nws_pop_pct = (rec.hourly ?? []).find((p) => p.start_ms <= t && t < p.start_ms + 3600000)?.pop_pct ?? null;
+  const rows = (run.forecasts ?? []).filter((x) => x.lead_min === lead);
+  const f = { predicted: {}, nws_pop_pct: rows[0]?.nws_pop_pct ?? null, observed: rows[0]?.observed_dbz ?? null,
+              radar_ms: rows[0]?.radar_ms ?? null, valid_ms: rows[0]?.valid_ms ?? null };
+  for (const r of rows) f.predicted[r.method] = r.predicted_dbz;
+  if (!rows.length) {
+    // No forecast rows (a run stopped by a data check): show what the model computed
+    f.predicted = { steering: i[`upstream_dbz_${lead}`], cell_motion: i[`cell_upstream_dbz_${lead}`], persistence: i.radar_dbz };
+    const t = (rec.radar?.site_ms ?? run.created_ms) + lead * 60000;
+    f.nws_pop_pct = (rec.hourly ?? []).find((p) => p.start_ms <= t && t < p.start_ms + 3600000)?.pop_pct ?? null;
+  }
+  return f;
+}
+
+/** One plain sentence per checked time: what the weather did and who called it */
+function summary(run) {
+  const i = run.inputs ?? {};
+  const rec = run.record ?? {};
+  const box = el("div", "wx-summary");
+  const wasRain = i.radar_dbz >= RAIN_DBZ;
+  const o = run.outputs ?? {};
+  const now = el("p", "wx-sum-now", `At ${utc(rec.radar?.site_ms ?? run.created_ms)} UTC it was ${wasRain ? "raining" : "dry"} here ` +
+    (wasRain ? `(${fmt(i.radar_dbz, 0)} dBZ, about ${fmt(o.radar_rain_mmh, 1)} mm/h).` : `(${fmt(i.radar_dbz, 0)} dBZ).`));
+  if (rec.alerts?.length) now.append(el("span", "wx-alert", ` ⚠ ${rec.alerts.map((a) => a.event).join(", ")}`));
+  box.append(now);
+  let next = null;
+  for (const lead of LEADS) {
+    const f = leadData(run, lead);
+    if (f.observed === null || f.observed === undefined) {
+      next ??= f.valid_ms;
+      continue;
     }
-    return f;
-  };
-  const leads = LEADS.map(byLead);
+    const isRain = f.observed >= RAIN_DBZ;
+    const what = wasRain ? (isRain ? "it was still raining" : "the rain had stopped") : (isRain ? "rain had arrived" : "it was still dry");
+    const right = [], wrong = [];
+    for (const fc of FORECASTERS) {
+      const c = call(fc.key, f);
+      if (c.rain === null) continue;
+      (c.rain === isRain ? right : wrong).push(fc.name);
+    }
+    const line = el("p", "wx-sum-line");
+    line.append(el("b", "", `${lead} min later (${utc(f.radar_ms ?? f.valid_ms)}): ${what}. `));
+    const verdict = (ok, names) => {
+      const v = el("span", "wx-verdict");
+      const label = el("span", "wx-nowrap");
+      label.append(el("span", ok ? "wx-mark ok" : "wx-mark bad", ok ? "✓ " : "✗ "), `${ok ? "Right" : "Wrong"}:`);
+      v.append(label, el("span", "", ` ${names.join(", ")}. `));
+      return v;
+    };
+    if (right.length) line.append(verdict(true, right));
+    if (wrong.length) line.append(verdict(false, wrong));
+    box.append(line);
+  }
+  if (next) box.append(el("p", "wx-dim wx-sum-next", `Next check at ${utc(next)} UTC.`));
+  return box;
+}
+
+function forecastTable(run) {
+  const i = run.inputs ?? {};
+  const leads = LEADS.map((lead) => leadData(run, lead));
 
   const table = el("table", "wx-q");
   const thead = el("thead");
@@ -232,12 +278,7 @@ function runCard(run) {
   }
   if (run.status === "gated") card.append(el("p", "wx-error", `${run.error ?? ""}. These forecasts are shown but not scored.`));
 
-  const now = el("p", "wx-now");
-  const raining = i.radar_dbz >= RAIN_DBZ;
-  now.append(el("span", "", `Radar at ${utc(rec.radar?.site_ms ?? run.created_ms)} UTC: `),
-    el("b", raining ? "wx-rain" : "wx-dry", raining ? `raining (${fmt(i.radar_dbz, 0)} dBZ, about ${fmt(o.radar_rain_mmh, 1)} mm/h)` : `dry (${fmt(i.radar_dbz, 0)} dBZ)`));
-  if (rec.alerts?.length) now.append(el("span", "wx-alert", ` · ⚠ ${rec.alerts.map((a) => a.event).join(", ")}`));
-  card.append(now);
+  card.append(summary(run));
   card.append(forecastTable(run));
 
   // Everything behind the forecast, collapsed

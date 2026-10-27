@@ -1359,3 +1359,11 @@ ul.wx-sources li { display: flex; gap: 0.5rem; align-items: center; flex-wrap: w
   .wx-q th, .wx-q td { padding: 0.45rem 0.35rem; }
   .wx-q .wx-fname { white-space: normal; }
 }
+.wx-summary { border-left: 3px solid var(--accent); padding: 0.4rem 0 0.4rem 0.8rem; display: flex; flex-direction: column; gap: 0.3rem; }
+.wx-summary p { margin: 0; font-size: 0.92rem; color: var(--text); }
+.wx-summary .wx-sum-line span { color: var(--text-muted); }
+.wx-summary .wx-mark { width: auto; margin-left: 0.15rem; }
+.wx-sum-next { font-size: 0.85rem !important; }
+.wx-summary .wx-verdict { display: block; font-weight: 400; }
+.wx-summary .wx-verdict .wx-mark { margin: 0; }
+.wx-nowrap { white-space: nowrap; }
