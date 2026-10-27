@@ -12,7 +12,7 @@ const LEADS = [15, 30, 60];
 const FORECASTERS = [
   { key: "cell_motion", name: "Aven · storm motion", cls: "aven" },
   { key: "steering", name: "Aven · winds aloft", cls: "aven" },
-  { key: "persistence", name: "No change", cls: "base" },
+  { key: "persistence", name: "Baseline: same as now", cls: "base" },
   { key: "nws", name: "NWS forecast", cls: "nws" },
 ];
 const SOURCE_NAMES = {

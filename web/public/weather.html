@@ -55,8 +55,8 @@
         <p>The same model, but moving the rain with the winds 9,000 to 18,000 ft up, from NOAA's winds-aloft forecast.</p>
       </div>
       <div class="wx-who base">
-        <h3>No change</h3>
-        <p>Assumes whatever is falling now keeps falling. The standard baseline: a forecast is only useful if it beats this.</p>
+        <h3>Baseline: same as now</h3>
+        <p>Predicts that whatever the radar shows now stays exactly as it is. The standard yardstick: a forecast is only useful if it beats this.</p>
       </div>
       <div class="wx-who nws">
         <h3>NWS forecast</h3>
@@ -90,7 +90,7 @@
             <tbody id="wx-score-detail"></tbody>
           </table>
         </div>
-        <p class="wx-note">Echo error is the mean absolute difference between the predicted and observed radar echo, for the forecasters that predict one. The Brier score measures a probability forecast (0 is perfect; always saying 50% scores 0.25); for Aven and no change it is the share of wrong calls, since they say rain or no rain outright.</p>
+        <p class="wx-note">Echo error is the mean absolute difference between the predicted and observed radar echo, for the forecasters that predict one. The Brier score measures a probability forecast (0 is perfect; always saying 50% scores 0.25); for Aven and the baseline it is the share of wrong calls, since they say rain or no rain outright.</p>
       </details>
     </section>
 
@@ -107,7 +107,7 @@
       <p class="wx-note">Each row is one place and time: every forecaster's call and what the radar showed (the image nearest that time, within 3 minutes).</p>
       <div class="table-wrap">
         <table class="wx-ver">
-          <thead><tr><th>Time (UTC)</th><th>Place</th><th class="num">Ahead</th><th>Aven · storm motion</th><th>Aven · winds aloft</th><th>No change</th><th>NWS</th><th>Radar showed</th></tr></thead>
+          <thead><tr><th>Time (UTC)</th><th>Place</th><th class="num">Ahead</th><th>Aven · storm motion</th><th>Aven · winds aloft</th><th>Baseline: same as now</th><th>NWS</th><th>Radar showed</th></tr></thead>
           <tbody id="wx-ver"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
         </table>
       </div>
