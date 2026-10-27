@@ -2,7 +2,7 @@
 
 Thank you for contributing to **Aven**!
 
-Aven replaces fragile imperative code with verified mathematical invariants and cryptographic audit trails. Because Aven is used in safety-critical, high-reliability engineering domains (aerospace, industrial robotics, quantitative finance), contributions are held to rigorous standards.
+Aven replaces fragile imperative code with verified mathematical invariants and cryptographic audit trails. Because Aven has the possibility to be used in safety-critical, high-reliability engineering domains (aerospace, industrial robotics, quantitative finance), contributions are held to rigorous standards.
 
 ---
 
