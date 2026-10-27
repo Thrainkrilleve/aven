@@ -249,7 +249,7 @@ aven/
 │   └── main.rs                             # CLI entry point
 ├── tests/                                  # Integration tests, incl. claims.rs (documented claims)
 ├── examples/                               # Example models (aerodynamics, server capacity, ...)
-├── evaluations/                            # Live-data harnesses, logs and reports
+├── evaluations/                            # Live-data harnesses and test logs
 ├── verify/                                 # Checks against independent references
 ├── benchmarks/                             # Performance benchmarks & RHEL harnesses
 ├── web/                                    # avenc.dev site and live solver demo (WASM)
