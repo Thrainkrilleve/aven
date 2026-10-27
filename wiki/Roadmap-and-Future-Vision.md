@@ -35,9 +35,15 @@ From its inception as an experimental relational solver to a production-grade mu
 - [x] **C / Rust Native FFI Plugins (`using native(...)`):** Dynamic library loading (`.so` / `.dll`) for zero-copy in-process evaluation ($5.5\,\mu\text{s}$ measured).
 - [x] **Bidirectional IPC Daemon Control:** Real-time actuation commands streamed from Aven directly to physical actuators (valves, flaps, throttling governors).
 
-### Phase 5: Formal Verification & SMT Export
-- [ ] **SMT-LIB2 Export:** Transpile Aven invariant specifications to Z3 / CVC5 for formal mathematical verification before deployment.
-- [ ] **Safety Case Generation:** Automated compliance documentation for FAA DO-178C and ISO 26262 functional safety audits.
+### Phase 5: Formal Verification, SMT Export & Safety Cases (Completed)
+- [x] **SMT-LIB2 Export & Prover:** Transpile Aven invariant specifications to SMT-LIB2 v2.6 for Z3 / CVC5 theorem proving with refutation-based invariant verification (`avenc emit-smt`, `avenc verify-smt`).
+- [x] **Safety Case Generation:** Automated compliance documentation for FAA DO-178C (Table A-5 / DO-333) and ISO 26262 ASIL-D functional safety audits (`avenc safety-case`).
+- [x] **High-Resolution RT Timing & Jitter Profiler:** Real-time single-tick WCET latency quantiles (min/p50/p90/p95/p99/p99.9/max) and cycle jitter reporting (`avenc bench --latency-profile`).
+
+### Phase 6: Temporal Rigor, Ledger Compaction & Interactive Debugger
+- [ ] **Signal Calculus Formalization:** Retention windows, staleness decay, and cross-signal temporal alignment.
+- [ ] **Ledger Storage Compaction:** Bounded memory via segmented audit logs and settled subgraph snapshots.
+- [ ] **Interactive Debugger UI (`avenc debug`):** Timeline scrubbing, causal provenance DAG rendering, and rewind inspection.
 
 ---
 
