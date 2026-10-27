@@ -19,6 +19,7 @@ mod optimize;
 mod parser;
 mod solver;
 mod units;
+mod smt;
 
 use ast::*;
 use codegen_c::CTranspiler;
@@ -64,6 +65,10 @@ fn print_usage() {
     );
     println!("  avenc build <file.aven> [--emit-c] [-o out.c] [--traceable] [--checked-c] [--no-main] [--aeric-shim] [--out-dir <dir>]");
     println!("                                        Transpile pinned relations to standalone C or AERIC deployment bundle");
+    println!("  avenc emit-smt <file.aven> [-o out.smt2] [--prove] [--logic <LOGIC>]");
+    println!("                                        Transpile relation/forward blocks to SMT-LIB2 format for Z3/CVC5");
+    println!("  avenc verify-smt <file.aven> [--prove] [--solver <CMD>]");
+    println!("                                        Formally verify safety invariants or check satisfiability via SMT");
     println!(
         "  avenc check <file.aven>               Validate syntax, relations, and unit declarations"
     );
@@ -123,6 +128,68 @@ fn real_main() {
             let out_file = args.windows(2).find(|w| w[0] == "-o").map(|w| w[1].as_str());
             let out_dir = args.windows(2).find(|w| w[0] == "--out-dir").map(|w| w[1].as_str());
             cmd_build(file, true, out_file, out_dir, &options);
+        }
+        "emit-smt" => {
+            let file_arg = args.iter().skip(2).find(|a| !a.starts_with('-'));
+            let Some(file) = file_arg else {
+                eprintln!("Error: missing file argument for 'emit-smt': avenc emit-smt <file.aven> [-o out.smt2] [--prove]");
+                process::exit(1);
+            };
+            let prove = args.iter().any(|a| a == "--prove");
+            let logic = args
+                .windows(2)
+                .find(|w| w[0] == "--logic")
+                .map(|w| w[1].clone());
+            let prove_inv = args
+                .windows(2)
+                .find(|w| w[0] == "--prove-invariant" || w[0] == "--invariant")
+                .map(|w| w[1].clone());
+            let out_file = args
+                .windows(2)
+                .find(|w| w[0] == "-o")
+                .map(|w| w[1].as_str());
+            let options = smt::SmtOptions {
+                mode: if prove {
+                    smt::SmtMode::Prove
+                } else {
+                    smt::SmtMode::Satisfy
+                },
+                logic,
+                prove_invariant: prove_inv,
+                block_name: None,
+            };
+            cmd_emit_smt(file, out_file, &options);
+        }
+        "verify-smt" => {
+            let file_arg = args.iter().skip(2).find(|a| !a.starts_with('-'));
+            let Some(file) = file_arg else {
+                eprintln!("Error: missing file argument for 'verify-smt': avenc verify-smt <file.aven> [--prove] [--solver <CMD>]");
+                process::exit(1);
+            };
+            let prove = args.iter().any(|a| a == "--prove");
+            let solver = args
+                .windows(2)
+                .find(|w| w[0] == "--solver")
+                .map(|w| w[1].as_str());
+            let logic = args
+                .windows(2)
+                .find(|w| w[0] == "--logic")
+                .map(|w| w[1].clone());
+            let prove_inv = args
+                .windows(2)
+                .find(|w| w[0] == "--prove-invariant" || w[0] == "--invariant")
+                .map(|w| w[1].clone());
+            let options = smt::SmtOptions {
+                mode: if prove {
+                    smt::SmtMode::Prove
+                } else {
+                    smt::SmtMode::Satisfy
+                },
+                logic,
+                prove_invariant: prove_inv,
+                block_name: None,
+            };
+            cmd_verify_smt(file, solver, &options);
         }
         "bench" => {
             let file_arg = args.iter().skip(2).find(|a| !a.starts_with('-'));
@@ -803,6 +870,88 @@ fn cmd_build(
             );
         }
         println!("Use --emit-c to view the emitted C code or -o <out.c> to save.");
+    }
+}
+
+fn cmd_emit_smt(path: &str, out_file: Option<&str>, options: &smt::SmtOptions) {
+    let module = parse_file(path);
+    let smt_text = match smt::SmtTranspiler::transpile_module(&module, options) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("{}", e);
+            process::exit(1);
+        }
+    };
+
+    if let Some(out_path) = out_file {
+        if let Err(e) = fs::write(out_path, &smt_text) {
+            eprintln!("Error writing output SMT-LIB2 file '{}': {}", out_path, e);
+            process::exit(1);
+        }
+        println!("Successfully emitted SMT-LIB2 to '{}'", out_path);
+    } else {
+        println!("{}", smt_text);
+    }
+}
+
+fn cmd_verify_smt(path: &str, solver_cmd: Option<&str>, options: &smt::SmtOptions) {
+    let module = parse_file(path);
+    let smt_text = match smt::SmtTranspiler::transpile_module(&module, options) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("{}", e);
+            process::exit(1);
+        }
+    };
+
+    println!("============================================================");
+    println!(" Aven SMT Formal Verification Engine (Phase 5)");
+    println!(" Model: '{}' | Mode: {:?}", path, options.mode);
+    println!("============================================================");
+
+    let res = match smt::SmtTranspiler::run_solver(&smt_text, solver_cmd) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Verification Solver Error: {}", e);
+            process::exit(1);
+        }
+    };
+
+    println!("Solver: {}", res.solver_used);
+    match (options.mode, res.status) {
+        (smt::SmtMode::Prove, smt::SmtStatus::Unsat) => {
+            println!("\n✓ FORMALLY PROVEN (UNSAT)");
+            println!("  Safety invariant holds unconditionally across the entire parameter envelope.");
+        }
+        (smt::SmtMode::Prove, smt::SmtStatus::Sat) => {
+            println!("\n✗ INVARIANT VIOLATED (SAT)");
+            println!("  Counterexample found! The safety invariant can be broken under the following state:");
+            let mut keys: Vec<&String> = res.model.keys().collect();
+            keys.sort();
+            for k in keys {
+                println!("    {} = {}", k, res.model[k]);
+            }
+            process::exit(EXIT_CONSTRAINT_VIOLATION);
+        }
+        (smt::SmtMode::Satisfy, smt::SmtStatus::Sat) => {
+            println!("\n✓ SATISFIED (SAT)");
+            println!("  Feasible physical state solved:");
+            let mut keys: Vec<&String> = res.model.keys().collect();
+            keys.sort();
+            for k in keys {
+                println!("    {} = {}", k, res.model[k]);
+            }
+        }
+        (smt::SmtMode::Satisfy, smt::SmtStatus::Unsat) => {
+            println!("\n✗ INFEASIBLE (UNSAT)");
+            println!("  No physical state exists that satisfies all declared equations and constraints.");
+            process::exit(EXIT_CONSTRAINT_VIOLATION);
+        }
+        (_, smt::SmtStatus::Unknown(msg)) => {
+            println!("\n? UNDECIDED (UNKNOWN)");
+            println!("  Solver returned: {}", msg);
+            process::exit(1);
+        }
     }
 }
 

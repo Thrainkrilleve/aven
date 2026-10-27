@@ -20,3 +20,4 @@ pub mod optimize;
 pub mod parser;
 pub mod solver;
 pub mod units;
+pub mod smt;
