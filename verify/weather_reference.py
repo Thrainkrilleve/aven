@@ -10,7 +10,8 @@ For random but realistic atmospheric states, solves the shipped WeatherCell rela
                    which implements the same physics with the same constants
   kinematics       the plane fit Aven solves through three stations: against an exact NumPy
                    solve of the same 3x3 systems, plus divergence/vorticity/deformation
-  radar            Marshall-Palmer inverse (dBZ -> rain rate) against the closed form
+  radar            Marshall-Palmer inverse (dBZ -> rain rate) against the closed form, now and
+                   at each nowcast lead, with no rain below 10 dBZ (checked at exactly 10 and 0)
 
 Usage:  .venv/Scripts/python verify/weather_reference.py --cases 150 --seed 1
 """
@@ -52,6 +53,11 @@ def ambaum(t_c):
 EPS, RD = 0.6219569100577033, 287.04749097718457
 
 
+def marshall_palmer(dbz):
+    """Rain rate (mm/h) from Z = 200 R^1.6; 0 below 10 dBZ, where there is no measurable rain."""
+    return (10 ** (dbz / 10) / 200) ** (1 / 1.6) if dbz >= 10 else 0.0
+
+
 def check(name, got, want, rel, failures, case):
     err = abs(got - want) / max(abs(want), 1e-30)
     if err > rel:
@@ -80,6 +86,8 @@ def main():
         u0, v0 = rng.uniform(-15, 15), rng.uniform(-15, 15)
         winds = [(u0 + g["du_dx"] * x + g["du_dy"] * y, v0 + g["dv_dx"] * x + g["dv_dy"] * y) for x, y in pts]
         dbz = rng.uniform(5, 60)
+        if case < 2:
+            dbz = (10.0, 0.0)[case]  # the rain threshold itself, and no echo
         b = {
             "temp_c": t, "dewpoint_c": td, "rh_reported": rh_rep, "pressure_hpa": p,
             "wind_u": winds[0][0], "wind_v": winds[0][1], "aloft_u": rng.uniform(-30, 30),
@@ -113,7 +121,8 @@ def main():
             "e_sat_hpa": e_s, "vapor_pressure_hpa": e, "relative_humidity": 100 * e / e_s,
             "specific_humidity": q, "virtual_temp_k": tv,
             "air_density_kg_m3": 100 * p / (RD * tv),
-            "radar_rain_mmh": (10 ** (dbz / 10) / 200) ** (1 / 1.6),
+            "radar_rain_mmh": marshall_palmer(dbz),
+            **{f"nowcast_rain_{l}_mmh": marshall_palmer(b[f"upstream_dbz_{l}"]) for l in (15, 30, 60)},
         }
         for k, want in exact.items():
             note(f"{k} (formula)", check(k, env[k], want, 1e-9, failures, case))
