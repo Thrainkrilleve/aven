@@ -97,7 +97,7 @@
             <tr><td>NEXRAD storm tracking (NWS Level III, via Iowa Environmental Mesonet)</td><td>Where storm cells are, their peak reflectivity and measured motion: picks the sites and gives the storm-motion nowcast</td></tr>
             <tr><td>NOAA nowCOAST radar mosaic</td><td>Base reflectivity at the site and upstream, in a named image; the archive of images scores each forecast</td></tr>
             <tr><td>NOAA Aviation Weather Center METAR</td><td>Temperature, dewpoint, wind and altimeter at every airport near the site</td></tr>
-            <tr><td>NWS observations (api.weather.gov)</td><td>The same station through the NWS pipeline: reported humidity and station pressure</td></tr>
+            <tr><td>NWS observations (api.weather.gov)</td><td>The same station report through the NWS pipeline: reported humidity and altimeter setting, checked against the METAR issued at the same time</td></tr>
             <tr><td>NOAA Aviation Weather Center winds aloft</td><td>Winds at 3,000 to 18,000 ft: vertical shear and the steering flow</td></tr>
             <tr><td>USGS rain gauges</td><td>Measured rain rate within 25 km, an independent check on the radar estimate (few sites have one)</td></tr>
             <tr><td>NWS alerts and hourly forecast</td><td>Active warnings and the official precipitation probability, shown for comparison</td></tr>
@@ -107,7 +107,7 @@
       <h3>What the checks do and don't show</h3>
       <ul>
         <li>The data-quality gate is the bounds in <code>weather-predict.aven</code>; a run that breaks one is stored but issues no forecast.</li>
-        <li>Humidity and pressure compare two processing pipelines for the same station's sensors, so they catch decoding and reduction errors, not a faulty sensor. Radar against a rain gauge, and steering wind against radar-tracked storm motion, compare independent measurements.</li>
+        <li>Humidity and pressure compare two processing pipelines for the same station report (the NWS observation and the METAR issued at the same time), so they catch decoding and reduction errors, not a faulty sensor. Radar against a rain gauge, and steering wind against radar-tracked storm motion, compare independent measurements.</li>
         <li>Scores are for single points in the base reflectivity mosaic. Storm-cell sites are chosen where echoes are strong, which favours forecasts of rain; the fixed airports are a control.</li>
         <li>Lagrangian persistence is a baseline nowcast, not a weather model: it moves today's echoes and cannot grow or decay them.</li>
       </ul>

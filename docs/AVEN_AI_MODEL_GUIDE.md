@@ -225,7 +225,7 @@ A live build of this is in `evaluations/possible/weather-predict.aven` (driven b
 against MetPy, NumPy and the published formulas, and checks the forward-block version that
 [avenc.dev/weather](https://avenc.dev/weather) runs as WebAssembly (`examples/weather_nowcast.aven`)
 against it: on 150 random states (seed 1) every output agrees to within 1e-9 relative (largest
-1.3e-10, the radar inverse that the relational model solves by Newton iteration). The simplified single-cell form below shows the
+1.4e-10, the radar inverse that the relational model solves by Newton iteration). The simplified single-cell form below shows the
 physics — note the distinction between divergence, shear and deformation. Its formulas are
 written for °C and hPa, so the inputs are plain numbers (see rule 7).
 

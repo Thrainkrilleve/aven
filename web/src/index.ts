@@ -1,12 +1,19 @@
 import { Env, PackageRecord, SharedModelRecord } from "./types";
-import { runCycle } from "./weather/cycle";
+import { runCycle, TASKS_BY_CRON } from "./weather/cycle";
 import { handleWeatherApi } from "./weather/api";
 
 export default {
-  // Cron trigger (wrangler.jsonc): one run of the live weather nowcast behind /weather
-  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+  // Cron triggers (wrangler.jsonc): one task of the live weather nowcast behind /weather
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    const task = TASKS_BY_CRON[controller.cron];
+    if (!task) {
+      console.error(`no weather task for cron "${controller.cron}"`);
+      return;
+    }
     ctx.waitUntil(
-      runCycle(env).then((r) => console.log(`weather cycle: ${r.runs} site(s), ${r.verified} verified, ${r.requests} requests`))
+      runCycle(env, task)
+        .then((r) => console.log(`weather (${controller.cron}): ${r.runs} site(s), ${r.verified} verified, ${r.requests} requests`))
+        .catch((e) => console.error(`weather (${controller.cron}) failed:`, e))
     );
   },
 

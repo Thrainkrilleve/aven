@@ -8,7 +8,7 @@ Website, in-browser WebAssembly playground, live weather nowcast, and D1-backed 
 
 - **Static site:** Plain HTML, CSS and ES modules in `public/`, served by the platform's static-assets layer. Assets are served *without* running the worker, so response headers for them live in `public/_headers`.
 - **Edge worker (TypeScript):** `src/index.ts` handles paths with no matching file (the `/api/v1/*` routes, `/p/:id` share redirects, the 404 page) and the scheduled job.
-- **Scheduled job:** every 5 minutes (`triggers.crons` in `wrangler.jsonc`) the worker runs one cycle of the live weather nowcast (`src/weather/`), described below.
+- **Scheduled job:** three cron triggers (`wrangler.jsonc`) run the live weather nowcast (`src/weather/`): a site at minutes 0 and 2 of every 5, and scoring at minute 4, so each invocation stays small. Described below.
 - **Database:** D1 (`env.DB`): the package index, legacy shared-model links, and the nowcast's runs, forecasts and cached source data.
 - **Models:** WebAssembly modules emitted by `avenc emit-wasm` from `forward` blocks in `examples/`. The playground runs them in the browser; the scheduled job runs the weather model in the worker. `scripts/build-models.mjs` regenerates them and checks every output against `avenc run`.
 
@@ -64,21 +64,22 @@ The script fails if any WASM output differs from `avenc run --json` on the examp
 
 ## Live weather nowcast (`/weather`)
 
-Each cycle (`src/weather/cycle.ts`):
+Each task (`src/weather/cycle.ts`) first writes a row to `weather_cycles` and completes it when done, so a task the platform stopped (CPU or time limit) shows on the page as started and never finished. A site task:
 
-1. Reads the NEXRAD storm cells being tracked (Iowa Environmental Mesonet) and the list of NOAA nowCOAST radar images.
-2. Picks up to two sites: the strongest cells in the contiguous U.S. not visited in the last 20 minutes, else fixed airports in rotation.
+1. Reads the list of NOAA nowCOAST radar images and the NEXRAD storm cells being tracked (Iowa Environmental Mesonet).
+2. Picks a site: the strongest cell in the contiguous U.S. not visited in the last 20 minutes, else a fixed airport in rotation.
 3. For each site, gathers METAR stations in a box around it (AWC), the primary station's NWS observation, winds aloft (AWC, cached an hour), radar reflectivity at the site and upstream along the steering wind and the storm motion (all from one named image), the nearest USGS rain gauge, NWS alerts and the NWS hourly forecast.
 4. Runs `models/weather.wasm` (`examples/weather_nowcast.aven`) and applies the data-quality gate (the bounds of `evaluations/possible/weather-predict.aven`).
 5. Stores the inputs, outputs and every request in `weather_runs`, and the forecasts (+15, +30, +60 min; steering wind, storm motion, persistence) in `weather_forecasts`.
-6. Scores due forecasts against the archived radar image nearest their valid time.
 
-Each cycle makes at most 45 outbound requests (Workers limit subrequests per invocation; the free plan allows 50) and typically about 25.
+The scoring task scores due forecasts against the archived radar image nearest their valid time. A site task makes about 15 outbound requests and a scoring task a few (at most 45; Workers limit subrequests per invocation, 50 on the free plan). Replayed from recorded responses in Node, a whole two-site cycle takes 11–24 ms of CPU; split in three, each task is a fraction of that. Workers on the free plan get 10 ms of CPU per invocation, so if `weather_cycles` shows tasks that never finish, the account needs the paid plan or the work split further.
+
+To see what the scheduled tasks are doing on Cloudflare: `npx wrangler tail avenc-web`, or the worker's **Logs** tab (observability is enabled in `wrangler.jsonc`).
 
 To run it outside Cloudflare (for instance where `wrangler dev` has no internet access):
 
 ```bash
-node scripts/weather-local.mjs cycle            # one cycle into weather-local.sqlite
+node scripts/weather-local.mjs cycle            # two sites and scoring into weather-local.sqlite
 node scripts/weather-local.mjs serve --every 5  # site + API on http://localhost:8790, a cycle every 5 min
 node scripts/weather-local.mjs api /api/v1/weather/skill
 ```
@@ -106,7 +107,7 @@ The worker is configured for the existing `avenc_db` D1 database (see `wrangler.
 
 ```bash
 npm run typecheck
-npm run db:migrate:prod   # applies pending migrations (0002–0005 as of this release)
+npm run db:migrate:prod   # applies pending migrations (0002–0006 as of this release)
 npm run deploy
 ```
 

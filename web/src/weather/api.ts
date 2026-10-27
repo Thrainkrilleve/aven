@@ -3,7 +3,7 @@
 import { WeatherEnv, RAIN_DBZ } from "./cycle";
 
 const json = (body: unknown, headers: Record<string, string>, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { ...headers, "Cache-Control": "public, max-age=60" } });
+  new Response(JSON.stringify(body), { status, headers: { ...headers, "Cache-Control": "public, max-age=30" } });
 
 const parseRun = (r: any) => ({
   id: r.id, created_ms: r.created_ms, site_kind: r.site_kind, site_label: r.site_label,
@@ -33,7 +33,13 @@ export async function handleWeatherApi(env: WeatherEnv, url: URL, headers: Recor
     const counts = await env.DB.prepare(
       "SELECT COUNT(*) AS runs, MIN(created_ms) AS first_ms, SUM(status = 'ok') AS ok, SUM(status = 'gated') AS gated, SUM(status = 'error') AS errors FROM weather_runs"
     ).first();
-    return json({ now_ms: Date.now(), totals: counts, runs: runs.map((r) => ({ ...r, forecasts: forecasts.filter((f) => f.run_id === r.id) })) }, headers);
+    const cycles = (await env.DB.prepare(
+      "SELECT started_ms, task, finished_ms, sites, verified, requests, error FROM weather_cycles ORDER BY started_ms DESC LIMIT 6"
+    ).all()).results;
+    return json({
+      now_ms: Date.now(), totals: counts, cycles,
+      runs: runs.map((r) => ({ ...r, forecasts: forecasts.filter((f) => f.run_id === r.id) })),
+    }, headers);
   }
 
   // GET /api/v1/weather/runs/:id — one run in full (for re-running the model in a browser)

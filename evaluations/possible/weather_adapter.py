@@ -7,8 +7,9 @@ object of observations. Every value comes from a U.S. government source; nothing
 estimated or filled in. If a source fails, the adapter reports an error instead.
 
   NWS api.weather.gov      latest observations of the nearest stations: temperature,
-                           dewpoint, reported RH, wind, station pressure
-  NOAA AWC (METAR)         altimeter setting when NWS has no station pressure
+                           dewpoint, reported RH, wind, altimeter setting (reduced
+                           to the station's elevation for station pressure)
+  NOAA AWC (METAR)         altimeter setting when NWS reports none
   NOAA AWC (FB winds)      winds aloft (vertical shear, storm steering flow)
   NOAA nowCOAST            CONUS base reflectivity mosaic (dBZ) at the site and upstream
   USGS NWIS                precipitation gauges near the site (independent rain rate)
@@ -92,7 +93,9 @@ def latest_obs(station):
         "temp_c": val("temperature"),
         "dewpoint_c": val("dewpoint"),
         "rh": val("relativeHumidity"),
-        "pressure_pa": val("barometricPressure"),
+        # NWS "barometricPressure" is the altimeter setting (it equals the METAR A-group to
+        # 0.1 hPa), i.e. reduced to sea level, not the pressure at the station
+        "altimeter_pa": val("barometricPressure"),
         "wind_kmh": val("windSpeed"),
         "wind_dir": val("windDirection"),
     })
@@ -278,12 +281,14 @@ def main():
         complete = [o for o in obs if None not in (o["temp_c"], o["dewpoint_c"], o["rh"]) and "u" in o]
         tri, pts = triangle(lat, lon, obs)
 
-        # Primary station: the nearest complete report with a pressure, from NWS or else METAR
+        # Primary station: the nearest complete report with an altimeter setting, from NWS or
+        # else METAR, reduced to station pressure
         primary = None
         for o in complete:
-            if o["pressure_pa"] is not None:
-                primary, pressure_hpa, elev = o, o["pressure_pa"] / 100.0, o["elev_m"] or 0.0
-                pressure_src = "nws_station_pressure"
+            if o["altimeter_pa"] is not None and o["elev_m"] is not None:
+                elev = o["elev_m"]
+                pressure_hpa = o["altimeter_pa"] / 100.0 * ((288.15 - 0.0065 * elev) / 288.15) ** 5.2561
+                primary, pressure_src = o, "nws_altimeter"
                 break
             res = metar_station_pressure(o)
             if res is not None:

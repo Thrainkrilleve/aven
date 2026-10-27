@@ -153,7 +153,8 @@ export interface NwsObservation {
   temp_c: number;
   dewpoint_c: number;
   rh: number;
-  pressure_hpa: number;
+  /** NWS "barometricPressure": the altimeter setting (sea-level reduced), not station pressure */
+  altimeter_hpa: number;
 }
 
 const num = (v: any): number => (typeof v === "number" && Number.isFinite(v) ? v : NaN);
@@ -167,7 +168,7 @@ export async function nwsLatest(c: Client, station: string): Promise<NwsObservat
     temp_c: val("temperature"),
     dewpoint_c: val("dewpoint"),
     rh: val("relativeHumidity"),
-    pressure_hpa: val("barometricPressure") / 100,
+    altimeter_hpa: val("barometricPressure") / 100,
   };
   c.stamp("nws_observation", obs.timestamp_ms, station);
   return obs;
@@ -223,8 +224,10 @@ export interface Metar {
   v: number;
 }
 
-export async function metarsNear(c: Client, lat: number, lon: number, half = 0.9): Promise<Metar[]> {
-  const url = `https://aviationweather.gov/api/data/metar?bbox=${(lat - half).toFixed(2)},${(lon - half).toFixed(2)},${(lat + half).toFixed(2)},${(lon + half).toFixed(2)}&format=json`;
+/** Every METAR in a box around the site over the last two hours: `latest` holds each
+ *  station's newest report (nearest station first), `history` all reports by station. */
+export async function metarsNear(c: Client, lat: number, lon: number, half = 0.9): Promise<{ latest: Metar[]; history: Record<string, Metar[]> }> {
+  const url = `https://aviationweather.gov/api/data/metar?bbox=${(lat - half).toFixed(2)},${(lon - half).toFixed(2)},${(lat + half).toFixed(2)},${(lon + half).toFixed(2)}&format=json&hours=2`;
   const rows = (await c.json<any[]>("metar", url)) ?? [];
   const out: Metar[] = [];
   for (const r of rows) {
@@ -238,9 +241,12 @@ export async function metarsNear(c: Client, lat: number, lon: number, half = 0.9
       temp_c: num(r.temp), dewpoint_c: num(r.dewp), altimeter_hpa: num(r.altim), u, v,
     });
   }
-  out.sort((a, b) => Math.hypot(...offsetM(lat, lon, a.lat, a.lon)) - Math.hypot(...offsetM(lat, lon, b.lat, b.lon)));
-  c.stamp("metar", Math.max(0, ...out.map((m) => m.obs_ms || 0)), `${out.length} stations`);
-  return out;
+  const history: Record<string, Metar[]> = {};
+  for (const m of out) (history[m.id] ??= []).push(m);
+  const latest = Object.values(history).map((h) => h.reduce((a, b) => (b.obs_ms > a.obs_ms ? b : a)));
+  latest.sort((a, b) => Math.hypot(...offsetM(lat, lon, a.lat, a.lon)) - Math.hypot(...offsetM(lat, lon, b.lat, b.lon)));
+  c.stamp("metar", Math.max(0, ...latest.map((m) => m.obs_ms || 0)), `${latest.length} stations, ${out.length} reports`);
+  return { latest, history };
 }
 
 /** Three wind-reporting stations whose triangle is well conditioned for a plane fit,

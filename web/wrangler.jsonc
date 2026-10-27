@@ -27,9 +27,10 @@
       "migrations_dir": "./migrations"
     }
   ],
-  // The live weather nowcast (/weather) runs every 5 minutes
+  // The live weather nowcast (/weather): a site at minutes 0 and 2 of every 5, scoring at
+  // minute 4 (see TASKS_BY_CRON in src/weather/cycle.ts)
   "triggers": {
-    "crons": ["*/5 * * * *"]
+    "crons": ["*/5 * * * *", "2-59/5 * * * *", "4-59/5 * * * *"]
   },
   "vars": {
     "AVEN_VERSION": "0.6.0",

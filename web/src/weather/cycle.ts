@@ -10,7 +10,7 @@ import manifest from "../../public/models/manifest.json";
 import { AVEN_HOST_IMPORTS } from "../../public/aven_math.js";
 import {
   Client, LEADS_MIN, StormCell, aloftAt, displace, fbTable, metarsNear, nwsAlerts, nwsHourly, nwsLatest,
-  nwsPoint, offsetM, radarDbz, radarTimes, nearestImage, stormCells, triangle, usgsRain, FbTable, PointInfo, HourlyForecast,
+  nwsPoint, offsetM, radarDbz, radarTimes, nearestImage, stormCells, triangle, usgsRain, FbTable, PointInfo, HourlyForecast, Metar,
 } from "./sources";
 
 export interface WeatherEnv {
@@ -43,8 +43,11 @@ export const GATE: [string, (o: Record<string, number>, i: Record<string, number
   ["rh_residual <= 5", (o) => !Number.isFinite(o.rh_residual) || o.rh_residual <= 5],
   ["dewpoint_depression_c >= -0.5", (o) => o.dewpoint_depression_c >= -0.5],
   ["-80 <= temp_c <= 60", (_o, i) => i.temp_c >= -80 && i.temp_c <= 60],
-  ["500 <= pressure_hpa <= 1090", (_o, i) => i.pressure_hpa >= 500 && i.pressure_hpa <= 1090],
+  ["500 <= pressure_hpa <= 1090", (o) => o.pressure_hpa >= 500 && o.pressure_hpa <= 1090],
 ];
+
+/** The site lacks the station coverage the model needs; the task tries the next candidate. */
+class SiteUnusable extends Error {}
 
 interface Site {
   kind: "storm_cell" | "anchor";
@@ -89,54 +92,88 @@ const finiteOrNull = (o: Record<string, number>) =>
 
 // ---------------------------------------------------------------------------
 
-export async function runCycle(env: WeatherEnv, now = Date.now()): Promise<{ runs: number; verified: number; requests: number }> {
+/** What one invocation does. The cron triggers split a cycle in three so each stays small
+ *  (Workers cap CPU time per invocation; 10 ms on the free plan): one storm-cell site at
+ *  minute 0 of every 5, another at minute 2, and scoring at minute 4. */
+export interface Task {
+  sites: number;
+  verify: boolean;
+}
+
+export const TASKS_BY_CRON: Record<string, Task> = {
+  "*/5 * * * *": { sites: 1, verify: false },
+  "2-59/5 * * * *": { sites: 1, verify: false },
+  "4-59/5 * * * *": { sites: 0, verify: true },
+};
+
+/** Runs one task and records it in weather_cycles: a row is written when the task starts and
+ *  completed when it ends, so a task the platform stopped (CPU or time limit) is visible as
+ *  started and never finished. */
+export async function runCycle(env: WeatherEnv, task: Task = { sites: SITES_PER_RUN, verify: true }, now = Date.now()) {
+  const label = [task.sites ? `${task.sites} site(s)` : "", task.verify ? "scoring" : ""].filter(Boolean).join(" + ");
+  const started = await env.DB.prepare("INSERT INTO weather_cycles (started_ms, task) VALUES (?, ?)").bind(now, label).run();
+  const cycleId = started.meta.last_row_id;
   const c = new Client(45);
-  let cells: StormCell[] = [];
+  let runs = 0, verified = 0;
   try {
-    cells = (await stormCells(c)).filter((x) => now - x.valid_ms < CELL_MAX_AGE_MS);
-  } catch (e) {
-    console.error("nexrad cells:", e);
-  }
-  const cellsRecord = c.records[0];
-  // Every radar read in this run, and every verification, names the image it reads
-  const times = await radarTimes(c);
-  const timesRecord = c.records[c.records.length - 1];
-  const sites = await chooseSites(env, cells, now);
-
-  let fb: FbTable;
-  let runs = 0;
-  for (const site of sites) {
-    if (c.remaining() < 14) break;
-    c.records = [cellsRecord, timesRecord].filter(Boolean);
-    try {
-      fb = await cached(env, c, "winds_aloft", "fb_winds", 60 * 60 * 1000, () => fbTable(c));
-      await forecastSite(env, c, site, cells, fb, times[times.length - 1], now);
-    } catch (e: any) {
-      await env.DB.prepare(
-        "INSERT INTO weather_runs (created_ms, site_kind, site_label, site_lat, site_lon, status, error, sources, model_sha256) VALUES (?, ?, ?, ?, ?, 'error', ?, ?, ?)"
-      ).bind(now, site.kind, site.label, site.lat, site.lon, String(e?.message ?? e), JSON.stringify(c.records), MODEL.sha256).run();
+    // Every radar read in this task, and every verification, names the image it reads
+    const times = await radarTimes(c);
+    const timesRecord = c.records[c.records.length - 1];
+    if (task.sites) {
+      let cells: StormCell[] = [];
+      try {
+        cells = (await stormCells(c)).filter((x) => now - x.valid_ms < CELL_MAX_AGE_MS);
+      } catch (e) {
+        console.error("nexrad cells:", e);
+      }
+      const cellsRecord = c.records[c.records.length - 1];
+      // Up to two spare candidates per site: a storm cell far from enough weather stations
+      // is recorded and skipped rather than costing the task its forecast
+      let done = 0;
+      for (const site of await chooseSites(env, cells, now, task.sites + 2)) {
+        if (done === task.sites || c.remaining() < 14) break;
+        c.records = [cellsRecord, timesRecord].filter(Boolean);
+        try {
+          const fb = await cached(env, c, "winds_aloft", "fb_winds", 60 * 60 * 1000, () => fbTable(c));
+          await forecastSite(env, c, site, cells, fb, times[times.length - 1], now);
+          done++;
+        } catch (e: any) {
+          if (!(e instanceof SiteUnusable)) done++;
+          await env.DB.prepare(
+            "INSERT INTO weather_runs (created_ms, site_kind, site_label, site_lat, site_lon, status, error, sources, model_sha256) VALUES (?, ?, ?, ?, ?, 'error', ?, ?, ?)"
+          ).bind(now, site.kind, site.label, site.lat, site.lon, String(e?.message ?? e), JSON.stringify(c.records), MODEL.sha256).run();
+        }
+        runs++;
+      }
     }
-    runs++;
+    if (task.verify) {
+      verified = await verifyDue(env, c, times);
+      // Keep full run records for 30 days and cycle records for 7; forecasts are kept
+      await env.DB.prepare("DELETE FROM weather_runs WHERE created_ms < ?").bind(now - 30 * 86400_000).run();
+      await env.DB.prepare("DELETE FROM weather_cycles WHERE started_ms < ?").bind(now - 7 * 86400_000).run();
+    }
+    await env.DB.prepare("UPDATE weather_cycles SET finished_ms = ?, sites = ?, verified = ?, requests = ? WHERE id = ?")
+      .bind(Date.now(), runs, verified, c.count, cycleId).run();
+  } catch (e: any) {
+    await env.DB.prepare("UPDATE weather_cycles SET finished_ms = ?, sites = ?, verified = ?, requests = ?, error = ? WHERE id = ?")
+      .bind(Date.now(), runs, verified, c.count, String(e?.message ?? e), cycleId).run();
+    throw e;
   }
-
-  const verified = await verifyDue(env, c, times);
-  // Keep full run records for 30 days; forecast/verification rows are kept
-  await env.DB.prepare("DELETE FROM weather_runs WHERE created_ms < ?").bind(now - 30 * 86400_000).run();
   return { runs, verified, requests: c.count };
 }
 
-async function chooseSites(env: WeatherEnv, cells: StormCell[], now: number): Promise<Site[]> {
+async function chooseSites(env: WeatherEnv, cells: StormCell[], now: number, wanted: number): Promise<Site[]> {
   const { results: recent } = await env.DB.prepare("SELECT site_lat AS lat, site_lon AS lon FROM weather_runs WHERE created_ms > ?")
     .bind(now - RECENT_SITE_MS).all<{ lat: number; lon: number }>();
   const chosen: Site[] = [];
   const clear = (p: { lat: number; lon: number }) => [...recent, ...chosen].every((q) => distM(p, q) > MIN_SITE_SPACING_M);
   for (const cell of [...cells].sort((a, b) => b.max_dbz - a.max_dbz)) {
-    if (chosen.length === SITES_PER_RUN) break;
+    if (chosen.length === wanted) break;
     if (cell.max_dbz < 30 || !inConus(cell.lat, cell.lon) || !clear(cell)) continue;
     chosen.push({ kind: "storm_cell", label: `${cell.radar} storm cell ${cell.id}`, lat: round4(cell.lat), lon: round4(cell.lon), cell });
   }
   let turn = Math.floor(now / (5 * 60 * 1000));
-  for (let tries = 0; chosen.length < SITES_PER_RUN && tries < ANCHORS.length; tries++, turn++) {
+  for (let tries = 0; chosen.length < wanted && tries < ANCHORS.length; tries++, turn++) {
     const [label, lat, lon] = ANCHORS[turn % ANCHORS.length];
     if (clear({ lat, lon })) chosen.push({ kind: "anchor", label, lat, lon });
   }
@@ -148,22 +185,34 @@ const round4 = (x: number) => Math.round(x * 1e4) / 1e4;
 async function forecastSite(env: WeatherEnv, c: Client, site: Site, cells: StormCell[], fb: FbTable, image_ms: number, now: number) {
   const { lat, lon } = site;
   const point = await cached<PointInfo>(env, c, "nws_point", `point:${lat.toFixed(2)},${lon.toFixed(2)}`, 30 * 86400_000, () => nwsPoint(c, lat, lon));
-  if (!point.observationStations) throw new Error("outside NWS land coverage (no observation stations)");
+  if (!point.observationStations) throw new SiteUnusable("outside NWS land coverage (no observation stations)");
 
   // Surface stations: every METAR in a box around the site; the primary is the nearest
   // current report with temperature, dewpoint, wind and altimeter
-  const metars = (await metarsNear(c, lat, lon)).filter((m) => now - m.obs_ms <= FRESH_MS);
+  const near = await metarsNear(c, lat, lon);
+  const metars = near.latest.filter((m) => now - m.obs_ms <= FRESH_MS);
   const primary = metars.find((m) => [m.temp_c, m.dewpoint_c, m.altimeter_hpa, m.u, m.elev_m].every(Number.isFinite));
-  if (!primary) throw new Error("no current METAR near the site reports temperature, dewpoint, wind and altimeter");
+  if (!primary) throw new SiteUnusable("no current METAR near the site reports temperature, dewpoint, wind and altimeter");
   const tri = triangle(lat, lon, metars);
-  if (!tri) throw new Error("no well-conditioned triangle of wind-reporting METAR stations near the site");
+  if (!tri) throw new SiteUnusable("no well-conditioned triangle of wind-reporting METAR stations near the site");
 
-  // The same station through the NWS observation pipeline: reported RH and station pressure
+  // The same station through the NWS observation pipeline: reported RH and station pressure.
+  // NWS publishes reports later than the METAR feed, so its latest observation is compared
+  // with the METAR issued at the same time (within 5 minutes), from the two hours fetched.
   let nws = null;
+  let checkMetar: Metar | null = null;
+  let nwsNote = "";
   try {
-    nws = await nwsLatest(c, primary.id);
-    if (now - nws.timestamp_ms > FRESH_MS) nws = null;
-  } catch {}
+    const obs = await nwsLatest(c, primary.id);
+    const same = (near.history[primary.id] ?? [])
+      .filter((m) => Math.abs(m.obs_ms - obs.timestamp_ms) <= 5 * 60 * 1000)
+      .sort((a, b) => Math.abs(a.obs_ms - obs.timestamp_ms) - Math.abs(b.obs_ms - obs.timestamp_ms))[0];
+    const hhmm = (ms: number) => new Date(ms).toISOString().slice(11, 16);
+    if (same) [nws, checkMetar] = [obs, same];
+    else nwsNote = `no METAR in the last two hours matches the NWS observation at ${hhmm(obs.timestamp_ms)} UTC`;
+  } catch {
+    nwsNote = "NWS observation unavailable";
+  }
 
   const aloft = aloftAt(fb, lat, lon, primary.elev_m);
   const cell = site.cell ?? cells.filter((x) => distM(x, site) < 75_000).sort((a, b) => distM(a, site) - distM(b, site))[0];
@@ -199,10 +248,10 @@ async function forecastSite(env: WeatherEnv, c: Client, site: Site, cells: Storm
     temp_c: primary.temp_c,
     dewpoint_c: primary.dewpoint_c,
     rh_reported: nws?.rh ?? NaN,
-    // Station pressure from NWS; without it, the METAR altimeter reduced to the station
-    // (set below), and the NWS-vs-METAR pressure check is unavailable
-    pressure_hpa: nws && Number.isFinite(nws.pressure_hpa) ? nws.pressure_hpa : NaN,
-    nws_pressure_hpa: nws?.pressure_hpa ?? NaN,
+    nws_altimeter_hpa: nws?.altimeter_hpa ?? NaN,
+    check_temp_c: checkMetar?.temp_c ?? NaN,
+    check_dewpoint_c: checkMetar?.dewpoint_c ?? NaN,
+    check_altimeter_hpa: checkMetar?.altimeter_hpa ?? NaN,
     metar_altimeter_hpa: primary.altimeter_hpa,
     station_elev_m: primary.elev_m,
     layer_depth_m: LAYER_DEPTH_M,
@@ -229,12 +278,6 @@ async function forecastSite(env: WeatherEnv, c: Client, site: Site, cells: Storm
     inputs[`upstream_dbz_${lead}`] = steerUp[lead].dbz;
     inputs[`cell_upstream_dbz_${lead}`] = cellUp?.[lead].dbz ?? NaN;
   }
-  const pressureFromNws = Number.isFinite(inputs.pressure_hpa);
-  if (!pressureFromNws) {
-    // Same reduction the model applies to metar_altimeter_hpa
-    inputs.pressure_hpa = primary.altimeter_hpa * ((288.15 - 0.0065 * primary.elev_m) / 288.15) ** 5.2561;
-  }
-
   const outputs = await runModel(inputs);
   const failed = GATE.filter(([, ok]) => !ok(outputs, inputs)).map(([name]) => name);
   const status = failed.length ? "gated" : "ok";
@@ -246,8 +289,8 @@ async function forecastSite(env: WeatherEnv, c: Client, site: Site, cells: Storm
       primary: primary.id,
       primary_obs_ms: primary.obs_ms,
       triangle: tri.tri.map((s) => ({ id: s.id, lat: s.lat, lon: s.lon, obs_ms: s.obs_ms })),
-      nws_observation: nws ? { station: nws.station, timestamp_ms: nws.timestamp_ms } : null,
-      pressure_from: pressureFromNws ? "nws_station_pressure" : "metar_altimeter",
+      nws_observation: nws ? { station: nws.station, timestamp_ms: nws.timestamp_ms, metar_ms: checkMetar!.obs_ms } : null,
+      nws_note: nwsNote || null,
       winds_aloft: { station: aloft.fb_station, issued: fb.issued, aloft_ft: aloft.aloft_ft, steer_levels_ft: aloft.steer_levels_ft },
     },
     cell: cell ? { radar: cell.radar, id: cell.id, lat: cell.lat, lon: cell.lon, max_dbz: cell.max_dbz, top_km: cell.top_km,

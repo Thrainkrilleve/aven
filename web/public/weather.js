@@ -143,11 +143,12 @@ function runCard(run) {
     const checks = el("div", "wx-checks");
     checks.append(el("div", "wx-label", "Cross-checks"));
     const rhOk = o.rh_residual == null ? "na" : o.rh_residual <= 5 ? "ok" : "bad";
-    checks.append(check("Humidity: NWS reported vs recomputed from METAR T/Td",
-      o.rh_residual == null ? "NWS reported none" : `${fmt(i.rh_reported)} % vs ${fmt(o.relative_humidity)} % (Δ ${fmt(o.rh_residual, 2)})`, rhOk));
-    const pOk = o.pressure_residual_hpa == null ? "na" : o.pressure_residual_hpa <= 2 ? "ok" : "warn";
-    checks.append(check("Station pressure: NWS vs METAR altimeter reduced",
-      o.pressure_residual_hpa == null ? "NWS reported none" : `${fmt(i.nws_pressure_hpa)} vs ${fmt(o.metar_station_pressure_hpa)} hPa (Δ ${fmt(o.pressure_residual_hpa, 2)})`, pOk));
+    const nwsAt = rec.stations?.nws_observation ? ` at ${utc(rec.stations.nws_observation.timestamp_ms)} UTC` : "";
+    checks.append(check(`Humidity: NWS reported vs recomputed from the METAR${nwsAt}`,
+      o.rh_residual == null ? (rec.stations?.nws_note ?? "NWS reported none") : `${fmt(i.rh_reported)} % vs ${fmt(o.check_relative_humidity)} % (Δ ${fmt(o.rh_residual, 2)})`, rhOk));
+    const pOk = o.altimeter_residual_hpa == null ? "na" : o.altimeter_residual_hpa <= 0.5 ? "ok" : "warn";
+    checks.append(check(`Altimeter setting: NWS vs METAR${nwsAt}`,
+      o.altimeter_residual_hpa == null ? (rec.stations?.nws_note ?? "NWS reported none") : `${fmt(i.nws_altimeter_hpa)} vs ${fmt(i.check_altimeter_hpa)} hPa (Δ ${fmt(o.altimeter_residual_hpa, 2)})`, pOk));
     checks.append(check("Rain: radar estimate vs USGS gauge",
       i.gauge_available ? `${fmt(o.radar_rain_mmh, 2)} vs ${fmt(i.gauge_rate_mmh, 2)} mm/h` : "no gauge within 25 km",
       i.gauge_available ? (Math.abs(o.radar_minus_gauge_mmh) <= 5 ? "ok" : "warn") : "na"));
@@ -264,9 +265,24 @@ async function loadRuns() {
     const data = await getJSON("/api/v1/weather/latest?limit=8");
     const t = data.totals ?? {};
     const last = data.runs[0];
-    $("wx-status").textContent = last
-      ? `Last run ${ago(last.created_ms)} · ${t.runs} runs since ${new Date(t.first_ms).toUTCString().slice(5, 22)} UTC: ${t.ok} issued forecasts, ${t.gated} gated, ${t.errors} without enough data`
-      : "No runs yet. The first runs within five minutes of deployment.";
+    const status = $("wx-status");
+    status.replaceChildren(el("div", "", last
+      ? `Last site run ${ago(last.created_ms)} · ${t.runs} runs since ${new Date(t.first_ms).toUTCString().slice(5, 22)} UTC: ${t.ok} issued forecasts, ${t.gated} gated, ${t.errors} without enough data`
+      : "No site runs yet. The scheduled job runs a site every few minutes once deployed."));
+    // The scheduled tasks themselves: a task with no finish time was stopped by the platform
+    const cycles = data.cycles ?? [];
+    const c = cycles[0];
+    if (c) {
+      const stuck = cycles.filter((x) => !x.finished_ms && Date.now() - x.started_ms > 2 * 60 * 1000).length;
+      let line = `Last scheduled task (${c.task}) started ${ago(c.started_ms)}: `;
+      if (!c.finished_ms) line += Date.now() - c.started_ms > 2 * 60 * 1000 ? "never finished" : "running";
+      else line += c.error ? `failed: ${c.error}` : `finished, ${c.requests} requests`;
+      status.append(el("div", c.error || stuck ? "wx-off" : "", line));
+      if (stuck) status.append(el("div", "wx-off", `${stuck} of the last ${cycles.length} tasks started but never finished: the platform stopped them, usually at its CPU-time limit.`));
+    } else {
+      status.append(el("div", "wx-off", "No scheduled task has run yet. If this persists more than five minutes after deploying, check the worker's cron triggers and logs."));
+    }
+    status.append(el("div", "wx-dim", `Page updated ${new Date().toISOString().slice(11, 19)} UTC; refreshes every minute.`));
     $("wx-live-dot").classList.toggle("stale", !last || Date.now() - last.created_ms > 15 * 60 * 1000);
     box.replaceChildren(...(data.runs.length ? data.runs.map(runCard) : [el("div", "empty", "No runs yet.")]));
   } catch (e) {
@@ -312,4 +328,10 @@ document.querySelectorAll(".wx-seg button").forEach((b) =>
 );
 $("wx-refresh").addEventListener("click", loadAll);
 loadAll();
-setInterval(loadAll, 5 * 60 * 1000);
+// The job writes every few minutes; poll each minute while the page is visible
+setInterval(() => {
+  if (document.visibilityState === "visible") loadAll();
+}, 60 * 1000);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") loadAll();
+});

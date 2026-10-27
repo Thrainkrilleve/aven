@@ -126,10 +126,16 @@ def main():
             continue
 
         # The forward block (what avenc.dev/weather runs as WebAssembly) on the same state
-        fb = dict(b)
+        # It takes station pressure from the METAR altimeter: choose the setting that reduces
+        # to the same pressure, so both models see the same state
+        fb = {k: v for k, v in b.items() if k != "pressure_hpa"}
+        elev = rng.uniform(0, 2500)
+        factor = ((288.15 - 0.0065 * elev) / 288.15) ** 5.2561
+        ct = rng.uniform(-30, 40)
         fb.update({
-            "metar_altimeter_hpa": rng.uniform(980, 1040), "station_elev_m": rng.uniform(0, 2500),
-            "nws_pressure_hpa": rng.uniform(600, 1040),
+            "metar_altimeter_hpa": p / factor, "station_elev_m": elev,
+            "nws_altimeter_hpa": rng.uniform(980, 1040),
+            "check_temp_c": ct, "check_dewpoint_c": ct - rng.uniform(0, 25), "check_altimeter_hpa": rng.uniform(980, 1040),
             "cell_u": rng.uniform(-25, 25), "cell_v": rng.uniform(-25, 25),
             **{f"cell_upstream_dbz_{l}": rng.uniform(0, 60) for l in (15, 30, 60)},
         })
@@ -184,7 +190,7 @@ def main():
                 failures.append(f"case {case} {k}: avenc {env[k]!r} vs NumPy {want!r}")
 
         # Forward block vs the relational model: same physics, closed forms instead of solving
-        shared = ["e_sat_hpa", "vapor_pressure_hpa", "relative_humidity", "rh_residual", "specific_humidity",
+        shared = ["e_sat_hpa", "vapor_pressure_hpa", "relative_humidity", "specific_humidity", "pressure_hpa",
                   "virtual_temp_k", "air_density_kg_m3", "dp_dz_pa_per_m", "vertical_shear_ms_per_km",
                   "steering_speed_ms", "radar_rain_mmh", "radar_minus_gauge_mmh",
                   "nowcast_rain_15_mmh", "nowcast_rain_30_mmh", "nowcast_rain_60_mmh"]
@@ -196,9 +202,10 @@ def main():
             if err > 1e-6:
                 failures.append(f"case {case} forward {k}: {fwd[k]!r} vs {kin.get(k, env[k])!r}")
         extra = {
-            "metar_station_pressure_hpa": fb["metar_altimeter_hpa"] * ((288.15 - 0.0065 * fb["station_elev_m"]) / 288.15) ** 5.2561,
             "steering_vs_cell_ms": math.hypot(fb["steer_u"] - fb["cell_u"], fb["steer_v"] - fb["cell_v"]),
-            "pressure_residual_hpa": abs(fb["nws_pressure_hpa"] - fb["metar_altimeter_hpa"] * ((288.15 - 0.0065 * fb["station_elev_m"]) / 288.15) ** 5.2561),
+            "altimeter_residual_hpa": abs(fb["nws_altimeter_hpa"] - fb["check_altimeter_hpa"]),
+            "check_relative_humidity": 100 * ambaum(fb["check_dewpoint_c"]) / ambaum(fb["check_temp_c"]),
+            "rh_residual": abs(100 * ambaum(fb["check_dewpoint_c"]) / ambaum(fb["check_temp_c"]) - fb["rh_reported"]),
             **{f"cell_nowcast_rain_{l}_mmh": marshall_palmer(fb[f"cell_upstream_dbz_{l}"]) for l in (15, 30, 60)},
         }
         for k, want in extra.items():
