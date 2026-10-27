@@ -1,0 +1,26 @@
+// examples/stream/openplc_supervisor.aven — Supervisory limits for a PLC-controlled line
+//
+// Feed it live telemetry, one JSON object per line, e.g. from the OpenPLC Modbus poller:
+//   python evaluations/tests/PLC-test/openplc_poller.py --host <plc> | avenc stream examples/stream/openplc_supervisor.aven
+// Each reading (scan_ms, power_w, temp_c, quality_pct) is checked against the limits below;
+// a cycle that breaks one is reported as ALARM. The limits are example values: set them
+// for your own controller, enclosure and power supply.
+
+relation LineSupervisor {
+    scan_margin_ms    = scan_deadline_ms - scan_ms
+    thermal_margin_c  = enclosure_limit_c - temp_c
+    power_margin_w    = psu_limit_w - power_w
+    quality_margin    = quality_pct - quality_floor_pct
+}
+
+solve LineSupervisor with {
+    scan_deadline_ms  = 18.0
+    enclosure_limit_c = 55.0
+    psu_limit_w       = 250.0
+    quality_floor_pct = 95.0
+
+    scan_margin_ms   >= 0.0
+    thermal_margin_c >= 0.0
+    power_margin_w   >= 0.0
+    quality_margin   >= 0.0
+}

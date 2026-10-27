@@ -26,7 +26,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 UA = {
-    "User-Agent": "AvenWeatherCell/1.0 (https://git.thrainkrill.space/thrain/aven)",
+    "User-Agent": "AvenWeatherCell/1.0 (https://github.com/Thrainkrilleve/aven)",
     "Accept": "application/geo+json, application/json, text/plain",
 }
 EARTH_M_PER_DEG = 111_320.0

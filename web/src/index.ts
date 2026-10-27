@@ -14,6 +14,11 @@ export default {
     }
 
     if (pathname.startsWith("/api/v1/")) {
+      // HEAD is answered like GET (same status and headers) without the body
+      if (request.method === "HEAD") {
+        const res = await handleApi(new Request(request, { method: "GET" }), env, pathname);
+        return new Response(null, { status: res.status, headers: res.headers });
+      }
       return handleApi(request, env, pathname);
     }
 
@@ -27,7 +32,7 @@ async function handleApi(request: Request, env: Env, pathname: string): Promise<
   const jsonHeaders = {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, HEAD, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
   };
 

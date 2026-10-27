@@ -1,4 +1,4 @@
-# Aven Scientific Website & Cloudflare Edge Services (`avenc.dev`)
+# Aven Website & Edge Services (`avenc.dev`)
 
 Website, in-browser WebAssembly playground, and D1-backed package index for **Aven**.
 
@@ -6,9 +6,9 @@ Website, in-browser WebAssembly playground, and D1-backed package index for **Av
 
 ## Architecture & Technology Stack
 
-- **Static site:** Plain HTML, CSS and ES modules in `public/`, served by Cloudflare's static-assets layer. Assets are served *without* running the worker, so response headers for them live in `public/_headers`.
+- **Static site:** Plain HTML, CSS and ES modules in `public/`, served by the platform's static-assets layer. Assets are served *without* running the worker, so response headers for them live in `public/_headers`.
 - **Edge worker (TypeScript):** `src/index.ts` handles only paths with no matching file: the `/api/v1/*` routes, `/p/:id` share redirects, and the 404 page.
-- **Database:** Cloudflare D1 (`env.DB`) for the package index, legacy shared-model links, and solve telemetry.
+- **Database:** D1 SQL database (`env.DB`) for the package index, legacy shared-model links, and solve telemetry.
 - **Playground:** WebAssembly modules emitted by `avenc emit-wasm` from the `forward` blocks in `examples/`, run client-side. `scripts/build-models.mjs` regenerates them and cross-checks every output against `avenc run`.
 
 ---
@@ -67,7 +67,7 @@ npm install
 # 2. Apply initial D1 database schema to local SQLite simulator
 npm run db:migrate:local
 
-# 3. Start local Cloudflare edge development server
+# 3. Start the local edge development server
 npm run dev
 ```
 

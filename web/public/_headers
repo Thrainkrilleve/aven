@@ -1,4 +1,4 @@
-# Cloudflare static-asset headers. Assets are served without running the worker,
+# Static-asset headers. Assets are served without running the worker,
 # so headers for pages and files must be set here rather than in src/index.ts.
 /*
   X-Content-Type-Options: nosniff

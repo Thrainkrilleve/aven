@@ -98,7 +98,16 @@ avenc bench evaluations/flight_mesh/flight_mesh_ipc.aven
 
 ---
 
-### 2.6 `avenc verify-ledger <out.jsonl>`
+### 2.6 `avenc stream <file.aven>`
+Reads one JSON object per line from stdin and solves the model once per line, with the line's fields added to the solve block's facts. Each cycle prints `SETTLED` with the derived values, `ALARM` naming the broken bound, or `UNSOLVED` with the reason (a reading that leaves the model under-determined is not filled in). The run ends with a count of each and exits 0 when stdin closes. See [Supervising a live feed](https://github.com/Thrainkrilleve/aven/blob/main/docs/TUTORIAL.md#supervising-a-live-feed-with-avenc-stream).
+
+```bash
+python evaluations/tests/PLC-test/openplc_poller.py --host <plc-address> | avenc stream examples/stream/openplc_supervisor.aven
+```
+
+---
+
+### 2.7 `avenc verify-ledger <out.jsonl>`
 Recomputes an audit log's hash chain, seal and (with `AVEN_LEDGER_KEY`) signatures. Exit 0 when intact; exit 1 naming the first tampered line.
 
 ## 3. Environment Variables

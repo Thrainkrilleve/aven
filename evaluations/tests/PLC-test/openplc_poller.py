@@ -79,7 +79,7 @@ def main():
     parser.add_argument("--port", type=int, default=502)
     parser.add_argument("--interval", type=float, default=1.0)
     parser.add_argument("--start", type=int, default=0)
-    parser.add_argument("--count", type=int, default=10)
+    parser.add_argument("--count", type=int, default=len(REGISTER_MAP))
     args = parser.parse_args()
 
     client = ModbusTcpClient(args.host, port=args.port)

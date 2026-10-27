@@ -122,6 +122,8 @@ solve FlightMesh with {
 
 Inequalities may also appear inside a `relation` block, where they constrain every solve of it. All `solve` blocks in a file contribute to one settled state.
 
+Without a `minimize` or `maximize` objective, bounds check values; they never choose them. Every variable a bound mentions must be given or derived from the equations, otherwise the system is reported as under-determined. A bound that is broken is a constraint violation (exit code 2 for `avenc run`, `ALARM` for `avenc stream`).
+
 ### 4.2 Supported Comparison Operators
 - Equality: `=` or `==`
 - Inequality: `!=`

@@ -2512,6 +2512,7 @@ fn cmd_stream(path: &str, limit: usize) {
     let mut ledger = new_ledger();
     let mut seq = 0;
     let mut failures = 0;
+    let mut alarm_cycles = 0;
 
     for line_res in reader.lines() {
         let line = match line_res {
@@ -2576,11 +2577,17 @@ fn cmd_stream(path: &str, limit: usize) {
             }
         }
 
+        // A broken bound is an alarm about the readings; anything else is a failure to solve
+        let mut alarms = Vec::new();
         let mut failure = match solver.solve(&env) {
             Ok(solved_env) => {
                 for (k, v) in solved_env {
                     env.entry(k).or_insert(v);
                 }
+                None
+            }
+            Err(e @ solver::SolverError::ConstraintViolation { .. }) => {
+                alarms.push(e.to_string());
                 None
             }
             Err(e) => Some(e.to_string()),
@@ -2593,7 +2600,6 @@ fn cmd_stream(path: &str, limit: usize) {
         }
 
         // Evaluate constraints from solve directives
-        let mut alarms = Vec::new();
         for solve in &module.solves {
             for c in &solve.constraints {
                 if let Some(&lhs_val) = env.get(&c.lhs) {
@@ -2635,6 +2641,8 @@ fn cmd_stream(path: &str, limit: usize) {
             failures += 1;
             format!("UNSOLVED: {}", e)
         } else if !alarms.is_empty() {
+            alarm_cycles += 1;
+            alarms.dedup();
             format!("ALARM: {}", alarms.join("; "))
         } else {
             "SETTLED".to_string()
@@ -2651,9 +2659,10 @@ fn cmd_stream(path: &str, limit: usize) {
 
     println!("{}", "-".repeat(72));
     println!(
-        "Stream completed: {} cycle(s), {} settled, {} unsolved.",
+        "Stream completed: {} cycle(s), {} settled, {} alarm(s), {} unsolved.",
         cycle,
-        cycle - failures,
+        cycle - failures - alarm_cycles,
+        alarm_cycles,
         failures
     );
 }

@@ -155,6 +155,9 @@ avenc emit-smt <file.aven> [-o <path.smt2>] [--prove]
 # Safety Compliance Assurance Case (DO-178C / ISO 26262)
 avenc safety-case <file.aven> [-o <path.md>] [--standard do178c|iso26262]
 
+# Supervise a feed: one JSON object per line on stdin; each cycle is SETTLED, ALARM or UNSOLVED
+avenc stream <file.aven>
+
 # High-Resolution Latency & Jitter Benchmark
 avenc bench <file.aven> [--latency-profile]
 
