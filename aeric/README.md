@@ -121,3 +121,43 @@ return-valued rejection (see `aven_shim.c`), not as a process abort.
    at tick entry with a defined recovery policy.
 6. **Ledger wasn't a ledger** — independent, non-chained FNV-1a. Here it is a
    real chain plus a keyed HMAC-SHA256 seal.
+
+## Level-1 daemon (`aeric_daemon.c`)
+
+Turns the library into a standalone backend: a config-driven, fixed-rate control
+loop that pulls sensor frames over TCP, pushes setpoints back, drops to HOLD on a
+missed deadline or lost peer, and appends a hash-chained, HMAC-sealed ledger to
+disk. The AERIC core stays transport-free; the daemon is the edge wiring around it.
+
+| File | Role |
+|------|------|
+| `aeric_daemon.c` | config parse + timed loop + TCP transport + ledger-to-disk |
+| `daemon.aer` | runtime config (`key = value`, `#` comments) |
+| `daemon_peer.py` | test peer: happy-path / deadline-miss / disconnect |
+| `verify_ledger.py` | independent ledger verifier (FNV chain + HMAC seal + tamper test) |
+
+**Transport** (length-prefixed TCP, little-endian): peer → daemon sends
+`u32 len` + `n_inputs` float64 (sensors); daemon → peer replies `u32 len` +
+`n_outputs` float64 (setpoints), one exchange per live tick. A tick with no
+sensor frame within `deadline_ms`, or a lost peer, is a fault → HOLD (no reply).
+
+**Run the demo** (MSVC shown; gcc/clang use `-lws2_32 -lwinmm`):
+```
+cl /O2 aeric_daemon.c aeric.c aven_shim.c model_server_capacity.c /Fe:aericd.exe
+aericd.exe daemon.aer           # terminal 1
+python daemon_peer.py 5555 8 5  # terminal 2
+python verify_ledger.py aeric_ledger.jsonl aven-aeric-demo-key-v1
+```
+
+**Verified** (Ryzen 7 9800X3D, 50 Hz, `max_ticks=120`): the peer streams, pauses
+250 ms (→ HOLD), resumes, disconnects (→ HOLD). The daemon records 120 ticks
+(56 live / 64 hold), max jitter ~17 ms across connect/pause transitions (~1.7 ms
+headless). The ledger independently verifies: FNV chain intact, HMAC seal valid,
+a flipped setpoint bit is **detected**, and the wrong key is **rejected**. Builds
+clean at `-Wall -Wextra -Wpedantic` on MSVC, gcc 14.2, and clang 19.1.
+
+**Honest limits.** Jitter is bounded by `deadline_ms`, not sub-ms — true
+worst-case/RT timing (SCHED_FIFO, busy-spin) is the Level-2/3 track. The on-disk
+ledger is AERIC-native JSONL verified by `verify_ledger.py`; making it pass
+`avenc verify-ledger` (the Rust SHA-256/canonical-JSON format) is the separate
+host-interop gate. Single client, one transport (TCP) — more drivers are Level-2.

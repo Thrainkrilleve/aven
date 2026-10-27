@@ -6,3 +6,5 @@ aeric_demo.exe
 *.exe
 *.pdb
 *.ilk
+# runtime output
+aeric_ledger.jsonl
