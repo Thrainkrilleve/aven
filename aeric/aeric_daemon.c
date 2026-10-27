@@ -86,7 +86,17 @@ typedef struct {
     size_t   n_safe;
     double   init_state[AERIC_MAX_STATE]; /* initial state vector */
     size_t   n_init;
+    double   env_min[AERIC_MAX_OUTPUTS];  size_t n_min;   /* optional safety envelope */
+    double   env_max[AERIC_MAX_OUTPUTS];  size_t n_max;
+    double   env_rate[AERIC_MAX_OUTPUTS]; size_t n_rate;
 } daemon_cfg;
+
+/* parse a comma-separated double list into dst[], returning the count */
+static size_t parse_list(const char *v, double *dst, size_t cap){
+    size_t n=0; char *p=(char*)v;
+    while(*p && n<cap){ dst[n++]=strtod(p,&p); if(*p==',')p++; }
+    return n;
+}
 
 static char *trim(char *s){ while(*s==' '||*s=='\t')s++; char*e=s+strlen(s); while(e>s&&(e[-1]=='\n'||e[-1]=='\r'||e[-1]==' '||e[-1]=='\t'))*--e=0; return s; }
 
@@ -117,10 +127,10 @@ static int load_cfg(const char *path, daemon_cfg *c){
             c->n_safe=0; char *p=v;
             while(*p && c->n_safe<AERIC_MAX_OUTPUTS){ c->safe[c->n_safe++]=strtod(p,&p); if(*p==',')p++; }
         }
-        else if(!strcmp(k,"state0")) {
-            c->n_init=0; char *p=v;
-            while(*p && c->n_init<AERIC_MAX_STATE){ c->init_state[c->n_init++]=strtod(p,&p); if(*p==',')p++; }
-        }
+        else if(!strcmp(k,"state0"))   c->n_init=parse_list(v,c->init_state,AERIC_MAX_STATE);
+        else if(!strcmp(k,"out_min"))  c->n_min =parse_list(v,c->env_min,AERIC_MAX_OUTPUTS);
+        else if(!strcmp(k,"out_max"))  c->n_max =parse_list(v,c->env_max,AERIC_MAX_OUTPUTS);
+        else if(!strcmp(k,"out_rate")) c->n_rate=parse_list(v,c->env_rate,AERIC_MAX_OUTPUTS);
     }
     fclose(f);
     if(c->n_inputs==0||c->n_outputs==0){ fprintf(stderr,"config: n_inputs/n_outputs required\n"); return 0; }
@@ -128,6 +138,9 @@ static int load_cfg(const char *path, daemon_cfg *c){
     size_t n_setpoints=c->n_outputs-c->n_state;
     if(c->n_safe!=n_setpoints){ fprintf(stderr,"config: 'safe' needs %zu values (n_outputs-n_state), got %zu\n",n_setpoints,c->n_safe); return 0; }
     if(c->n_init!=c->n_state){ fprintf(stderr,"config: 'state0' needs %zu values, got %zu\n",c->n_state,c->n_init); return 0; }
+    if(c->n_min &&c->n_min !=n_setpoints){ fprintf(stderr,"config: 'out_min' needs %zu values\n",n_setpoints); return 0; }
+    if(c->n_max &&c->n_max !=n_setpoints){ fprintf(stderr,"config: 'out_max' needs %zu values\n",n_setpoints); return 0; }
+    if(c->n_rate&&c->n_rate!=n_setpoints){ fprintf(stderr,"config: 'out_rate' needs %zu values\n",n_setpoints); return 0; }
     return 1;
 }
 
@@ -210,6 +223,12 @@ int main(int argc, char **argv){
     if(!AERIC_Init(&rt,&schema,cfg.safe,state0,(const uint8_t*)key,strlen(key))){ fprintf(stderr,"AERIC_Init failed\n"); return 1; }
     const size_t n_sensors = cfg.n_inputs - cfg.n_state;      /* wire: peer -> daemon */
     const size_t n_setpoints = cfg.n_outputs - cfg.n_state;   /* wire: daemon -> peer */
+    if(cfg.n_min||cfg.n_max||cfg.n_rate){
+        if(!AERIC_SetEnvelope(&rt, cfg.n_min?cfg.env_min:NULL,
+                              cfg.n_max?cfg.env_max:NULL, cfg.n_rate?cfg.env_rate:NULL)){
+            fprintf(stderr,"bad safety envelope (min > max?)\n"); return 1; }
+        printf("safety envelope: active\n");
+    }
 
     FILE *lf=fopen(cfg.ledger,"w"); if(!lf){ fprintf(stderr,"cannot open ledger '%s'\n",cfg.ledger); return 1; }
 
@@ -224,7 +243,7 @@ int main(int argc, char **argv){
     fflush(stdout);
 
     const double period = 1.0/cfg.tick_hz;
-    double dummy=0.0, next=now_s(), max_jit=0.0, last=next;
+    double next=now_s(), max_jit=0.0, last=next;
     uint64_t tick=0; unsigned live=0, held=0;
     sock_t cli=BAD_SOCK;
     char prev[65]; memset(prev,'0',64); prev[64]=0;   /* ledger chain head = genesis */
@@ -240,16 +259,18 @@ int main(int argc, char **argv){
             }
         }
         if(cli==BAD_SOCK){
-            status=AERIC_Tick(&rt,&dummy,0);            /* no peer -> HOLD tick */
+            status=AERIC_HoldTick(&rt,AERIC_FAULT_TRANSPORT);   /* no peer connected */
         } else {
             double inb[AERIC_MAX_INPUTS];
             int fr=read_frame(cli,inb,n_sensors);
             if(fr==0){
                 status=AERIC_Tick(&rt,inb,n_sensors);    /* live solve (state fed back internally) */
                 if(write_frame(cli,AERIC_Setpoints(&rt),n_setpoints)){ closesock(cli); cli=BAD_SOCK; }
+            } else if(fr<0){
+                status=AERIC_HoldTick(&rt,AERIC_FAULT_TRANSPORT);  /* peer gone */
+                closesock(cli); cli=BAD_SOCK;
             } else {
-                status=AERIC_Tick(&rt,&dummy,0);          /* deadline miss / schema fault -> HOLD, no reply */
-                if(fr<0){ closesock(cli); cli=BAD_SOCK; } /* peer gone */
+                status=AERIC_HoldTick(&rt,AERIC_FAULT_DEADLINE);   /* no frame within deadline */
             }
         }
         tick++; if(status==AERIC_OK) live++; else held++;
@@ -273,7 +294,12 @@ int main(int argc, char **argv){
     closesock(srv);
     sock_cleanup();
     hires_end();
-    printf("done: %llu ticks (%u live, %u hold), max jitter %.3f ms, faults %u\n",
-           (unsigned long long)tick,live,held,max_jit*1000.0,rt.fault_count);
+    printf("done: %llu ticks (%u live, %u hold), max jitter %.3f ms\n",
+           (unsigned long long)tick,live,held,max_jit*1000.0);
+    printf("faults: total %u | sensor %u  solver %u  deadline %u  transport %u | clamp events %u\n",
+           rt.fault_count,
+           rt.fault_counts[AERIC_FAULT_SENSOR], rt.fault_counts[AERIC_FAULT_SOLVER],
+           rt.fault_counts[AERIC_FAULT_DEADLINE], rt.fault_counts[AERIC_FAULT_TRANSPORT],
+           rt.clamp_count);
     return 0;
 }

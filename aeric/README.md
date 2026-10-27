@@ -201,5 +201,30 @@ matching the Python PI reference exactly. A daemon built with the PI shim
 stateless `server_capacity` daemon still verifies unchanged. Clean at `-Wpedantic`
 on MSVC, gcc 14.2, clang 19.1.
 
-**Still Level-2:** the graded safety envelope (clamp / rate-limit / fault
-taxonomy), the RT+telemetry concurrency split, and SHM interop with the Rust daemon.
+## Level-2: safety envelope & fault taxonomy
+
+The live setpoint path has an optional **safety envelope** (`AERIC_SetEnvelope`,
+inert until configured): each output is **clamped** to `[min, max]` and then
+**rate-limited** to `±rate` change from the previously published value. A NULL
+array leaves that dimension unbounded. HOLD still publishes the fail-safe. Faults
+are tagged with a **taxonomy** — `sensor` (bad ingress), `solver` (solve failed /
+non-finite), `deadline`, `transport` — tracked per tick (`last_fault`) and counted
+(`fault_counts`); the daemon reports deadline/transport through `AERIC_HoldTick`.
+
+`test_envelope.c` clamps `allocated_workers` (solved to 1429) to `[0,1000]` at
+50/tick; `env_check.py` confirms against a reference:
+
+```
+cl /O2 test_envelope.c aeric.c aven_shim.c model_server_capacity.c /Fe:test_env.exe
+python env_check.py test_env.exe
+```
+
+**Verified:** the output **ramps** from the fail-safe (1) by 50/tick — `51, 101, …`
+— then **plateaus at the clamp ceiling 1000**, with `clamped` set every tick
+(1429 > max), matching the reference exactly; each fault class is injected, named,
+and counted. The envelope is opt-in, so the stateless demo's hash is unchanged.
+Configurable from the daemon via `out_min` / `out_max` / `out_rate`. Clean at
+`-Wpedantic` on MSVC, gcc 14.2, clang 19.1.
+
+**Still Level-2:** a hardware watchdog kick, the RT+telemetry concurrency split,
+and SHM interop with the Rust daemon.

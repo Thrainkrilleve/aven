@@ -145,9 +145,11 @@ Remaining: only RT-grade (sub-ms) jitter, which is the Level 2/3 track.
   advances `x[t+1]` from the trailing outputs on a live tick (frozen on HOLD).
   Backward-compatible (`n_state = 0` is the old behavior). The daemon carries it
   through config + wire framing.
-- **Graded safety envelope** — per-output min/max **clamp**, setpoint **rate
-  limiting**, a **fault taxonomy** (sensor / solver / deadline / transport) each
-  with its own policy, and a **hardware watchdog kick**. HOLD remains the floor.
+- **Graded safety envelope** ✅ (mostly) — per-output min/max **clamp** and
+  setpoint **rate limiting** on the live path (`AERIC_SetEnvelope`), plus a
+  **fault taxonomy** (sensor / solver / deadline / transport) tagged per tick and
+  counted. HOLD remains the floor. *Remaining:* a **hardware watchdog kick**
+  (target-specific).
 - **Concurrency split** — a non-blocking, non-allocating RT control thread plus a
   lower-priority I/O/telemetry thread, joined by a *genuine* SPSC ring with
   atomics and memory barriers. (This is where a correct ring buffer belongs —
@@ -165,9 +167,11 @@ Remaining: only RT-grade (sub-ms) jitter, which is the Level 2/3 track.
       publishes fail-safe, and the controller resumes from the frozen integral
       (`examples/pi_controller.aven`, `test_state.c`, `pi_check.py`). The stateful
       daemon's ledger passes `avenc verify-ledger`; the stateless path is unchanged.
-- [ ] Clamp and rate-limit each have a test proving the bound holds under an
-      out-of-range solve.
-- [ ] Each fault class has an injection test and a distinct recorded response.
+- [x] Clamp and rate-limit proven against an out-of-range solve: the published
+      output ramps from fail-safe by the rate limit then plateaus at the clamp
+      ceiling, matching a Python reference exactly (`test_envelope.c`, `env_check.py`).
+- [x] Each fault class (sensor / solver / deadline / transport) is injected,
+      tagged by name, and counted per class.
 - [ ] RT thread shows **zero page faults after init** and zero allocations on the
       tick path (verified with instrumentation / `mlockall` + counters).
 - [ ] End-to-end SHM loop with the Rust daemon: telemetry in, setpoints out,
@@ -264,6 +268,8 @@ evidence.
 | Host verifies edge-signed ledger (JSONL interop) | ✅ verified | `avenc verify-ledger` accepts the daemon ledger (600 facts, all sigs valid); wrong key / tamper rejected |
 | Stateful models (state fed back tick→tick) | ✅ verified | PI controller matches Python reference exactly; integral ramps; HOLD freezes & resumes (`pi_check.py`) |
 | Stateful daemon end-to-end | ✅ verified | PI daemon (`n_state=1`) ledger passes `avenc verify-ledger`; stateless path unchanged |
+| Safety envelope (clamp + rate-limit) | ✅ verified | `test_envelope` vs reference: ramps 51→1000, plateaus at ceiling, `clamped` flagged; stateless hash unchanged |
+| Fault taxonomy (sensor/solver/deadline/transport) | ✅ verified | each class injected, named, and counted (`AERIC_FaultName`, `fault_counts`) |
 | "MISRA-grade" | ⬜ **unfounded** | static-analysis track |
 | SHM end-to-end cycle time | ⬜ unverified | measure on real loop (not guessed) |
 

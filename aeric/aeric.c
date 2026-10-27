@@ -141,6 +141,39 @@ static void ledger_record(aeric_runtime_t *rt, int status) {
     arena_reset(&rt->arena);
 }
 
+/* Common HOLD bookkeeping: tag the fault, latch, publish fail-safe (state frozen),
+ * record the tick. Does NOT advance tick_index (callers do). */
+static int do_hold(aeric_runtime_t *rt, aeric_fault_t reason) {
+    rt->fault_count++;
+    if ((unsigned)reason < AERIC_FAULT_KINDS) rt->fault_counts[reason]++;
+    rt->last_fault = reason;
+    rt->consecutive_ok = 0;
+    rt->hold_mode = true;
+    rt->clamped = false;
+    memcpy(rt->outputs, rt->safe, rt->n_setpoints * sizeof(double));
+    ledger_record(rt, AERIC_HOLD);
+    return AERIC_HOLD;
+}
+
+/* Apply the safety envelope to the live setpoints in-place: clamp to [min,max],
+ * then limit the change from the previously published value to ±rate. */
+static void apply_envelope(aeric_runtime_t *rt, double *sp) {
+    if (!rt->envelope) return;
+    bool hit = false;
+    for (size_t i = 0; i < rt->n_setpoints; ++i) {
+        double v = sp[i];
+        if (v < rt->out_min[i]) { v = rt->out_min[i]; hit = true; }
+        if (v > rt->out_max[i]) { v = rt->out_max[i]; hit = true; }
+        double prev = rt->outputs[i];            /* last published setpoint */
+        double d = v - prev;
+        if (d >  rt->out_rate[i]) { v = prev + rt->out_rate[i]; hit = true; }
+        if (d < -rt->out_rate[i]) { v = prev - rt->out_rate[i]; hit = true; }
+        sp[i] = v;
+    }
+    rt->clamped = hit;
+    if (hit) rt->clamp_count++;
+}
+
 /* ======================================================================
  * Public API
  * ====================================================================== */
@@ -209,14 +242,7 @@ int AERIC_Tick(aeric_runtime_t *rt, const double *sensors, size_t n_sensors) {
     for (size_t i = 0; ingress_ok && i < n_sensors; ++i)
         if (!isfinite(sensors[i])) ingress_ok = false;
 
-    if (!ingress_ok) {
-        rt->fault_count++;
-        rt->consecutive_ok = 0;
-        rt->hold_mode = true;
-        memcpy(rt->outputs, rt->safe, rt->n_setpoints * sizeof(double));
-        ledger_record(rt, AERIC_HOLD);        /* state frozen */
-        return AERIC_HOLD;
-    }
+    if (!ingress_ok) return do_hold(rt, AERIC_FAULT_SENSOR);   /* state frozen */
 
     /* 2. Build the canonical solver input [sensors | state]; the caller never
      *    supplies the state. */
@@ -233,14 +259,7 @@ int AERIC_Tick(aeric_runtime_t *rt, const double *sensors, size_t n_sensors) {
         if (!isfinite(tmp[j])) solved = false;   /* belt-and-braces vs the shim */
 
     /* 4. Fault -> latch HOLD, publish fail-safe, freeze state. */
-    if (!solved) {
-        rt->fault_count++;
-        rt->consecutive_ok = 0;
-        rt->hold_mode = true;
-        memcpy(rt->outputs, rt->safe, rt->n_setpoints * sizeof(double));
-        ledger_record(rt, AERIC_HOLD);
-        return AERIC_HOLD;
-    }
+    if (!solved) return do_hold(rt, AERIC_FAULT_SOLVER);
 
     /* 5. Clean solve while latched: count toward recovery but keep holding
      *    (fail-safe out, state frozen) until the threshold or an operator clear. */
@@ -257,9 +276,12 @@ int AERIC_Tick(aeric_runtime_t *rt, const double *sensors, size_t n_sensors) {
         }
     }
 
-    /* 6. Live: publish setpoints and advance x[t+1] from the trailing n_state
-     *    outputs. State advances only on a fully live tick. */
+    /* 6. Live: clamp/rate-limit the setpoints (envelope reads the previous
+     *    published values in rt->outputs), publish, then advance x[t+1] from the
+     *    trailing n_state outputs. State advances only on a fully live tick. */
     rt->consecutive_ok++;
+    rt->last_fault = AERIC_FAULT_NONE;
+    apply_envelope(rt, tmp);
     memcpy(rt->outputs, tmp, rt->n_setpoints * sizeof(double));
     for (size_t i = 0; i < rt->schema.n_state; ++i)
         rt->state[i] = tmp[rt->n_setpoints + i];
@@ -279,6 +301,39 @@ const double *AERIC_Setpoints(const aeric_runtime_t *rt) {
 
 const double *AERIC_State(const aeric_runtime_t *rt) {
     return rt ? rt->state : NULL;
+}
+
+bool AERIC_SetEnvelope(aeric_runtime_t *rt,
+                       const double *min, const double *max, const double *rate) {
+    if (!rt) return false;
+    for (size_t i = 0; i < rt->n_setpoints; ++i) {
+        double lo = min  ? min[i]  : -INFINITY;
+        double hi = max  ? max[i]  :  INFINITY;
+        double rr = rate ? rate[i] :  INFINITY;
+        if (lo > hi) return false;
+        rt->out_min[i]  = lo;
+        rt->out_max[i]  = hi;
+        rt->out_rate[i] = (rr < 0.0) ? 0.0 : rr;
+    }
+    rt->envelope = true;
+    return true;
+}
+
+int AERIC_HoldTick(aeric_runtime_t *rt, aeric_fault_t reason) {
+    if (!rt) return AERIC_BADCALL;
+    rt->tick_index++;
+    return do_hold(rt, reason);
+}
+
+const char *AERIC_FaultName(aeric_fault_t reason) {
+    switch (reason) {
+        case AERIC_FAULT_NONE:      return "none";
+        case AERIC_FAULT_SENSOR:    return "sensor";
+        case AERIC_FAULT_SOLVER:    return "solver";
+        case AERIC_FAULT_DEADLINE:  return "deadline";
+        case AERIC_FAULT_TRANSPORT: return "transport";
+        default:                    return "?";
+    }
 }
 
 void AERIC_Seal(aeric_runtime_t *rt, uint8_t out_digest[32]) {

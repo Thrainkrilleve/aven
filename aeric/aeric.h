@@ -46,6 +46,16 @@
  */
 int aven_solve(const double *in, size_t n_in, double *out, size_t n_out);
 
+/* ===== Fault taxonomy ===== */
+typedef enum {
+    AERIC_FAULT_NONE = 0,
+    AERIC_FAULT_SENSOR,     /* ingress: bad arity or non-finite sensor      */
+    AERIC_FAULT_SOLVER,     /* solver returned error or non-finite output   */
+    AERIC_FAULT_DEADLINE,   /* missed the tick deadline (signalled by host)  */
+    AERIC_FAULT_TRANSPORT   /* lost/absent peer or egress NAK (host)         */
+} aeric_fault_t;
+#define AERIC_FAULT_KINDS 5
+
 /* ===== Tick schema ===== */
 typedef struct {
     uint32_t version;        /* schema version for .aer evolution                */
@@ -90,6 +100,18 @@ typedef struct {
     uint64_t       last_tick_hash;               /* chained FNV-1a heartbeat        */
     aeric_sha256_t seal;                         /* HMAC-SHA256 inner ctx (K^ipad + records) */
     uint8_t        seal_opad[64];                /* K'^opad, kept for HMAC finalisation */
+
+    /* Optional safety envelope (see AERIC_SetEnvelope; inert until configured). */
+    bool     envelope;
+    double   out_min[AERIC_MAX_OUTPUTS];
+    double   out_max[AERIC_MAX_OUTPUTS];
+    double   out_rate[AERIC_MAX_OUTPUTS];        /* max |Δsetpoint| per tick        */
+    bool     clamped;                            /* last live tick hit a limit      */
+    uint32_t clamp_count;                        /* lifetime clamp/rate-limit events */
+
+    /* Fault taxonomy. */
+    aeric_fault_t last_fault;
+    uint32_t      fault_counts[AERIC_FAULT_KINDS];
 } aeric_runtime_t;
 
 /* ===== Tick result codes ===== */
@@ -127,6 +149,22 @@ const double *AERIC_Setpoints(const aeric_runtime_t *rt);
 
 /* Current persistent state vector x[t] (n_state doubles; NULL-safe). */
 const double *AERIC_State(const aeric_runtime_t *rt);
+
+/* Configure the optional safety envelope (call after Init). For each of the
+ * n_setpoints outputs AERIC clamps a live setpoint to [min[i], max[i]] and then
+ * limits its change from the previous published value to ±rate[i]. A NULL array
+ * leaves that dimension unbounded (-inf / +inf / +inf). Returns false on a null
+ * rt or min[i] > max[i]. HOLD still publishes the fail-safe unchanged. */
+bool AERIC_SetEnvelope(aeric_runtime_t *rt,
+                       const double *min, const double *max, const double *rate);
+
+/* Record a typed HOLD tick for faults the core cannot see itself (deadline,
+ * transport): latches HOLD, publishes fail-safe, freezes state, advances the
+ * ledger, and tags the reason. Returns AERIC_HOLD (or AERIC_BADCALL). */
+int AERIC_HoldTick(aeric_runtime_t *rt, aeric_fault_t reason);
+
+/* Human-readable fault name ("none", "sensor", "solver", "deadline", "transport"). */
+const char *AERIC_FaultName(aeric_fault_t reason);
 
 /* Finalise a snapshot of the HMAC-SHA256 provenance seal into out_digest[32].
  * The running inner context is cloned, so AERIC_Seal may be called repeatedly
