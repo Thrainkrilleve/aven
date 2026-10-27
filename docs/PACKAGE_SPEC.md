@@ -53,6 +53,9 @@ scale = 1.0
 - `dimension`: Base SI dimension or compound algebraic dimension (`Pressure`, `Force`, `Energy`).
 - `scale`: Multiplier relative to standard SI base unit.
 
+> [!NOTE]
+> **Not yet applied.** `avenc` (v0.6.0) reads and preserves `[dependencies]` and `[[units]]`, but does not act on them: dependencies are not fetched or resolved (install each package yourself), and manifest units are not registered with the unit checker. Declare units your relations need with `unit` declarations in the entry file instead.
+
 ---
 
 ## 2. Package Archive Format (`.avenpkg`)
@@ -73,18 +76,18 @@ When packaged via `avenc pkg pack`, Aven creates a portable `.avenpkg` archive:
 +-------------------------------------------------------+
 | File 2: Name Len (u64) | Name | Data Len (u64) | Data |
 +-------------------------------------------------------+
-| Footer: HMAC/SHA-256 Digest (64 hex characters)      |
+| Footer: SHA-256 of all preceding bytes (64 hex chars) |
 +-------------------------------------------------------+
 ```
 
-Every distribution archive carries an immutable SHA-256 payload digest ensuring supply chain integrity.
+`avenc pkg pack` dimension-checks the entry file before sealing, then appends the SHA-256 digest of everything before the footer. `avenc pkg install` recomputes it and refuses an archive whose digest does not match, which detects corruption and accidental edits. The digest is not a signature: anyone who changes an archive can recompute it, so it does not prove who published the package.
 
 ---
 
 ## 3. Dependency Resolution & Inlining
 
 When an Aven model references external packages:
-```aven
+```aven-fragment
 import aerospace_dynamics;
 
 relation MissionFlight {
@@ -92,9 +95,9 @@ relation MissionFlight {
 }
 ```
 
-The compiler searches:
-1. Current working directory or relative path.
-2. Local project `vendor/` directory.
-3. System cache `.aven/packages/<name>/<version>/`.
+`import <name>;` inlines the package's entry file into the model. The compiler searches, in order:
+1. The directory containing the model file (a `<name>/` subdirectory, `<name>.aven`, or an `Aven.toml` whose `name` matches).
+2. `vendor/` in the current working directory.
+3. `.aven/packages/<name>/<version>/` in the current working directory, where `avenc pkg install` puts packages; the highest installed version wins.
 
-During compilation, imported relations are validated against the global unit registry to guarantee dimensional homogeneity across package boundaries before execution.
+The inlined relations are then dimension-checked together with the model, so unit mismatches across the package boundary are caught before anything runs.

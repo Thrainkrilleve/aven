@@ -26,10 +26,10 @@ relation ClusterCapacity {
 ```
 
 Aven's compiler:
-1. **Solves in any direction**: Give it `allocated_workers` and `avg_latency_ms`, and Aven's exact Newton-Raphson solver will solve backwards for maximum allowable `reqs_per_second`.
-2. **Enforces dimensional homogeneity**: You cannot accidentally add Megabytes to Volts or subtract Seconds from Watts.
+1. **Solves in any direction**: Give it `allocated_workers` and `avg_latency_ms`, and Aven's Newton–Raphson solver solves backwards for the maximum `reqs_per_second` they can serve (1,429 workers at 20 ms and 70% utilization: 50,015 req/s).
+2. **Enforces dimensional homogeneity**: You cannot accidentally add Megabytes to Volts or subtract Seconds from Watts, and values given in different units (`km/h`, `m/s`) are converted before solving.
 3. **Guarantees data freshness**: Decisions are blocked automatically if incoming sensor telemetry has expired its declared Time-to-Live (TTL).
-4. **Maintains a cryptographic ledger**: Every deduction produces an immutable HMAC-SHA256 audit record proving exactly why the decision was made.
+4. **Maintains a tamper-evident ledger**: Every deduction extends a SHA-256 hash chain (HMAC-SHA256-signed when you supply a key) recording exactly why the decision was made.
 
 ---
 
@@ -76,13 +76,18 @@ avenc run thermostat.aven
 
 Outputs:
 ```text
+Solver Trace:
+  [temp_delta_c = target_temp_c - current_temp_c] temp_delta_c <- forward eval
+  [cooling_power_w = temp_delta_c * thermal_conductivity_w_per_c] cooling_power_w <- forward eval
+  [compressor_amps = cooling_power_w / line_voltage_v] compressor_amps <- forward eval
+
 Settled Environment:
-  compressor_amps              = -3.7500
-  cooling_power_w              = -900.0000
-  current_temp_c               = 28.5000
-  line_voltage_v               = 240.0000
-  target_temp_c                = 21.0000
-  temp_delta_c                 = -7.5000
+  compressor_amps  = -3.7500
+  cooling_power_w  = -900.0000
+  current_temp_c   = 28.5000
+  line_voltage_v   = 240.0000
+  target_temp_c    = 21.0000
+  temp_delta_c     = -7.5000
   thermal_conductivity_w_per_c = 120.0000
 
 Fact Ledger: 7 facts settled.
@@ -116,9 +121,9 @@ Output:
 (declare-const thermal_conductivity_w_per_c Real)
 
 ; Physical relations and invariant equations
-(assert (= temp_delta_c (- target_temp_c current_temp_c)))
-(assert (= cooling_power_w (* temp_delta_c thermal_conductivity_w_per_c)))
-(assert (= compressor_amps (/ cooling_power_w line_voltage_v)))
+(assert (= temp_delta_c (- target_temp_c current_temp_c))) ; temp_delta_c = target_temp_c - current_temp_c
+(assert (= cooling_power_w (* temp_delta_c thermal_conductivity_w_per_c))) ; cooling_power_w = temp_delta_c * thermal_conductivity_w_per_c
+(assert (= compressor_amps (/ cooling_power_w line_voltage_v))) ; compressor_amps = cooling_power_w / line_voltage_v
 
 ; Ingress observed bindings
 (assert (= current_temp_c 28.5))

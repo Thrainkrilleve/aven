@@ -29,7 +29,7 @@
 2. **Type checker.** The unit system generalizes beyond 4 hardcoded dimensions: extensible dimension registries, unit literals (`90 km/h`), full compile-time propagation through relation graphs.
 3. **Under-determination reporting.** The coupled solver currently stalls silently on rank-deficient systems. It must *explain*: which variables remain free, why, and what additional binding would pin them. An under-constrained program should feel like an unbalanced equation in math class — obvious and educational.
 4. **Test suite.** Golden-file tests for the solver (analytic cross-checks), transpiler (compare emitted C vs handwritten), and debugger (deterministic replay fuzzing).
-5. **CLI:** `avenc run file.aven`, `avenc build file.aven --emit-c`, `avenc repl`.
+5. **CLI:** `avenc run file.aven`, `avenc build file.aven --emit-c`, and an interactive REPL (shipped as `avenc debug`).
 
 ---
 

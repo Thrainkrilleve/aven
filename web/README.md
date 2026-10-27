@@ -1,15 +1,15 @@
 # Aven Scientific Website & Cloudflare Edge Services (`avenc.dev`)
 
-High-performance, scientific-facing website, client-side WebAssembly solver playground, and Cloudflare D1-backed package registry for **Aven**.
+Website, in-browser WebAssembly playground, and D1-backed package index for **Aven**.
 
 ---
 
 ## Architecture & Technology Stack
 
-- **Edge Runtime:** Cloudflare Workers (TypeScript) with Static Assets binding (`env.ASSETS`).
-- **Database:** Cloudflare D1 SQL database (`env.DB`) for package metadata, shared playground shortlinks, and solve telemetry logs.
-- **Client-Side Solver Engine:** Pure standard library WebAssembly Core 1.0 (`.wasm`) compiled directly by `avenc emit-wasm`—runs Newton-Raphson relaxation client-side in the browser with sub-millisecond execution times and zero backend server costs.
-- **Frontend:** Vanilla HTML5 / modern CSS3 (obsidian scientific dark theme, glassmorphism, responsive grids) with Google Fonts (`Inter`, `Outfit`, `JetBrains Mono`).
+- **Static site:** Plain HTML, CSS and ES modules in `public/`, served by Cloudflare's static-assets layer. Assets are served *without* running the worker, so response headers for them live in `public/_headers`.
+- **Edge worker (TypeScript):** `src/index.ts` handles only paths with no matching file: the `/api/v1/*` routes, `/p/:id` share redirects, and the 404 page.
+- **Database:** Cloudflare D1 (`env.DB`) for the package index, legacy shared-model links, and solve telemetry.
+- **Playground:** WebAssembly modules emitted by `avenc emit-wasm` from the `forward` blocks in `examples/`, run client-side. `scripts/build-models.mjs` regenerates them and cross-checks every output against `avenc run`.
 
 ---
 
@@ -17,25 +17,42 @@ High-performance, scientific-facing website, client-side WebAssembly solver play
 
 ```text
 web/
-├── wrangler.jsonc            # Cloudflare Worker configuration & D1 bindings
-├── package.json              # NPM scripts and devDependencies (wrangler, typescript)
-├── tsconfig.json             # TypeScript compiler settings
+├── wrangler.jsonc               # Worker, static assets, D1 binding, vars
+├── package.json                 # Scripts: dev, deploy, build:models, typecheck, db:migrate:*
+├── scripts/
+│   └── build-models.mjs         # Rebuilds public/models/ from examples/ and verifies them
 ├── migrations/
-│   └── 0001_initial_schema.sql  # D1 schema for packages, models, and telemetry
+│   ├── 0001_initial_schema.sql
+│   └── 0002_remove_placeholder_packages.sql
 ├── src/
-│   ├── index.ts              # Edge worker routing, REST API, install script handlers
-│   └── types.ts              # Environment and database record interfaces
+│   ├── index.ts                 # API routes and share redirects
+│   └── types.ts
 └── public/
-    ├── index.html            # Scientific hero, live stats, and reactive WASM playground
-    ├── docs.html             # Documentation explorer (Quickstart, Cookbook, Specs)
-    ├── registry.html         # Interactive D1 package registry browser
-    ├── styles.css            # Mathematical / scientific design system
-    ├── app.js                # Reactive slider state & D1 model sharing
-    ├── wasm_engine.js        # Zero-copy browser WebAssembly execution engine
-    ├── models/               # Emitted .wasm binaries (quadcopter, server_capacity, portfolio)
-    ├── install.sh            # Universal POSIX installer
-    └── install.ps1           # Windows PowerShell installer
+    ├── index.html               # Home page and playground
+    ├── docs.html                # Documentation
+    ├── registry.html            # Package index
+    ├── 404.html
+    ├── styles.css               # Shared design system
+    ├── site.js                  # Nav, copy buttons, syntax highlighting, docs TOC
+    ├── app.js                   # Playground UI (presentation only)
+    ├── wasm_engine.js           # Loads and runs the emitted WebAssembly
+    ├── models/                  # *.wasm + manifest.json (generated; do not edit)
+    ├── install.sh, install.ps1  # Build-from-source installers (cargo install)
+    ├── favicon.svg
+    └── _headers                 # Security and cache headers for static assets
 ```
+
+---
+
+## Updating the playground models
+
+The playground reads input order, output order, source text and defaults from `public/models/manifest.json`, so the page cannot drift out of step with the compiled modules. After changing a `forward` block in `examples/`, or the WASM code generator:
+
+```bash
+npm run build:models
+```
+
+The script fails if any WASM output differs from `avenc run --json` on the example's own solve block. Slider ranges and labels live in `public/app.js`.
 
 ---
 
@@ -58,55 +75,23 @@ Visit `http://localhost:8787` to explore the website, manipulate the reactive WA
 
 ---
 
-## Production Cloudflare Deployment
+## Production Deployment
 
-Because you have the **Cloudflare Workers Paid** plan, you benefit from uncapped CPU execution, high-throughput D1 queries, and worldwide edge CDN caching.
-
-### Step 1: Create your Production D1 Database
+The worker is configured for the existing `avenc_db` D1 database (see `wrangler.jsonc`).
 
 ```bash
-npx wrangler d1 create avenc_db
-```
-Wrangler will output your unique `database_id`:
-```text
-[[d1_databases]]
-binding = "DB"
-database_name = "avenc_db"
-database_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-```
-
-### Step 2: Update `wrangler.jsonc`
-
-Open `wrangler.jsonc` and replace the placeholder `database_id` with your real ID:
-```jsonc
-"d1_databases": [
-  {
-    "binding": "DB",
-    "database_name": "avenc_db",
-    "database_id": "<YOUR_ACTUAL_DATABASE_ID_HERE>",
-    "migrations_dir": "./migrations"
-  }
-]
-```
-
-### Step 3: Apply Database Migrations to Remote D1
-
-```bash
-npx wrangler d1 migrations apply avenc_db --remote
-```
-
-### Step 4: Deploy to Cloudflare
-
-```bash
+npm run typecheck
+npm run db:migrate:prod   # applies pending migrations, including 0002 (removes placeholder packages)
 npm run deploy
 ```
 
-### Step 5: Bind Domain `avenc.dev`
+Publishing packages through the API requires a secret; without it, `POST /api/v1/packages` returns 503:
 
-1. Log into the Cloudflare Dashboard.
-2. Navigate to **Workers & Pages** &rarr; **avenc-web** &rarr; **Settings** &rarr; **Domains & Routes**.
-3. Click **Add Custom Domain** and enter `avenc.dev`.
-4. Cloudflare will automatically provision the DNS records and SSL/TLS certificates.
+```bash
+npx wrangler secret put REGISTRY_PUBLISH_TOKEN
+```
+
+The custom domain `avenc.dev` is bound under **Workers & Pages → avenc-web → Settings → Domains & Routes**.
 
 ---
 
@@ -114,13 +99,12 @@ npm run deploy
 
 | Endpoint | Method | Description |
 |:---|:---:|:---|
-| `/install.sh` | `GET` | Serves dynamic POSIX shell installer with version injection. |
-| `/install.ps1` | `GET` | Serves dynamic Windows PowerShell installer. |
-| `/p/:id` | `GET` | Permalinks that redirect to `/?model=:id` to load shared models. |
-| `/api/v1/stats` | `GET` | Returns aggregated platform metrics from D1. |
-| `/api/v1/packages` | `GET` | Searches and lists unit-verified packages from D1. |
-| `/api/v1/packages/:name` | `GET` | Retrieves package versions and cryptographic seals. |
-| `/api/v1/packages` | `POST` | Publishes new package with SHA-256 seal verification. |
+| `/install.sh`, `/install.ps1` | `GET` | Static installers (build from source with `cargo install`). |
+| `/p/:id` | `GET` | Legacy share links; redirects to `/?model=:id#playground`. |
+| `/api/v1/stats` | `GET` | Row counts from D1 (no synthetic values). |
+| `/api/v1/packages` | `GET` | Searches the package index (`?q=`, `?limit=`). |
+| `/api/v1/packages/:name` | `GET` | Versions and SHA-256 digests for one package. |
+| `/api/v1/packages` | `POST` | Adds a package record. Requires `Authorization: Bearer $REGISTRY_PUBLISH_TOKEN`. |
 | `/api/v1/models/share` | `POST` | Saves custom model to D1 and returns permanent shortlink. |
 | `/api/v1/models/:id` | `GET` | Retrieves shared model source code. |
 | `/api/v1/telemetry` | `POST` | Records solve benchmarks and latency logs. |

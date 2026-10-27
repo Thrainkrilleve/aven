@@ -15,5 +15,5 @@
 - [[Roadmap & Future Vision|Roadmap-and-Future-Vision]]
 
 ---
-[Aven Source Code](file:///f:/aven)  
+[Aven Source Code](https://github.com/Thrainkrilleve/aven)  
 *Pure Rust Std • Zero Dependencies*

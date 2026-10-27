@@ -4,6 +4,7 @@ export interface Env {
   AVEN_VERSION: string;
   REGISTRY_URL: string;
   ENVIRONMENT: string;
+  REGISTRY_PUBLISH_TOKEN?: string;
 }
 
 export interface PackageRecord {

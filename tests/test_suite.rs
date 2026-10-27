@@ -240,12 +240,16 @@ fn test_units_and_dimensions() {
     let req = reg.lookup("req").expect("req not found");
     let s = reg.lookup("s").expect("s not found");
     let ms = reg.lookup("ms").expect("ms not found");
-    let kb = reg.lookup("kb").expect("kb not found");
+    let kb = reg.lookup("kB").expect("kB not found");
     let gbps = reg.lookup("gbps").expect("gbps not found");
     let gib = reg.lookup("gib").expect("gib not found");
 
+    // "kb"/"gb" could mean bits or bytes (an 8x difference), so they are refused
+    assert!(reg.lookup("kb").is_none() && reg.ambiguous("kb").is_some());
+    assert!(reg.lookup("Gb").is_none() && reg.ambiguous("Gb").is_some());
+
     // Binary vs Decimal data: 1 GiB = 1024^3 bytes, 1 GB = 1000^3 bytes
-    let gb = reg.lookup("gb").expect("gb not found");
+    let gb = reg.lookup("GB").expect("GB not found");
     assert_eq!(gib.dimension, Dim::DATA);
     assert_eq!(gb.dimension, Dim::DATA);
     assert!((gib.to_base / gb.to_base - 1.073741824).abs() < 1e-6);

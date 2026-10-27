@@ -2,15 +2,13 @@
 
 **Declarative Invariant Programming & Relational Multi-Physics Engine**
 
-[![Build & Test](https://img.shields.io/badge/tests-130%20passed-brightgreen.svg)](#key-capabilities)
+[![CI](https://github.com/Thrainkrilleve/aven/actions/workflows/ci.yml/badge.svg)](https://github.com/Thrainkrilleve/aven/actions/workflows/ci.yml)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-pure%20Rust%20std-blue.svg)](#key-capabilities)
-[![Throughput](https://img.shields.io/badge/IPC%20Throughput-1%2C720%20solves%2Fsec-orange.svg)](#live-multi-stream-flight-dynamics-mesh)
-[![Median Latency](https://img.shields.io/badge/Median%20Latency-0.56%20ms-purple.svg)](#live-multi-stream-flight-dynamics-mesh)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](#license)
 
-Aven is a domain-specific relational programming language and deterministic solver engine designed for physical systems, telemetry fusion, automated control, and multi-objective optimization. 
+Aven is a domain-specific relational programming language and deterministic solver engine designed for physical systems, telemetry fusion, automated control, and optimization.
 
-Unlike traditional imperative languages where functions require hardcoded input/output parameters, Aven relations represent **omnidirectional mathematical invariants**. Define your physical laws once, and Aven dynamically solves for any unknown variable via symbolic differentiation, analytical substitution, and Newton-Raphson numerical relaxation—or transpiles directly to branchless, solver-free ANSI C code.
+Unlike traditional imperative languages where functions require hardcoded input/output parameters, Aven relations represent **omnidirectional mathematical invariants**. Define your physical laws once, and Aven solves for any unknown variable with Newton–Raphson using exact symbolic derivatives—or transpiles `forward` blocks directly to branchless, solver-free C99.
 
 ---
 
@@ -32,11 +30,12 @@ Unlike traditional imperative languages where functions require hardcoded input/
 
 - **Omnidirectional Relational Solving:** Declare physical relations naturally without specifying solve directions. Write $F = m \cdot a$ once, and solve for force, mass, or acceleration automatically depending on which inputs are observed.
 - **Pure-Rust Zero-Dependency Core:** The `avenc` compiler, lexer, parser, AST, evaluator, and fact ledger are written strictly in standard library Rust (`std`), requiring zero external crates.
-- **Shared Memory Rings & Native In-Process FFI (`using shm(...)`, `using native(...)`):** Zero-socket memory-mapped ring buffers driving telemetry ingestion latency down to **$10.1\,\mu\text{s}$** ($< 100\,\mu\text{s}$ target), native C/Rust dynamic library loading (`.so` / `.dll`) executing in **$5.5\,\mu\text{s}$**, and closed-loop bidirectional actuation streamed directly back to physical control daemons.
-- **Direction-Pinning & C Code Generation (`avenc emit-c`, `--aeric-shim`):** Transpile declarative Aven blocks into standalone, branchless ANSI C code with no runtime solver overhead, suitable for bare-metal embedded targets and hard real-time control loops. Supports automated AERIC edge deployment bundles (`--aeric-shim --out-dir <dir>`) with deterministic SHA-256 model-identity hashing and non-aborting domain finiteness guards.
-- **First-Class External Adapters & Persistent IPC Daemons:** Connect relations to real-world sensors, telemetry streams, and black-box simulators via standard I/O subshells (`using external(...)`) or high-throughput persistent TCP/IPC daemons (`using ipc(...)`) executing in $< 3\,\text{ms}$.
+- **Checked and converted units:** `avenc check` infers the dimension of every variable and rejects equations that mix incompatible ones. Values are converted to coherent base units before solving, so `velocity = 250 km/h` is solved as 69.44 m/s and shown back in km/h. Ambiguous spellings such as `Mb` (megabit or megabyte?) are refused rather than guessed.
+- **Shared Memory Rings & Native In-Process FFI (`using shm(...)`, `using native(...)`):** Memory-mapped ring buffers and in-process loading of C/Rust dynamic libraries (`.so` / `.dll`), with no subprocess or socket per solve. `tests/phase4_shm_ffi.rs` times one call of each: shared-memory reads take 5–10 µs and native library calls 40–50 µs on a 4-vCPU Linux container (timings vary by machine).
+- **Direction-Pinning & C Code Generation (`avenc emit-c`, `--aeric-shim`):** Transpile `forward` blocks into standalone, branchless C99 with no runtime solver: straight-line code suited to embedded targets and fixed-rate control loops. `--aeric-shim --out-dir <dir>` emits an AERIC edge deployment bundle with a SHA-256 model-identity hash and non-aborting domain finiteness guards.
+- **External Adapters & Persistent IPC Daemons:** Connect relations to sensors, telemetry streams and black-box simulators via subprocess adapters (`using external(...)`) or persistent TCP daemons (`using ipc(...)`). Adapters exchange values in each variable's declared unit.
 - **Tamper-Evident Fact Ledgers:** Every settled fact extends a SHA-256 hash chain (optionally HMAC-signed with `AVEN_LEDGER_KEY`); facts from adapters record the SHA-256 of the adapter's raw output. `avenc run --ledger out.jsonl` writes the audit log and `avenc verify-ledger out.jsonl` detects any edit, deletion, reordering or truncation. Time-to-live (`ttl_ms`) freshness tracking blocks decisions on stale data (`DECISION BLOCKED`, exit code 3).
-- **Multi-Objective Pareto Optimization:** Explore multi-dimensional tradeoff frontiers across competing constraints (e.g., latency vs. compute capacity vs. cost).
+- **Optimization:** `minimize` / `maximize` over real and integer variables with simplex branch-and-bound; a result is labelled *proven optimal* only when its bound certifies it. `avenc pareto` sweeps one variable across a range and marks the knee point of the resulting trade-off curve.
 
 ---
 
@@ -61,9 +60,9 @@ Unlike traditional imperative languages where functions require hardcoded input/
                                    ▼                                                                     ▼
 ┌──────────────────────────────────────────────────────────────┐       ┌──────────────────────────────────────────────────────────────┐
 │                  Relational Solver Engine                    │       │                 Direction-Pinned C Transpiler                │
-│  - Symbolic differentiation & analytical backward solving   │       │  - Topological sort of dependency graph                      │
+│  - Symbolic differentiation & Newton backward solving       │       │  - Topological sort of dependency graph                      │
 │  - Guarded Newton-Raphson relaxation                         │       │  - Zero-solver, deterministic forward evaluation              │
-│  - Inequality bounds enforcement (min / max / domain)        │       │  - Emits clean, dependency-free ANSI C code                  │
+│  - Inequality bounds enforcement (min / max / domain)        │       │  - Emits clean, dependency-free C99 code                     │
 └──────────────────────────────┬───────────────────────────────┘       └──────────────────────────────┬───────────────────────────────┘
                                │                                                                      │
                                ▼                                                                      ▼
@@ -134,8 +133,9 @@ For real-time control and high-frequency streams, declare relations backed by pe
 ```aven
 // Connect directly to a persistent telemetry daemon via local TCP socket
 relation FlightAtmosphericDynamics using ipc("127.0.0.1:9090") {
-    // Mathematical invariants solved over persistent memory-mapped stream
-    ...
+    // The daemon supplies facts over TCP; these equations are solved over them
+    speed_of_sound_ms = sqrt(1.4 * 287.058 * ambient_temp_k)
+    mach_number = velocity_ms / speed_of_sound_ms
 }
 ```
 
@@ -154,29 +154,30 @@ forward ServerSizing {
 
 ## Multi-Physics Telemetry Benchmarks
 
-Aven has been validated against massive live multi-stream real-world datasets:
+These runs used live public feeds, so they cannot be reproduced exactly; the harnesses and their logs are in `evaluations/`. Timings depend on the machine.
 
 ### Live Multi-Stream Flight Dynamics Mesh
-Fusing real-time commercial transponder data from **OpenSky Network** (4,700+ active aircraft), surface aviation weather from **NOAA Aviation Weather Center** (AWC METARs), and instantaneous hydrology from **USGS Water Services**:
+Fusing transponder data from the **OpenSky Network**, surface weather from the **NOAA Aviation Weather Center** (METARs), and hydrology from **USGS Water Services**:
 
-| Benchmark Pipeline | Median Settle Latency | Multi-Worker Throughput | Improvement |
+| Benchmark Pipeline | Median Settle Latency | Throughput | Notes |
 | :--- | :--- | :--- | :--- |
-| **Subprocess Mode (`using external(...)`)** | `125.1 ms` | $7.4\,\text{solves/sec}$ | Baseline |
-| **Lazy-Import Subprocess** | `71.5 ms` | $54.1\,\text{solves/sec}$ | $1.7\times$ faster |
-| **Persistent IPC Daemon (`using ipc(...)`)** | **`9.7 ms`** | **`352.9 solves/sec`** | **$12.9\times$ faster / $47\times$ throughput** |
-| **`avenc bench`, live IPC daemon (one client)** | **`0.56 ms`** (p95 `0.71 ms`) | **`1,720 solves/sec`** | Badge figures |
+| **Subprocess Mode (`using external(...)`)** | `125.1 ms` | 7.4 solves/sec | `stream_ringer.py`, multi-worker |
+| **Lazy-Import Subprocess** | `71.5 ms` | 54.1 solves/sec | `stream_ringer.py`, multi-worker |
+| **Persistent IPC Daemon (`using ipc(...)`)** | `9.7 ms` | 352.9 solves/sec | `stream_ringer.py`, multi-worker |
+| **`avenc bench`, live IPC daemon (one client)** | `0.56 ms` (p95 `0.71 ms`) | 1,720 solves/sec | 8-core Windows workstation, 2026-10-25 |
+| **`avenc bench`, same model** | `1.26 ms` (p95 `1.76 ms`) | 775 solves/sec | 4-vCPU Linux container (Xeon 2.1 GHz), 2026-10-27 |
 
-The first three rows come from the `stream_ringer.py` multi-worker harness, which includes its own process and worker overhead. The badge figures are the complete `avenc` solve (TCP round trip to the daemon plus the relational solve of `flight_mesh_ipc.aven`, 24 facts), measured with `avenc bench evaluations/flight_mesh/flight_mesh_ipc.aven --iterations 2000` against the live daemon: medians 0.561–0.566 ms and 1,700–1,734 solves/sec over three runs (2026-10-25, 8-core Windows workstation).
+The `stream_ringer.py` rows include the harness's own process and worker overhead. The `avenc bench` rows are the complete solve (TCP round trip to the daemon plus the relational solve of `flight_mesh_ipc.aven`), measured with `avenc bench evaluations/flight_mesh/flight_mesh_ipc.aven --iterations 2000` against `evaluations/flight_mesh/flight_mesh_daemon.py`. The Windows figures are the median of three runs (0.561–0.566 ms, 1,700–1,734 solves/sec).
 
-- **In-Memory Physics Resolution:** $144.3\,\mu\text{s}$ compute time inside daemon.
-- **Round-Trip Loopback Settle:** $2.95\,\text{ms}$ total connection and solve duration.
-- **Standard Atmosphere Verified:** Temperature, pressure and Mach number match an independent ISA computation for all 150 live aircraft checked, including 30 cruising above the 11 km tropopause (up to $43{,}000\,\text{ft}$); see `verify/live_atmosphere.py`. (An earlier model extended the tropospheric lapse rate above the tropopause and reported spurious $-80^\circ\text{C}$ bound violations at cruise altitude; that model error is fixed.)
+- **Standard Atmosphere Verified:** Temperature, pressure and Mach number match an independent ISA computation for all 150 live aircraft checked, including 30 cruising above the 11 km tropopause (up to 43,000 ft); see `verify/live_atmosphere.py`. (An earlier model extended the tropospheric lapse rate above the tropopause and reported spurious −80 °C bound violations at cruise altitude; that model error is fixed. `evaluations/flight_mesh/flight_mesh_audit_ledger.jsonl` is a run log from before the fix.)
 
 ### 8-Hour Overnight Weather Operations Monitor
-Continuous live validation across 5 major US airport hubs (Denver KDEN, Dallas KDFW, New York KJFK, Chicago KORD, Seattle KSEA):
-- **486 Evaluation Cycles** completed over 8 continuous hours.
-- **Actionable Free-Cooling Solves:** $410 / 486$ ($84.4\%$).
-- **Stale Block Enforcements:** 76 cycles correctly held on expired sensor TTLs (`DECISION BLOCKED`).
+`evaluations/weather/overnight_monitor.py` polled the National Weather Service for 5 airports (KDEN, KDFW, KJFK, KORD, KSEA) on 2026-10-25. Its per-cycle log, `evaluations/weather/weather_audit_ledger.jsonl`, records:
+- **486 evaluation cycles** over 8.0 hours.
+- **410 actionable solves** (84.4%).
+- **76 cycles held** on expired sensor TTLs (`DECISION BLOCKED`).
+
+Both `*_audit_ledger.jsonl` files are the harnesses' per-cycle logs, not `avenc` hash-chained ledgers, so `avenc verify-ledger` does not apply to them.
 
 ---
 
@@ -189,38 +190,37 @@ cargo build --release
 
 ### Execute a Model
 ```bash
-./target/release/avenc run evaluations/flight_mesh/flight_mesh_ipc.aven
+./target/release/avenc run examples/aerodynamics.aven
 ```
 Output:
 ```text
-Connecting to persistent IPC evaluator at '127.0.0.1:9090' for relation 'FlightAtmosphericDynamics'...
-  [ipc] FlightAtmosphericDynamics settled in 2950.5 µs (backend: ipc_UAL605_KORD_MissBasin)
+Solver Trace:
+  [dynamic_pressure = 0.5 * air_density * velocity ^ 2] dynamic_pressure <- forward eval
+  [lift = dynamic_pressure * wing_area * lift_coeff] lift <- forward eval
 
 Settled Environment:
-  air_density_kg_m3 = 0.3311
-  ambient_pressure_pa = 20207.4864
-  ambient_temp_c   = -60.5668
-  baro_altitude_m  = 11887.2000
-  dynamic_pressure_pa = 9791.2787
-  mach_number      = 0.8320
-  speed_of_sound_ms = 292.2896
-  terrain_clearance_m = 11683.2000
-  velocity_ms      = 243.1800
+  air_density      = 1.2250 kg/m^3
+  dynamic_pressure = 2953.8002 Pa
+  lift             = 51986.8827
+  lift_coeff       = 0.5500
+  velocity         = 250.0000 km/h
+  wing_area        = 32.0000 m^2
 
-Fact Ledger: 25 facts settled.
+Fact Ledger: 6 facts settled.
 ```
+Values print in their declared unit, or in the base unit of their inferred dimension. `lift` has no label because `lift_coeff` was given no unit, so the dimension of `lift` is unknown. `--json` prints base-unit values with a `units` map.
 
 ### Check Model Invariants & Constraints
 ```bash
 ./target/release/avenc check examples/server_capacity.aven
 ```
 
-### Transpile to ANSI C Code
+### Transpile to C99
 ```bash
-./target/release/avenc emit-c examples/server_capacity.aven > server_capacity.c
+./target/release/avenc emit-c examples/server_capacity.aven -o server_capacity.c
 ```
 
-### Multi-Objective Pareto Optimization
+### Trade-off Sweep
 ```bash
 ./target/release/avenc pareto examples/server_capacity.aven reqs_per_second 100 50000
 ```
@@ -230,55 +230,44 @@ Fact Ledger: 25 facts settled.
 ## Repository Structure
 
 ```
-f:\aven/
-├── Cargo.toml                              # Root package manifest (pure Rust std)
-├── Aven Development Roadmap.md             # Architecture roadmap & milestones
-├── src/                                    # Core compiler & relational engine
-│   ├── ast.rs                              # AST definitions & BackendDecl variants
-│   ├── lexer.rs                            # Tokenizer with line/col tracking
-│   ├── parser.rs                           # Recursive descent parser
-│   ├── evaluator.rs                        # Solver engine, SHA-256 hasher & IPC evaluator
-│   ├── codegen_c.rs                        # ANSI C code emitter
-│   ├── optimize.rs                         # Simplex, nonlinear and interval branch-and-bound optimizer
-│   ├── ledger.rs                           # Hash-chained, signable fact ledger
-│   └── main.rs                             # CLI entrypoint & Pareto orchestrator
-├── tests/                                  # Integration and documentation-claim tests (79)
-│   └── test_suite.rs                       # Comprehensive verification suite
-├── examples/                               # Canonical domain specifications
-│   ├── aerodynamics.aven                   # Compressible flight dynamics
-│   ├── fleet.aven                          # Multi-agent vehicle constraints
-│   ├── flame.aven                          # Combustion dynamics
-│   ├── openplc.aven                        # Industrial automation & ladder logic
-│   └── server_capacity.aven                # Datacenter capacity planning
-├── evaluations/                            # Physical benchmarks & telemetry fusion
-│   ├── flight_mesh/                        # OpenSky + NOAA + USGS flight mesh
-│   │   ├── flight_mesh_daemon.py           # Sub-millisecond persistent telemetry daemon
-│   │   ├── flight_mesh_ipc.aven            # High-performance IPC model
-│   │   ├── flight_mesh_adapter.py          # Standalone subprocess adapter
-│   │   └── stream_ringer.py                # Parallel multi-worker stress harness
-│   ├── weather/                            # 8-hour live NWS NOAA audit monitor
-│   ├── reports/                            # Technical reviews & architectural findings
-│   └── traces/                             # Wikimedia production trace replay
+aven/
+├── Cargo.toml                              # Root package manifest (no dependencies)
+├── src/                                    # Compiler and relational engine
+│   ├── lexer.rs, parser.rs, ast.rs         # Front end
+│   ├── units.rs                            # Unit registry, dimensional checking, unit conversion
+│   ├── solver.rs, diff.rs, optimize.rs     # Newton solving, symbolic derivatives, simplex / branch-and-bound
+│   ├── evaluator.rs                        # External, IPC, shared-memory and FFI backends
+│   ├── codegen_c.rs, codegen_wasm.rs       # C and WebAssembly emitters
+│   ├── smt.rs                              # SMT-LIB2 export, solver runs, safety-case reports
+│   ├── ledger.rs, compaction.rs            # Hash-chained, signable fact ledger
+│   ├── debugger.rs, temporal.rs            # Time-travel debugger, signal streams
+│   ├── package.rs                          # Aven.toml and .avenpkg packaging
+│   └── main.rs                             # CLI entry point
+├── tests/                                  # Integration tests, incl. claims.rs (documented claims)
+├── examples/                               # Example models (aerodynamics, server capacity, ...)
+├── evaluations/                            # Live-data harnesses, logs and reports
+├── verify/                                 # Checks against independent references
 ├── benchmarks/                             # Performance benchmarks & RHEL harnesses
-├── app/                                    # Desktop orchestrator UI (Tauri v2 + frontend)
-├── k8s/                                    # Kubernetes controllers, CRDs & manifests
-├── scripts/                                # CI and validation scripts
-└── archive/                                # Archived development prototypes
+├── web/                                    # avenc.dev site, playground and package index
+├── aeric/                                  # AERIC C runtime for edge deployment
+├── app/                                    # Desktop orchestrator UI (Tauri v2)
+├── k8s/                                    # Kubernetes controller and manifests
+├── editors/vscode/                         # VS Code syntax highlighting
+├── scripts/                                # CI and documentation checks
+└── archive/                                # Earlier Python prototypes
 ```
 
 ---
 
 ## Testing & Verification
 
-Aven includes a comprehensive test suite verifying forward evaluation, backward solving through non-linear functions (`sqrt`, `ceil`, `floor`, exponents), Newton-Raphson relaxation, C code generation, fact ledger hashing, and IPC networking:
+The test suite covers forward evaluation, backward solving through non-linear functions, Newton–Raphson relaxation, units, optimization, C and WebAssembly code generation, ledger hashing, IPC, SMT export and safety cases:
 
 ```bash
 cargo test
 ```
-```text
-test result: ok. 30 passed; 0 failed   (tests/claims.rs: every documented claim)
-test result: ok. 49 passed; 0 failed   (tests/test_suite.rs)
-```
+
+The SMT and safety-case tests need `z3` (or `cvc5`) on `PATH`; CI installs it. `tests/claims.rs` turns statements made in this README and the wiki into tests, and `scripts/check_docs.py` compiles every Aven example in the documentation and the website.
 
 ---
 

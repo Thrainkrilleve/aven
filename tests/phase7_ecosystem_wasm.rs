@@ -507,3 +507,92 @@ fn test_cli_pkg_and_wasm_subprocesses() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+// ---------------------------------------------------------------------------
+// Regression: `^` must compile to exact arithmetic, never to a multiplication
+// ---------------------------------------------------------------------------
+#[test]
+fn test_wasm_pow_matches_native_evaluation() {
+    let src = "forward Powers {\n\
+                   cube     = x ^ 3\n\
+                   inv_sq   = x ^ -2\n\
+                   root     = x ^ 0.5\n\
+                   one      = x ^ 0\n\
+                   nested   = (x * 2) ^ 2\n\
+               }\n";
+    let module = parse_module_from_str(src, "powers");
+    let bundle = WasmTranspiler::transpile(&module).expect("integer and 0.5 exponents compile");
+    assert!(!bundle.wat.contains("approximation"));
+
+    let fractional = parse_module_from_str("forward Bad {\n y = x ^ 1.5\n}\n", "bad");
+    assert!(WasmTranspiler::transpile(&fractional).is_err(), "non-integer exponents must be rejected");
+
+    if Command::new("node").arg("--version").output().is_err() {
+        return;
+    }
+    let dir = create_temp_dir("wasm_pow");
+    let wasm_path = dir.join("powers.wasm");
+    fs::write(&wasm_path, &bundle.wasm_bytes).unwrap();
+    let node_code = format!(
+        "const bytes = require('fs').readFileSync('{file}');\n\
+         WebAssembly.instantiate(bytes).then(({{ instance }}) => {{\n\
+             const mem = new Float64Array(instance.exports.memory.buffer);\n\
+             mem[0] = 3.0;\n\
+             instance.exports.aven_solve(0, 1024);\n\
+             console.log(Array.from(mem.slice(128, 133)).join(','));\n\
+         }}).catch(e => {{ console.error(e); process.exit(1); }});",
+        file = wasm_path.to_str().unwrap().replace('\\', "/")
+    );
+    let out = Command::new("node").args(["-e", &node_code]).output().unwrap();
+    assert!(out.status.success(), "node wasm execution failed");
+    let got: Vec<f64> = String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .split(',')
+        .map(|v| v.parse().unwrap())
+        .collect();
+    let mut expected: HashMap<&str, f64> = HashMap::new();
+    expected.insert("cube", 27.0);
+    expected.insert("inv_sq", 1.0 / 9.0);
+    expected.insert("root", 3.0_f64.sqrt());
+    expected.insert("one", 1.0);
+    expected.insert("nested", 36.0);
+    for (i, name) in bundle.output_names.iter().enumerate() {
+        let want = expected[name.as_str()];
+        assert!((got[i] - want).abs() < 1e-12, "{}: wasm {} != {}", name, got[i], want);
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// ---------------------------------------------------------------------------
+// Regression: a package installed with `avenc pkg install` can be imported
+// ---------------------------------------------------------------------------
+#[test]
+fn test_pkg_install_then_import_from_another_project() {
+    let avenc = env!("CARGO_BIN_EXE_avenc");
+    let lib_dir = create_temp_dir("pkg_lib");
+    let app_dir = create_temp_dir("pkg_app");
+
+    let run = |args: &[&str], dir: &PathBuf| {
+        let out = Command::new(avenc).args(args).current_dir(dir).output().unwrap();
+        assert!(out.status.success(), "avenc {:?} failed: {}", args, String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+
+    run(&["pkg", "init", "power_lib"], &lib_dir);
+    run(&["pkg", "pack"], &lib_dir);
+    let archive = lib_dir.join("power_lib-0.1.0.avenpkg");
+    assert!(archive.exists(), "pkg pack must write <name>-<version>.avenpkg");
+    run(&["pkg", "install", archive.to_str().unwrap()], &app_dir);
+
+    // The app directory holds no package source; the import must come from .aven/packages
+    fs::write(
+        app_dir.join("app.aven"),
+        "import power_lib;\n\nsolve power_libRelations with {\n    voltage_v = 230\n    current_a = 10\n    operating_hours = 5\n}\n",
+    )
+    .unwrap();
+    let out = run(&["run", "app.aven"], &app_dir);
+    assert!(out.contains("energy_kwh       = 11.5000"), "{}", out);
+
+    let _ = fs::remove_dir_all(&lib_dir);
+    let _ = fs::remove_dir_all(&app_dir);
+}

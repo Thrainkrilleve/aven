@@ -255,6 +255,17 @@ impl Ledger {
     }
 
     pub fn why_with_depth(&self, name: &str, max_depth: Option<usize>) -> String {
+        self.why_formatted(name, max_depth, &|_, v| format!("{:.4}", v))
+    }
+
+    /// Like `why_with_depth`, with `format(name, value)` rendering each stored value
+    /// (e.g. converting base units to a variable's declared unit).
+    pub fn why_formatted(
+        &self,
+        name: &str,
+        max_depth: Option<usize>,
+        format: &dyn Fn(&str, f64) -> String,
+    ) -> String {
         let candidates = match self.by_name.get(name) {
             Some(list) if !list.is_empty() => list,
             _ => return format!("'{}' has no facts in ledger", name),
@@ -263,7 +274,7 @@ impl Ledger {
         let fact = candidates.last().unwrap();
         let mut lines = Vec::new();
         let mut visited = std::collections::HashSet::new();
-        self.walk_provenance(fact, 0, max_depth, &mut visited, &mut lines);
+        self.walk_provenance(fact, 0, max_depth, &mut visited, &mut lines, format);
         lines.join("\n")
     }
 
@@ -274,6 +285,7 @@ impl Ledger {
         max_depth: Option<usize>,
         visited: &mut std::collections::HashSet<usize>,
         lines: &mut Vec<String>,
+        format: &dyn Fn(&str, f64) -> String,
     ) {
         let pad = "  ".repeat(depth);
         let note = if fact.origin.is_empty() {
@@ -308,8 +320,13 @@ impl Ledger {
         }
 
         lines.push(format!(
-            "{}#{} {} = {:.4}{}{}",
-            pad, fact.seq, fact.name, fact.value, note, meta_str
+            "{}#{} {} = {}{}{}",
+            pad,
+            fact.seq,
+            fact.name,
+            format(&fact.name, fact.value),
+            note,
+            meta_str
         ));
 
         if !visited.insert(fact.seq) {
@@ -319,7 +336,7 @@ impl Ledger {
 
         for &parent_seq in &fact.causes {
             if let Some(parent) = self.by_seq.get(&parent_seq) {
-                self.walk_provenance(parent, depth + 1, max_depth, visited, lines);
+                self.walk_provenance(parent, depth + 1, max_depth, visited, lines, format);
             }
         }
     }

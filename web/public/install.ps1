@@ -1,26 +1,20 @@
-# Aven Windows Installer (PowerShell)
-# https://avenc.dev
-$ErrorActionPreference = "Stop"
+# Aven installer for Windows (PowerShell) — https://avenc.dev
+#
+# Builds avenc from source with cargo. Prebuilt binaries are not published yet,
+# so a Rust toolchain is required (https://rustup.rs). Uses return/throw rather than
+# exit, because this runs inside the caller's session via `irm ... | iex`.
 
-$Version = "0.9.0"
-Write-Host "==> Installing Aven Relational Compiler (avenc v$Version)..." -ForegroundColor Cyan
+$Repo = "https://github.com/Thrainkrilleve/aven.git"
 
-$InstallDir = "$env:USERPROFILE\.cargo\bin"
-if (!(Test-Path $InstallDir)) {
-    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+    Write-Host "error: cargo was not found." -ForegroundColor Red
+    Write-Host "Install a Rust toolchain from https://rustup.rs, then re-run this installer."
+    return
 }
 
-if (Get-Command cargo -ErrorAction SilentlyContinue) {
-    Write-Host "==> Rust toolchain detected. Building from pure-std source..." -ForegroundColor Green
-    cargo install --git https://github.com/Thrainkrilleve/aven.git --tag "v$Version" --force
-} else {
-    $Url = "https://github.com/Thrainkrilleve/aven/releases/download/v$Version/avenc-x86_64-pc-windows-msvc.zip"
-    Write-Host "==> Downloading binary from $Url..." -ForegroundColor Green
-    $ZipPath = "$env:TEMP\avenc.zip"
-    Invoke-WebRequest -Uri $Url -OutFile $ZipPath
-    Expand-Archive -Path $ZipPath -DestinationPath $InstallDir -Force
-    Remove-Item -Path $ZipPath -Force
-}
+Write-Host "==> Building avenc from $Repo (this takes about a minute)..." -ForegroundColor Cyan
+cargo install --git $Repo avenc --locked
+if ($LASTEXITCODE -ne 0) { throw "cargo install failed with exit code $LASTEXITCODE" }
 
-Write-Host "==> Success! avenc installed to $InstallDir\avenc.exe" -ForegroundColor Green
-Write-Host "==> Run: avenc --help" -ForegroundColor Yellow
+Write-Host ""
+Write-Host "==> Installed. Check it with: avenc --version" -ForegroundColor Green

@@ -3,248 +3,396 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Aven — Declarative Invariant Programming & Relational Physics</title>
-  <meta name="description" content="Aven replaces fragile imperative scripts with unbreakable mathematical invariants, compile-time physical unit tensors, and cryptographic audit trails.">
+  <title>Aven — Relational programming for physical systems</title>
+  <meta name="description" content="Aven is a relational language and solver. Write an equation once, solve it for any unknown, check its units, and compile it to C or WebAssembly with a tamper-evident audit trail.">
+  <meta name="theme-color" content="#070a10">
+  <meta property="og:title" content="Aven — Relational programming for physical systems">
+  <meta property="og:description" content="Write the physics once. Solve for any unknown. Compile to C or WebAssembly.">
+  <meta property="og:url" content="https://avenc.dev/">
+  <meta property="og:type" content="website">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>▲</text></svg>">
 </head>
 <body>
 
-  <!-- Navigation -->
-  <nav class="navbar">
-    <a href="/" class="brand">
-      <span>▲ AVEN</span>
-      <span class="brand-badge">v0.9.0</span>
-    </a>
-    <ul class="nav-links">
-      <li><a href="/" class="active">Home</a></li>
-      <li><a href="#playground">Playground</a></li>
-      <li><a href="/docs.html">Documentation</a></li>
-      <li><a href="/registry.html">Packages</a></li>
-      <li><a href="https://github.com/Thrainkrilleve/aven" target="_blank" rel="noopener">GitHub</a></li>
-    </ul>
-    <div class="nav-actions">
-      <a href="/docs.html" class="btn btn-outline btn-sm">Tutorial</a>
-      <a href="#install" class="btn btn-primary btn-sm">Install CLI</a>
+  <nav class="nav" aria-label="Main">
+    <div class="container">
+      <a href="/" class="brand" aria-label="Aven home">
+        <img src="/favicon.svg" alt="" class="brand-mark">
+        AVEN
+        <span class="brand-version">v0.6.0</span>
+      </a>
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" aria-label="Menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <ul class="nav-links" id="nav-links">
+        <li><a href="/#playground">Playground</a></li>
+        <li><a href="/docs.html">Docs</a></li>
+        <li><a href="/registry.html">Packages</a></li>
+        <li><a href="https://github.com/Thrainkrilleve/aven" rel="noopener">GitHub</a></li>
+      </ul>
+      <div class="nav-actions">
+        <a href="/docs.html#install" class="btn btn-primary btn-sm">Install</a>
+      </div>
     </div>
   </nav>
 
-  <!-- Hero Section -->
-  <header class="hero">
-    <div class="container">
-      <div class="hero-tag">
-        <span class="pulse-dot"></span>
-        Zero-Dependency Rust Compiler &bull; Freestanding C99 &bull; WebAssembly Core 1.0
-      </div>
-      <h1 class="hero-title">
-        Mathematical Determinism for <span class="gradient-text">Physical & Autonomous Systems</span>
-      </h1>
-      <p class="hero-subtitle">
-        Aven replaces fragile imperative code with timeless mathematical invariants. Define physical laws once, solve omnidirectionally via symbolic Jacobians, and verify compile-time dimensional tensors.
-      </p>
-
-      <!-- Terminal Install Box -->
-      <div class="install-box" id="install">
-        <div class="terminal-header">
-          <div class="terminal-dots">
-            <span class="terminal-dot red"></span>
-            <span class="terminal-dot yellow"></span>
-            <span class="terminal-dot green"></span>
+  <main>
+    <!-- Hero -->
+    <header class="hero">
+      <div class="container hero-grid">
+        <div>
+          <div class="hero-tag"><b>v0.6.0</b> Pure-std Rust compiler &middot; C &middot; WebAssembly &middot; SMT-LIB2</div>
+          <h1>Write the physics once. <span class="hl">Solve for any unknown.</span></h1>
+          <p class="hero-lede">
+            Aven is a relational language for physical and operational systems. Equations are invariants, not assignments:
+            give Aven any sufficient set of knowns and it settles the rest, checks the units, records every derived
+            fact in a hash-chained ledger, and compiles pinned models to solver-free C or WebAssembly.
+          </p>
+          <div class="hero-ctas">
+            <a href="#playground" class="btn btn-primary">
+              Try it in the browser
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            </a>
+            <a href="/docs.html" class="btn btn-ghost">Read the guide</a>
           </div>
-          <div class="terminal-tabs">
-            <button class="tab-btn active" data-tool="curl">curl (Linux / macOS)</button>
-            <button class="tab-btn" data-tool="powershell">powershell (Windows)</button>
-            <button class="tab-btn" data-tool="cargo">cargo</button>
-          </div>
-        </div>
-        <div class="terminal-body">
-          <code class="terminal-cmd" id="install-cmd">curl -proto '=https' --tlsv1.2 -sSf https://avenc.dev/install.sh | sh</code>
-          <button class="copy-btn" id="copy-install-btn">Copy</button>
-        </div>
-      </div>
 
-      <!-- Live D1 Stats Bar -->
-      <div class="stats-bar">
-        <div class="stat-item">
-          <div class="stat-val accent" id="stat-latency">&lt; 10.1 µs</div>
-          <div class="stat-label">Solver Median Latency</div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-val" id="stat-solves">1,720+</div>
-          <div class="stat-label">Verified Solves / Sec</div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-val" id="stat-packages">4</div>
-          <div class="stat-label">Verified Packages in D1</div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-val accent">0</div>
-          <div class="stat-label">External Crate Dependencies</div>
-        </div>
-      </div>
-    </div>
-  </header>
-
-  <!-- Interactive WASM Playground Section -->
-  <section class="playground-section" id="playground">
-    <div class="container">
-      <div style="text-align: center; margin-bottom: 2rem;">
-        <h2>Interactive WebAssembly Scientific Solver</h2>
-        <p>Running our pure standard library WebAssembly Core 1.0 engine directly in your browser. Drag inputs to witness instant multidimensional relaxation.</p>
-      </div>
-
-      <div class="playground-container">
-        <div class="playground-header">
-          <div class="model-selector">
-            <button class="model-btn active" data-model="quadcopter">Quadcopter Avionics</button>
-            <button class="model-btn" data-model="server_capacity">Little's Law Capacity</button>
-            <button class="model-btn" data-model="portfolio">Markowitz Portfolio</button>
-          </div>
-          <button class="btn btn-outline btn-sm" id="share-model-btn">Share Model</button>
-        </div>
-
-        <!-- Left: Aven Source Code Preview -->
-        <div class="playground-editor">
-          <div class="editor-title">
-            <span>RELATIONAL INVARIANTS</span>
-            <span>AVEN v0.9.0</span>
-          </div>
-          <pre class="code-preview" id="code-display"></pre>
-        </div>
-
-        <!-- Right: Reactive Sliders & Settled Telemetry Panel -->
-        <div class="playground-controls">
-          <div class="editor-title">
-            <span>OBSERVED INPUT PARAMETERS</span>
-            <span>LIVE REACTIVE BINDINGS</span>
-          </div>
-          
-          <div id="sliders-container"></div>
-
-          <!-- Settled Fact Ledger Panel -->
-          <div class="settlement-panel">
-            <div class="settlement-status">
-              <span class="settlement-badge">
-                <span class="pulse-dot"></span>
-                SYSTEM SETTLED
-              </span>
-              <span style="font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-dim);" id="solve-latency">
-                0.2 µs
-              </span>
+          <div class="install" id="install">
+            <div class="install-tabs" role="tablist" aria-label="Install method">
+              <button class="install-tab" role="tab" aria-selected="true"
+                data-cmd="cargo install --git https://github.com/Thrainkrilleve/aven.git avenc"
+                data-note="Needs a Rust toolchain (rustup.rs). Builds from source; no external crates.">cargo</button>
+              <button class="install-tab" role="tab" aria-selected="false"
+                data-cmd="curl --proto '=https' --tlsv1.2 -sSf https://avenc.dev/install.sh | sh"
+                data-note="Linux / macOS. Wraps the cargo install above; read it first at avenc.dev/install.sh.">curl</button>
+              <button class="install-tab" role="tab" aria-selected="false"
+                data-cmd="irm https://avenc.dev/install.ps1 | iex"
+                data-note="Windows PowerShell. Wraps the cargo install above.">powershell</button>
             </div>
-            <div class="settlement-grid" id="settled-outputs"></div>
+            <div class="install-body"><code class="install-cmd"></code></div>
+            <p class="install-note"></p>
+          </div>
+        </div>
+
+        <div class="window" aria-label="Example: one relation solved in two directions">
+          <div class="window-bar">
+            <span class="window-dots"><i></i><i></i><i></i></span>
+            dynamics.aven
+          </div>
+<pre data-lang="aven">
+// One equation. No input or output is fixed.
+relation Dynamics {
+    force = mass * acceleration
+}
+
+// Knowns go in a solve block; Aven settles the rest.
+solve Dynamics with {
+    force        = 4200.0
+    acceleration = 5.0
+}
+</pre>
+<pre class="term"><span class="prompt">$</span> avenc run dynamics.aven
+<span class="muted">Solver Trace:</span>
+  [force = mass * acceleration] mass &lt;- backward Newton
+
+<span class="muted">Settled Environment:</span>
+  acceleration     = 5.0000
+  force            = 4200.0000
+  mass             = <span class="val">840.0000</span>
+
+<span class="muted">Fact Ledger: 3 facts settled.</span></pre>
+        </div>
+      </div>
+    </header>
+
+    <!-- Proof strip -->
+    <section class="section-tight" aria-label="Key figures">
+      <div class="container">
+        <div class="proof">
+          <div class="proof-item">
+            <div class="proof-val">0</div>
+            <div class="proof-label">External crates</div>
+            <div class="proof-src">Compiler, solver and SHA-256 are Rust <code>std</code> only</div>
+          </div>
+          <div class="proof-item">
+            <div class="proof-val">0.56<small>ms</small></div>
+            <div class="proof-label">Median end-to-end solve</div>
+            <div class="proof-src"><code>avenc bench</code>, live IPC daemon, 24-fact flight model</div>
+          </div>
+          <div class="proof-item">
+            <div class="proof-val">1,720<small>/s</small></div>
+            <div class="proof-label">Solves per second</div>
+            <div class="proof-src">Same benchmark, one client, 8-core workstation</div>
+          </div>
+          <div class="proof-item">
+            <div class="proof-val">4</div>
+            <div class="proof-label">Execution targets</div>
+            <div class="proof-src">Native solver, C99, WebAssembly, SMT-LIB2</div>
           </div>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- Engineering Pillars / Features Grid -->
-  <section class="features-section">
-    <div class="container">
-      <div style="text-align: center;">
-        <h2>Engineered for Safety-Critical Systems</h2>
-        <p>Aven guarantees mathematical determinism from cloud capacity planning to sub-millisecond bare-metal control loops.</p>
-      </div>
-
-      <div class="features-grid">
-        <div class="feature-card">
-          <span class="feature-icon">⚡</span>
-          <h3 class="feature-title">Omnidirectional Relaxation</h3>
-          <p class="feature-desc">
-            Define physical equations once. Solve in any direction without writing separate forward and inverse functions. Symbolic Jacobians ensure exact quadratic convergence.
+    <!-- Playground -->
+    <section class="section" id="playground">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Playground</span>
+          <h2>Real models, compiled to WebAssembly, running in your browser</h2>
+          <p>
+            Each model below is a <code>forward</code> block from the repository's <code>examples/</code> directory,
+            compiled with <code>avenc emit-wasm</code>. At build time every output is checked against
+            <code>avenc run</code> on the example's own scenario.
           </p>
         </div>
 
-        <div class="feature-card">
-          <span class="feature-icon">📐</span>
-          <h3 class="feature-title">7-D SI Unit Tensors</h3>
-          <p class="feature-desc">
-            Enforces dimensional homogeneity at compile-time across Mass, Length, Time, Current, Temperature, Substance, and Luminous Intensity. Dimensional violations fail build.
-          </p>
-        </div>
-
-        <div class="feature-card">
-          <span class="feature-icon">🛡️</span>
-          <h3 class="feature-title">Cryptographic Fact Ledgers</h3>
-          <p class="feature-desc">
-            Every settled deduction produces an append-only, Merkle-chained SHA-256 audit entry. Ingested facts track TTL freshness to block decisions on stale telemetry.
-          </p>
-        </div>
-
-        <div class="feature-card">
-          <span class="feature-icon">🔬</span>
-          <h3 class="feature-title">Formal SMT Verification</h3>
-          <p class="feature-desc">
-            Transpiles invariant specifications directly to SMT-LIB2 v2.6 for automated theorem proving in Z3 or CVC5, with DO-178C (Table A-5) and ISO 26262 ASIL-D safety reports.
-          </p>
-        </div>
-
-        <div class="feature-card">
-          <span class="feature-icon">⚙️</span>
-          <h3 class="feature-title">Freestanding C99 Codegen</h3>
-          <p class="feature-desc">
-            Direction-pinned <code>forward</code> blocks compile to branchless, zero-overhead ANSI C code with no solver runtime. Perfect for RTOS, automotive ECUs, and microcontrollers.
-          </p>
-        </div>
-
-        <div class="feature-card">
-          <span class="feature-icon">⏳</span>
-          <h3 class="feature-title">Time-Travel Debugger</h3>
-          <p class="feature-desc">
-            Interactive REPL with timeline scrubbing (<code>step</code>, <code>goto</code>), causal provenance DAG rendering (<code>why</code>), and counterfactual what-if branching (<code>what-if</code>, <code>diff</code>).
+        <div class="pg">
+          <div class="pg-head">
+            <div class="pg-models" role="tablist" aria-label="Model" id="pg-models"></div>
+            <button class="btn btn-ghost btn-sm" type="button" id="pg-share">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>
+              <span>Copy link</span>
+            </button>
+          </div>
+          <div class="pg-body">
+            <div class="pg-pane">
+              <div class="pane-title">
+                <span id="pg-block">Source</span>
+                <a id="pg-source-link" href="https://github.com/Thrainkrilleve/aven/tree/main/examples" rel="noopener">View file</a>
+              </div>
+              <pre class="pg-code" id="pg-code"></pre>
+            </div>
+            <div class="pg-pane">
+              <div class="pane-title"><span>Inputs</span><button class="copy-btn" type="button" id="pg-reset">Reset</button></div>
+              <div class="sliders" id="pg-sliders"></div>
+              <div class="outputs" aria-live="polite">
+                <div class="outputs-head">
+                  <span class="status-ok" id="pg-status">Loading model…</span>
+                  <span id="pg-timing"></span>
+                </div>
+                <div class="output-grid" id="pg-outputs"></div>
+              </div>
+            </div>
+          </div>
+          <p class="pg-foot">
+            Values and timings are computed locally in WebAssembly; nothing is sent to a server.
+            Inputs not shown use the example's defaults.
           </p>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- Footer -->
+    <!-- Capabilities -->
+    <section class="section divider">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">What it does</span>
+          <h2>One model, checked, solved, explained and compiled</h2>
+        </div>
+
+        <div class="cards">
+          <article class="card">
+            <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7 7h10M7 17h10M4 12h16"/><path d="m15 4 3 3-3 3M9 14l-3 3 3 3"/></svg></div>
+            <h3>Solve in any direction</h3>
+            <p>Relations have no fixed inputs. Aven evaluates forward where it can, and solves backward with symbolic derivatives and guarded Newton–Raphson where it must.</p>
+            <span class="cmd">avenc run</span>
+          </article>
+          <article class="card">
+            <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 17 17 3l4 4L7 21H3z"/><path d="m7 13 2 2M10 10l2 2M13 7l2 2"/></svg></div>
+            <h3>Units checked and converted</h3>
+            <p>Dimensions are inferred across every equation; adding <code>m/s</code> to <code>s</code> is a compile error. Values given in <code>km/h</code>, <code>hPa</code> or <code>MB</code> are converted before solving and shown back in their own units.</p>
+            <span class="cmd">avenc check</span>
+          </article>
+          <article class="card">
+            <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+            <h3>Tamper-evident audit log</h3>
+            <p>Every settled fact extends a SHA-256 hash chain, optionally HMAC-signed. Edits, deletions, reordering and truncation are all detected. Stale inputs block the decision (exit code 3).</p>
+            <span class="cmd">avenc verify-ledger</span>
+          </article>
+          <article class="card">
+            <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 15c3 0 4-8 7-8s3 4 6 4"/></svg></div>
+            <h3>Optimization with certificates</h3>
+            <p><code>minimize</code> and <code>maximize</code> over real and integer variables. Results are labelled <em>proven optimal</em> only when a bound certifies them. Pareto frontiers with knee detection.</p>
+            <span class="cmd">avenc pareto</span>
+          </article>
+          <article class="card">
+            <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m8 8-5 4 5 4M16 8l5 4-5 4M14 4l-4 16"/></svg></div>
+            <h3>Solver-free C and WebAssembly</h3>
+            <p><code>forward</code> blocks compile to branchless C99 or WebAssembly 1.0 with no runtime. Generated C is checked to match <code>avenc run</code> exactly.</p>
+            <span class="cmd">avenc emit-c · avenc emit-wasm</span>
+          </article>
+          <article class="card">
+            <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M7.5 8 11 16M16.5 8 13 16"/></svg></div>
+            <h3>Explain every number</h3>
+            <p>Print the derivation tree of any value, replay a run in the time-travel debugger, branch a what-if, or export the model to SMT-LIB2 for Z3 or CVC5.</p>
+            <span class="cmd">avenc why · avenc debug · avenc emit-smt</span>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Workflow -->
+    <section class="section divider">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Workflow</span>
+          <h2>From model to deployment</h2>
+          <p>Real output from <code>examples/server_capacity.aven</code>, a Little's Law sizing model.</p>
+        </div>
+
+        <div class="flow">
+          <ol class="steps" role="tablist" aria-label="Workflow step">
+            <li class="step"><button type="button" role="tab" aria-selected="true" data-step="check" data-label="avenc check"><strong>Check</strong><span>Units and degrees of freedom, before anything runs.</span></button></li>
+            <li class="step"><button type="button" role="tab" aria-selected="false" data-step="run" data-label="avenc run"><strong>Solve</strong><span>Settle every unknown from the observed values.</span></button></li>
+            <li class="step"><button type="button" role="tab" aria-selected="false" data-step="why" data-label="avenc why"><strong>Explain</strong><span>Trace any value back to the inputs that produced it.</span></button></li>
+            <li class="step"><button type="button" role="tab" aria-selected="false" data-step="emit" data-label="avenc emit-c"><strong>Compile</strong><span>Emit dependency-free C for embedded targets.</span></button></li>
+            <li class="step"><button type="button" role="tab" aria-selected="false" data-step="audit" data-label="avenc verify-ledger"><strong>Audit</strong><span>Prove the decision log has not been altered.</span></button></li>
+          </ol>
+
+          <div class="window">
+            <div class="window-bar"><span class="window-dots"><i></i><i></i><i></i></span><span data-step-label>avenc check</span></div>
+<pre class="term" data-step-panel="check"><span class="prompt">$</span> avenc check examples/server_capacity.aven
+Checking module 'examples/server_capacity.aven'...
+  Blocks:   2
+  Solves:   1
+
+<span class="ok">✓ Dimensional Analysis PASSED:</span>
+  Verified 10 equation(s) across SI/Systems unit registry.
+
+<span class="ok">✓ System Determinacy PASSED:</span> All relation blocks have
+  0 degrees of freedom.</pre>
+<pre class="term" data-step-panel="run" hidden><span class="prompt">$</span> avenc run examples/server_capacity.aven --ledger audit.jsonl
+
+<span class="muted">Settled Environment:</span>
+  allocated_workers  = <span class="val">1429.0000</span>
+  avg_latency_ms     = 20.0000
+  payload_gbps       = <span class="val">25.6000</span>
+  raw_workers        = <span class="val">1000.0000</span>
+  reqs_per_second    = 50000.0000
+  target_utilization = 0.7000
+  total_ram_needed   = <span class="val">32676.0000</span>
+  wire_rate_gbps     = <span class="val">26.6240</span>
+
+<span class="muted">Fact Ledger: 13 facts settled.</span></pre>
+<pre class="term" data-step-panel="why" hidden><span class="prompt">$</span> avenc why examples/server_capacity.aven total_ram_needed
+Causal Derivation Tree for 'total_ram_needed':
+#11 total_ram_needed = <span class="val">32676.0000</span>  <span class="muted">; forward ProductionProfile: = allocated_workers * (ram_per_worker + socket_buffer_mb) + os_kernel_ram_mb</span>
+  #10 allocated_workers = 1429.0000  <span class="muted">; forward ProductionProfile: = ceil(raw_workers / target_utilization)</span>
+    #9 raw_workers = 1000.0000  <span class="muted">; forward ProductionProfile: = reqs_per_second * avg_latency_ms / 1000</span>
+      #2 avg_latency_ms = 20.0000  <span class="muted">; user binding</span>
+      #1 reqs_per_second = 50000.0000  <span class="muted">; user binding</span>
+    #7 target_utilization = 0.7000  <span class="muted">; user binding</span>
+  #6 os_kernel_ram_mb = 4096.0000  <span class="muted">; user binding</span>
+  #4 ram_per_worker = 16.0000  <span class="muted">; user binding</span>
+  #5 socket_buffer_mb = 4.0000  <span class="muted">; user binding</span></pre>
+<pre class="term" data-step-panel="emit" hidden><span class="prompt">$</span> avenc emit-c examples/server_capacity.aven -o capacity.c
+<span class="muted">/* Generated by avenc -- direction-pinned, solver-free */</span>
+static void aven_ProductionProfile(double avg_latency_ms, ...,
+                                   double* out_raw_workers, ...) {
+    const double raw_workers = ((reqs_per_second * avg_latency_ms) / 1000.0);
+    const double allocated_workers = aven_ceil((raw_workers / target_utilization));
+    const double total_ram_needed = ((allocated_workers *
+        (ram_per_worker + socket_buffer_mb)) + os_kernel_ram_mb);
+    const double payload_gbps = (((reqs_per_second * avg_payload_kb) * 8.0) / 1000000.0);
+    const double wire_rate_gbps = (payload_gbps * framing_overhead_ratio);
+    ...
+}</pre>
+<pre class="term" data-step-panel="audit" hidden><span class="prompt">$</span> avenc verify-ledger audit.jsonl
+<span class="ok">Ledger OK:</span> 13 fact(s), chain intact (signatures not checked: pass
+  --key &lt;code&gt; or set AVEN_LEDGER_KEY), head 1e61a9c5de48af4c628242f5…
+
+<span class="muted"># change one recorded value by hand, then verify again</span>
+<span class="prompt">$</span> avenc verify-ledger audit.jsonl
+<span class="bad">Ledger TAMPERED or invalid:</span> line 1: fact #1: displayed value
+  differs from its hashed value_bits
+<span class="muted">exit code 1</span></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Verification -->
+    <section class="section divider">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Verification</span>
+          <h2>Claims are checked against independent references</h2>
+          <p>The <code>verify/</code> harnesses in the repository compare Aven with established tools, and <code>tests/claims.rs</code> turns each documented claim into a test.</p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Harness</th><th>What it checks</th></tr></thead>
+            <tbody>
+              <tr><td><code>verify/oracle.py</code></td><td>Answers match HiGHS and SciPy on random integer, linear, infeasible, unbounded, nonconvex-integer and smooth models.</td></tr>
+              <tr><td><code>verify/c_diff.py</code></td><td>Emitted C compiles warning-free, is branchless, and matches <code>avenc run</code> exactly.</td></tr>
+              <tr><td><code>verify/fuzz.py</code></td><td>Malformed and adversarial input never crashes, panics or hangs the compiler.</td></tr>
+              <tr><td><code>verify/ledger_tamper.py</code></td><td>Every tampering technique tried on an audit log is detected.</td></tr>
+              <tr><td><code>verify/live_atmosphere.py</code></td><td>The flight model matches an independent ISA computation on 150 live aircraft.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="section-tight">
+      <div class="container">
+        <div class="cta">
+          <h2>Build your first model in fifteen minutes</h2>
+          <p>The guide walks from installation to solving, unit checking, optimization and code generation, with every example runnable as written.</p>
+          <div class="hero-ctas">
+            <a href="/docs.html" class="btn btn-primary">Start the guide</a>
+            <a href="https://github.com/Thrainkrilleve/aven" class="btn btn-ghost" rel="noopener">View the source</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
   <footer class="footer">
     <div class="container">
       <div class="footer-grid">
         <div class="footer-brand">
-          <div class="brand">▲ AVEN</div>
-          <p>Declarative invariant programming and relational multi-physics compiler. Built with 100% pure standard library Rust.</p>
+          <a href="/" class="brand"><img src="/favicon.svg" alt="" class="brand-mark"> AVEN</a>
+          <p>A relational language and solver for physical systems, written in dependency-free Rust. MIT licensed.</p>
         </div>
-        <div class="footer-col">
-          <h4>Documentation</h4>
+        <div>
+          <h4>Learn</h4>
           <ul>
-            <li><a href="/docs.html">Getting Started</a></li>
-            <li><a href="/docs.html#cookbook">Cookbook by Example</a></li>
-            <li><a href="/docs.html#cheat-sheet">Quick Reference</a></li>
-            <li><a href="/docs.html#standards">Engineering Standards</a></li>
+            <li><a href="/docs.html">Getting started</a></li>
+            <li><a href="/docs.html#language">Language guide</a></li>
+            <li><a href="/docs.html#cli">CLI reference</a></li>
+            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/docs/TUTORIAL.md" rel="noopener">Cookbook</a></li>
           </ul>
         </div>
-        <div class="footer-col">
-          <h4>Ecosystem</h4>
+        <div>
+          <h4>Project</h4>
           <ul>
-            <li><a href="/registry.html">Package Registry</a></li>
-            <li><a href="/docs.html#package-spec">Package Specification</a></li>
-            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/RFC_PROCESS.md" target="_blank" rel="noopener">RFC Process</a></li>
-            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/CODE_OF_CONDUCT.md" target="_blank" rel="noopener">Code of Conduct</a></li>
+            <li><a href="/registry.html">Packages</a></li>
+            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/STANDARDS.md" rel="noopener">Engineering standards</a></li>
+            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/RFC_PROCESS.md" rel="noopener">RFC process</a></li>
+            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/CONTRIBUTING.md" rel="noopener">Contributing</a></li>
           </ul>
         </div>
-        <div class="footer-col">
-          <h4>Repository</h4>
+        <div>
+          <h4>Source</h4>
           <ul>
-            <li><a href="https://github.com/Thrainkrilleve/aven" target="_blank" rel="noopener">GitHub (Mirror)</a></li>
-            <li><a href="https://git.thrainkrill.space/thrain/aven" target="_blank" rel="noopener">Git Origin</a></li>
-            <li><a href="https://github.com/Thrainkrilleve/aven/releases" target="_blank" rel="noopener">Binary Releases</a></li>
-            <li><a href="mailto:conduct@avenc.dev">Contact</a></li>
+            <li><a href="https://github.com/Thrainkrilleve/aven" rel="noopener">GitHub</a></li>
+            <li><a href="https://git.thrainkrill.space/thrain/aven" rel="noopener">Forgejo origin</a></li>
+            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/CODE_OF_CONDUCT.md" rel="noopener">Code of conduct</a></li>
           </ul>
         </div>
       </div>
       <div class="footer-bottom">
-        <div>&copy; 2026 Aven Contributors. Open source under MIT License.</div>
-        <div>Hosted globally on Cloudflare Workers &bull; avenc.dev</div>
+        <span>&copy; 2026 Aven contributors &middot; MIT License</span>
+        <span>avenc.dev</span>
       </div>
     </div>
   </footer>
 
+  <script type="module" src="/site.js"></script>
   <script type="module" src="/app.js"></script>
 </body>
 </html>

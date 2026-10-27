@@ -2,32 +2,33 @@
 
 This guide serves as the definitive reference for AI models (LLMs, coding assistants) and systems engineers modeling physical systems, hardware infrastructure, and digital twins in **Aven**.
 
-For the repository-level document, see [`docs/AVEN_AI_MODEL_GUIDE.md`](file:///f:/aven/docs/AVEN_AI_MODEL_GUIDE.md).
+For the repository-level document, see [`docs/AVEN_AI_MODEL_GUIDE.md`](https://github.com/Thrainkrilleve/aven/blob/main/docs/AVEN_AI_MODEL_GUIDE.md).
 
 ---
 
 ## 1. Quick Syntax Rules for AI Assistants
 
-1. **Units in Brackets:** Square brackets `[...]` are ONLY used for physical dimensions (e.g. `100.0 [TB]`, `295.15 [K]`, `10.0 [Gbps]`). Aven does NOT have array slicing or indexing syntax.
+1. **Units follow the number, without brackets:** `295.15 K`, `10.0 Gbps`, `250 km/h`. Aven has no array slicing or indexing syntax.
 2. **Infix Exponents:** Use `^` for powers (`z = x ^ 1.6`), NEVER `pow(x, y)` or `x ** y`.
 3. **Relation vs. Solve:** 
    - Define physical relationships in `relation Name { ... }`.
    - Supply bindings, inequalities, and objectives in `solve Name with { ... }`.
 4. **Discrete Optimization:** Declare discrete variables with `int varname` and set an objective (`minimize(cost)`).
 5. **No Imperative Control Flow:** Aven equations are simultaneous constraints, not sequential assignments. Do not use `if`, `while`, or `return`.
+6. **Units convert to SI:** an annotated value is converted to base SI before solving (`18 degC` becomes 291.15 K). If a formula's constants assume °C, hPa or another non-SI unit, give plain numbers instead of annotations.
 
 ---
 
 ## 2. Dimensional Checking Cheat Sheet
 
-Aven validates physical unit consistency at compile time.
+Aven validates physical unit consistency at compile time and converts values to base SI before solving.
 
-| Operation | Dimension Rule | Example |
+| Operation | Dimension Rule | Example (with `signal`-declared units) |
 | :--- | :--- | :--- |
-| `a + b` / `a - b` | Dimensions must match | `10 [kW] + 500 [W]` $\to$ `10.5 [kW]` |
-| `a * b` | Dimensions multiply | `speed [m/s] * time [s]` $\to$ `[m]` |
-| `a / b` | Dimensions divide | `distance [m] / time [s]` $\to$ `[m/s]` |
-| `a ^ n` | Exponent must be dimensionless | `radius [m] ^ 2` $\to$ `[m^2]` |
+| `a + b` / `a - b` | Dimensions must match | `p_kw + p_w` with `kW` and `W` → `W` (values converted) |
+| `a * b` | Dimensions multiply | `speed * time` with `m/s` and `s` → `m` |
+| `a / b` | Dimensions divide | `distance / time` with `m` and `s` → `m/s` |
+| `a ^ n` | Exponent is a dimensionless constant; result must have whole-number dimensions | `radius ^ 2` with `m` → `m^2`; `area ^ 0.5` with `m^2` → `m` |
 
 ---
 
@@ -44,9 +45,9 @@ relation HardwareSizing {
 }
 
 solve HardwareSizing with {
-    drive_size_tb = 18.0 [TB]
+    drive_size_tb = 18.0
     raid_eff = 0.75
-    usable_tb >= 100.0 [TB]
+    usable_tb >= 100.0
     drives_per_node <= 12
     minimize(total_cost)
 }
@@ -61,15 +62,15 @@ relation ThermalTwin {
 }
 
 solve ThermalTwin with {
-    idle_w = 110.0 [W]
-    dynamic_w = 240.0 [W]
+    idle_w = 110.0
+    dynamic_w = 240.0
     util = 0.70
-    inlet_c = 18.0 [degC]
+    inlet_c = 18.0
     recirc = 0.25
     rho = 1.2
     cp = 1005.0
     flow_m3s = 0.05
-    limit_c = 45.0 [degC]
+    limit_c = 45.0
 }
 ```
 
@@ -87,6 +88,6 @@ avenc run model.aven
 # Inspect causal lineage
 avenc why model.aven varname
 
-# Compile to standalone C99
-avenc build model.aven --emit-c -o model.c
+# Compile the forward block to standalone C99
+avenc emit-c model.aven -o model.c
 ```

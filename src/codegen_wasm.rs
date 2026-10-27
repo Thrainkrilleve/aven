@@ -171,6 +171,9 @@ impl WasmTranspiler {
                 Self::emit_wat_expr(inner, out, indent)?;
                 out.push_str(&format!("{}f64.neg\n", pad));
             }
+            Expr::Bin(BinaryOp::Pow, left, right) => {
+                Self::emit_wat_expr(&lower_pow(left, right)?, out, indent)?;
+            }
             Expr::Bin(op, left, right) => {
                 Self::emit_wat_expr(left, out, indent)?;
                 Self::emit_wat_expr(right, out, indent)?;
@@ -179,10 +182,7 @@ impl WasmTranspiler {
                     BinaryOp::Sub => out.push_str(&format!("{}f64.sub\n", pad)),
                     BinaryOp::Mul => out.push_str(&format!("{}f64.mul\n", pad)),
                     BinaryOp::Div => out.push_str(&format!("{}f64.div\n", pad)),
-                    BinaryOp::Pow => {
-                        // In pure WASM, handle simple exponents or approximate with exp(y * ln(x))
-                        out.push_str(&format!("{}f64.mul ;; pow approximation\n", pad));
-                    }
+                    BinaryOp::Pow => unreachable!("lowered above"),
                 }
             }
             Expr::Call(name, arg) => {
@@ -446,6 +446,9 @@ impl WasmTranspiler {
                 Self::emit_wasm_expr(inner, var_map, out)?;
                 out.push(0x9A); // f64.neg
             }
+            Expr::Bin(BinaryOp::Pow, left, right) => {
+                Self::emit_wasm_expr(&lower_pow(left, right)?, var_map, out)?;
+            }
             Expr::Bin(op, left, right) => {
                 Self::emit_wasm_expr(left, var_map, out)?;
                 Self::emit_wasm_expr(right, var_map, out)?;
@@ -454,10 +457,7 @@ impl WasmTranspiler {
                     BinaryOp::Sub => out.push(0xA1), // f64.sub
                     BinaryOp::Mul => out.push(0xA2), // f64.mul
                     BinaryOp::Div => out.push(0xA3), // f64.div
-                    BinaryOp::Pow => {
-                        // In pure wasm MVP, approximation with f64.mul
-                        out.push(0xA2);
-                    }
+                    BinaryOp::Pow => unreachable!("lowered above"),
                 }
             }
             Expr::Call(name, arg) => {
@@ -475,6 +475,43 @@ impl WasmTranspiler {
         }
         Ok(())
     }
+}
+
+/// WebAssembly 1.0 has no pow instruction, so `base ^ exp` is lowered to exact arithmetic:
+/// integer exponents become repeated multiplication (reciprocal for negative exponents) and
+/// `^ 0.5` becomes `f64.sqrt`. Any other exponent is rejected rather than approximated.
+const MAX_WASM_POW_EXPONENT: f64 = 64.0;
+
+fn lower_pow(base: &Expr, exp: &Expr) -> Result<Expr, CodegenError> {
+    let n = match exp {
+        Expr::Num(n) => *n,
+        Expr::UnaryMinus(inner) => match inner.as_ref() {
+            Expr::Num(n) => -*n,
+            _ => return Err(unsupported_pow()),
+        },
+        _ => return Err(unsupported_pow()),
+    };
+    if n == 0.5 {
+        return Ok(Expr::Call("sqrt".to_string(), Box::new(base.clone())));
+    }
+    if n.fract() != 0.0 || n.abs() > MAX_WASM_POW_EXPONENT {
+        return Err(unsupported_pow());
+    }
+    let k = n.abs() as usize;
+    let mut product = if k == 0 { Expr::Num(1.0) } else { base.clone() };
+    for _ in 1..k {
+        product = Expr::Bin(BinaryOp::Mul, Box::new(product), Box::new(base.clone()));
+    }
+    if n < 0.0 {
+        product = Expr::Bin(BinaryOp::Div, Box::new(Expr::Num(1.0)), Box::new(product));
+    }
+    Ok(product)
+}
+
+fn unsupported_pow() -> CodegenError {
+    CodegenError(
+        "Unsupported WASM exponent: only integer constants (|n| <= 64) and 0.5 can be compiled exactly".to_string(),
+    )
 }
 
 // ---------------------------------------------------------------------------

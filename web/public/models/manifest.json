@@ -1,0 +1,177 @@
+{
+  "generated_by": "avenc 0.6.0",
+  "models": [
+    {
+      "key": "quadcopter",
+      "title": "Quadcopter flight envelope",
+      "example": "examples/quadcopter_avionics.aven",
+      "block": "FastFlightComputer",
+      "source": "forward FastFlightComputer {\n    rps                 = motor_rpm / 60\n    single_thrust_n     = thrust_coeff * air_density * (rps^2) * (prop_diameter_m^4)\n    total_thrust_n      = 4 * single_thrust_n\n    weight_n            = total_mass_kg * 9.80665\n    thrust_weight_ratio = total_thrust_n / weight_n\n    climb_accel_mps2    = (total_thrust_n - weight_n) / total_mass_kg\n    total_amps_draw     = (total_thrust_n * amps_per_newton) + base_avionics_amps\n    voltage_sag_volts   = total_amps_draw * battery_internal_resistance_ohms\n    terminal_voltage    = battery_open_circuit_volts - voltage_sag_volts\n    delivered_power_w   = terminal_voltage * total_amps_draw\n}",
+      "inputs": [
+        {
+          "name": "air_density",
+          "default": 1.225
+        },
+        {
+          "name": "amps_per_newton",
+          "default": 1.45
+        },
+        {
+          "name": "base_avionics_amps",
+          "default": 1.8
+        },
+        {
+          "name": "battery_internal_resistance_ohms",
+          "default": 0.045
+        },
+        {
+          "name": "battery_open_circuit_volts",
+          "default": 25.2
+        },
+        {
+          "name": "motor_rpm",
+          "default": 6400
+        },
+        {
+          "name": "prop_diameter_m",
+          "default": 0.381
+        },
+        {
+          "name": "thrust_coeff",
+          "default": 0.115
+        },
+        {
+          "name": "total_mass_kg",
+          "default": 2.5
+        }
+      ],
+      "outputs": [
+        "rps",
+        "single_thrust_n",
+        "total_thrust_n",
+        "weight_n",
+        "thrust_weight_ratio",
+        "climb_accel_mps2",
+        "total_amps_draw",
+        "voltage_sag_volts",
+        "terminal_voltage",
+        "delivered_power_w"
+      ]
+    },
+    {
+      "key": "server_capacity",
+      "title": "Server capacity (Little's Law)",
+      "example": "examples/server_capacity.aven",
+      "block": "ProductionProfile",
+      "source": "forward ProductionProfile {\n    // Direction-pinned for zero-overhead C99 emission on Linux\n    raw_workers       = (reqs_per_second * avg_latency_ms) / 1000\n    allocated_workers = ceil(raw_workers / target_utilization)\n    total_ram_needed  = (allocated_workers * (ram_per_worker + socket_buffer_mb)) + os_kernel_ram_mb\n    payload_gbps      = (reqs_per_second * avg_payload_kb * 8) / 1000000\n    wire_rate_gbps    = payload_gbps * framing_overhead_ratio\n}",
+      "inputs": [
+        {
+          "name": "avg_latency_ms",
+          "default": 20
+        },
+        {
+          "name": "avg_payload_kb",
+          "default": 64
+        },
+        {
+          "name": "framing_overhead_ratio",
+          "default": 1.04
+        },
+        {
+          "name": "os_kernel_ram_mb",
+          "default": 4096
+        },
+        {
+          "name": "ram_per_worker",
+          "default": 16
+        },
+        {
+          "name": "reqs_per_second",
+          "default": 50000
+        },
+        {
+          "name": "socket_buffer_mb",
+          "default": 4
+        },
+        {
+          "name": "target_utilization",
+          "default": 0.7
+        }
+      ],
+      "outputs": [
+        "raw_workers",
+        "allocated_workers",
+        "total_ram_needed",
+        "payload_gbps",
+        "wire_rate_gbps"
+      ]
+    },
+    {
+      "key": "portfolio",
+      "title": "Portfolio allocation",
+      "example": "examples/portfolio_rebalancing.aven",
+      "block": "FastRebalanceProfile",
+      "source": "forward FastRebalanceProfile {\n    equity_value        = portfolio_value * equity_weight\n    bond_value          = portfolio_value * bond_weight\n    reit_value          = portfolio_value * reit_weight\n    total_weight        = equity_weight + bond_weight + reit_weight\n    expected_return_pct = (equity_weight * equity_return_pct) + (bond_weight * bond_return_pct) + (reit_weight * reit_return_pct)\n    portfolio_vol_pct   = sqrt((equity_weight * equity_vol_pct)^2 + (bond_weight * bond_vol_pct)^2 + (reit_weight * reit_vol_pct)^2) * diversification_factor\n    excess_return_pct   = expected_return_pct - risk_free_rate_pct\n    sharpe_ratio        = excess_return_pct / portfolio_vol_pct\n}",
+      "inputs": [
+        {
+          "name": "bond_return_pct",
+          "default": 4.2
+        },
+        {
+          "name": "bond_vol_pct",
+          "default": 5.5
+        },
+        {
+          "name": "bond_weight",
+          "default": 0.35
+        },
+        {
+          "name": "diversification_factor",
+          "default": 0.88
+        },
+        {
+          "name": "equity_return_pct",
+          "default": 10.5
+        },
+        {
+          "name": "equity_vol_pct",
+          "default": 16
+        },
+        {
+          "name": "equity_weight",
+          "default": 0.55
+        },
+        {
+          "name": "portfolio_value",
+          "default": 10000000
+        },
+        {
+          "name": "reit_return_pct",
+          "default": 7.8
+        },
+        {
+          "name": "reit_vol_pct",
+          "default": 12
+        },
+        {
+          "name": "reit_weight",
+          "default": 0.1
+        },
+        {
+          "name": "risk_free_rate_pct",
+          "default": 3.5
+        }
+      ],
+      "outputs": [
+        "equity_value",
+        "bond_value",
+        "reit_value",
+        "total_weight",
+        "expected_return_pct",
+        "portfolio_vol_pct",
+        "excess_return_pct",
+        "sharpe_ratio"
+      ]
+    }
+  ]
+}

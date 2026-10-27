@@ -7,7 +7,7 @@ A rapid-lookup reference card for Aven language syntax, operators, built-in func
 ## 1. Syntax at a Glance
 
 ### Omnidirectional Relation
-```aven
+```text
 relation <Name> {
     <equation_1>
     <equation_2>
@@ -15,8 +15,8 @@ relation <Name> {
 }
 ```
 
-### Direction-Pinned Forward Block (Zero-Overhead C/WASM)
-```aven
+### Direction-Pinned Forward Block (Solver-Free C/WASM)
+```text
 forward <Name> {
     <equation_1>
     <equation_2>
@@ -24,11 +24,12 @@ forward <Name> {
 ```
 
 ### Solve Directives & Observations
-```aven
+```text
 solve <RelationName> with {
-    <var_1> = <value> [<unit>]
-    <var_2> = <value> [<unit>]
-    [minimize(<var>) | maximize(<var>)]
+    <var_1> = <value> <unit>        // unit optional
+    <var_2> = <value>
+    <var> >= <expr>                 // bounds, optional
+    minimize(<var>)                 // or maximize(<var>), optional
 }
 ```
 
@@ -43,14 +44,19 @@ signal altitude  : m
 ```
 
 ### Telemetry Adapters & IPC
+A `using` clause attaches a backend to a relation:
 ```aven
-using external("python", "adapter.py") { sensor_var }
-using ipc("127.0.0.1:9090") { telemetry_var }
-using shm("/dev/shm/aven_ring") { high_rate_var }
+relation Sensors using external("python", "adapter.py") {
+    // equations over the adapter's facts
+}
+
+relation Telemetry using ipc("127.0.0.1:9090") {
+    // equations over the daemon's facts
+}
 ```
 
-### Namespaced Package Imports
-```aven
+### Package Imports
+```text
 import <package_name>;
 ```
 
@@ -98,27 +104,33 @@ All mathematical functions are unary expressions and validate inputs against num
 
 ---
 
-## 4. Standard Physical Units
+## 4. Units
 
-Aven verifies dimensions across the 7 SI base quantities: $[M, L, T, I, \Theta, N, J]$.
+Aven checks dimensions across ten base dimensions: the SI quantities length, mass, time, current, temperature and amount of substance, plus angle, money, data and transactions. Values are converted to base units (SI, bit, radian, transaction, US dollar) before solving and shown back in each variable's declared unit.
 
-| Symbol | Quantity | SI Base Dimension | Compatible Aliases |
-|:---:|:---|:---:|:---|
-| `kg` | Mass | $[M]$ | `g`, `mg`, `ton`, `lb` |
-| `m` | Length | $[L]$ | `km`, `cm`, `mm`, `nm`, `ft`, `in`, `mile` |
-| `s` | Time | $[T]$ | `ms`, `us`, `ns`, `min`, `h`, `day` |
-| `A` | Current | $[I]$ | `mA`, `uA` |
-| `K` | Temperature | $[\Theta]$ | `celsius` (via affine conversion) |
-| `mol` | Substance | $[N]$ | `mmol` |
-| `cd` | Luminous Intensity | $[J]$ | `lm` |
-| `N` | Force | $[M L T^{-2}]$ | `kN` |
-| `Pa` | Pressure | $[M L^{-1} T^{-2}]$ | `kPa`, `bar`, `hpa`, `psi` |
-| `J` | Energy / Work | $[M L^2 T^{-2}]$ | `kJ`, `wh`, `kwh` |
-| `W` | Power | $[M L^2 T^{-3}]$ | `kW`, `mw`, `hp` |
-| `V` | Voltage | $[M L^2 T^{-3} I^{-1}]$ | `mV`, `kv` |
-| `ohm` | Resistance | $[M L^2 T^{-3} I^{-2}]$ | `kohm`, `mohm` |
-| `km/h` | Speed | $[L T^{-1}]$ | `m/s`, `knots`, `mph` |
-| `m/s^2`| Acceleration | $[L T^{-2}]$ | `g_accel` |
+| Dimension | Built-in units |
+|:---|:---|
+| Length | `m`, `km`, `cm`, `mm`, `um`, `in`, `ft`, `mi`, `nmi` |
+| Time | `s`, `ms`, `us`, `ns`, `min`, `h`, `hr`, `day` |
+| Mass | `kg`, `g`, `mg`, `lb` |
+| Current | `A`, `mA` |
+| Temperature | `K`, `degC`, `degF` (absolute temperatures; write differences in `K`) |
+| Amount | `mol` |
+| Angle | `rad`, `deg` |
+| Money | `$`, `USD`. `EUR` and `GBP` are separate dimensions: there are no built-in exchange rates |
+| Force | `N`, `kN` |
+| Pressure | `Pa`, `hPa`, `kPa`, `MPa`, `bar`, `atm`, `psi` |
+| Energy | `J`, `kJ`, `MJ`, `Wh`, `kWh`, `MWh` |
+| Power | `W`, `mW`, `kW`, `MW` |
+| Electrical | `V`, `mV`, `kV`, `ohm` |
+| Frequency | `Hz`, `kHz`, `MHz`, `GHz` |
+| Data | `b`/`bit`, `B`/`byte`, `kbit`, `Mbit`, `Gbit`, `Tbit`, `kB`/`KB`, `MB`, `GB`, `TB`, `PB`, `KiB`, `MiB`, `GiB`, `TiB` |
+| Transactions | `req`, `iop`, `pkt`, `tx` |
+| Rates | `bps`, `kbps`, `Mbps`, `Gbps`, `Tbps`, `iops`, `rps`, `pph` |
+
+- **Compound units** combine these with `/`, `*` and integer `^`: `km/h`, `kg/m^3`, `kW*h`.
+- **Case**: symbols are matched exactly first (`MW` is a megawatt, `mW` a milliwatt). Another casing is accepted only when it is unambiguous (`gbps` → `Gbps`). Spellings that could mean bits or bytes (`kb`, `Mb`, `gb`, …) and other ambiguous ones (`mw`) are rejected with the valid choices listed.
+- **`unit` declarations** (`unit velocity_unit : knots, mach`) add units of a new dimension that convert only among themselves.
 
 ---
 
@@ -131,7 +143,7 @@ avenc check <file.aven>
 # Execute Solver & Emit Fact Ledger
 avenc run <file.aven> [--ledger <path.jsonl>]
 
-# Transpile to Standalone ANSI C99
+# Transpile to Standalone C99
 avenc emit-c <file.aven> [-o <path.c>] [--aeric-shim]
 
 # Transpile to WebAssembly (Binary or WAT)
@@ -147,14 +159,14 @@ avenc safety-case <file.aven> [-o <path.md>] [--standard do178c|iso26262]
 avenc bench <file.aven> [--latency-profile]
 
 # Interactive Time-Travel Debugger REPL
-avenc debug [--ledger <path.jsonl>]
+avenc debug <file.aven> [ledger.jsonl] [--goto <N>] [--what-if "<var>=<val>"] [--diff <t1>,<t2>]
 
 # Segmented Ledger Audit Compaction
-avenc compact-ledger <path.jsonl> [-o <compacted.jsonl>]
+avenc compact-ledger <path.jsonl> -o <compacted.jsonl>
 
 # Package Management
-avenc pkg init <pkg_name>
-avenc pkg pack [--out <file.avenpkg>]
+avenc pkg init [pkg_name]          # writes Aven.toml and lib.aven in the current directory
+avenc pkg pack [dir] [-o <file.avenpkg>]
 avenc pkg install <file.avenpkg>
 avenc pkg list
 ```
@@ -176,11 +188,13 @@ avenc pkg list
 
 | Command | Action |
 |:---|:---|
-| `step` | Advance to the next logical cycle. |
-| `prev` | Rewind to the previous logical cycle. |
-| `goto <cycle>` | Jump directly to cycle number `<cycle>`. |
-| `why <var>` | Render causal provenance DAG showing ancestors of `<var>`. |
-| `what-if <var> = <val>` | Branch timeline into a speculative counterfactual universe. |
-| `diff` | Display delta between baseline and counterfactual timeline. |
+| `step` | Advance one logical tick. |
+| `prev [n] [--force]` | Rewind one (or `n`) ticks; `--force` crosses a committed effect. |
+| `goto <tick> [--force]` | Jump to tick `<tick>`. |
+| `vars` | Show every variable at the current tick. |
+| `why <var>` | Print the derivation tree of `<var>`. |
+| `what-if <var>=<val>` | Branch a counterfactual with `<var>` changed (value in its declared unit) and show the effect on every output. |
+| `diff [t1 t2]` | Show what changed between two ticks (default: the previous and current tick). |
+| `seal` | Show the ledger's chain head and verify it. |
 | `help` | List available commands. |
-| `quit` | Exit debugger. |
+| `quit` | Exit the debugger. |

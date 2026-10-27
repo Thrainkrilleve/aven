@@ -7,7 +7,7 @@ description: Expertise in inspecting, compiling, solving, and diagnosing Aven mo
 
 Use this skill when reading, creating, modifying, or diagnosing `.aven` models and their interactions with the Aven compiler (`avenc`).
 
-For the comprehensive grammar specification, anti-patterns, and cookbook templates, see [docs/AVEN_AI_MODEL_GUIDE.md](file:///f:/aven/docs/AVEN_AI_MODEL_GUIDE.md).
+For the comprehensive grammar specification, anti-patterns, and cookbook templates, see [docs/AVEN_AI_MODEL_GUIDE.md](../../../docs/AVEN_AI_MODEL_GUIDE.md).
 
 ## Critical AI Guardrails
 1. **Square Brackets are Physical Units:** `[...]` is ONLY for units (`[TB]`, `[K]`, `[kW]`, `[m/s]`). Aven has NO array slicing or indexing syntax.

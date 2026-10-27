@@ -16,7 +16,7 @@ From its inception as an experimental relational solver to a production-grade mu
 ### Phase 2: Direction-Pinning & C Codegen (Completed)
 - [x] Topological sort of relational dependency graphs.
 - [x] Direction-pinned forward blocks (`forward`).
-- [x] Clean ANSI C code emission (`avenc emit-c`) for zero-overhead embedded targets.
+- [x] C99 code emission (`avenc emit-c`) for solver-free embedded targets.
 - [x] Multi-objective Pareto frontier exploration (`avenc pareto`).
 
 ### Phase 3: Telemetry Mesh & Persistent IPC Daemons (Completed)
