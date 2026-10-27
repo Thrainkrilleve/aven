@@ -68,7 +68,7 @@ def doc_files():
 
 
 def avenc(*args, cwd=ROOT):
-    return subprocess.run([str(AVENC), *args], capture_output=True, text=True, cwd=cwd, timeout=120)
+    return subprocess.run([str(AVENC), *args], capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=cwd, timeout=120)
 
 
 def check_source(code):
@@ -126,7 +126,7 @@ def toolchain_problems():
                     f"{PROOF_LOG.relative_to(ROOT)} does not record exit 0 for `{command}`"
                 )
     fmt = subprocess.run(
-        ["cargo", "fmt", "--check"], cwd=ROOT, capture_output=True, text=True
+        ["cargo", "fmt", "--check"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace"
     )
     if fmt.returncode != 0:
         tail = (fmt.stdout or fmt.stderr).strip().splitlines()
