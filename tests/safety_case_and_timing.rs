@@ -63,7 +63,8 @@ fn test_safety_case_golden_server_capacity() {
     assert!(md.contains("ISO 26262 Part 6 (ASIL-D"));
     assert!(md.contains("A5-1: HLR Accuracy & Consistency"));
     assert!(md.contains("Table 1 (1e): Formal Verification"));
-    assert!(md.contains("VERDICT: ✓ FORMALLY DISCHARGED"));
+    assert!(md.contains("This result is evidence about the model and not a certification."));
+    assert_safety_case_wording(&md);
 
     // Verify JSON generation
     let json = report.to_json();
@@ -98,8 +99,9 @@ fn test_safety_case_violation_detection_and_counterexample() {
     assert!(report.proofs[0].counterexample.is_some());
 
     let md = report.to_markdown();
-    assert!(md.contains("VERDICT: ✗ INVARIANTS VIOLATED"));
-    assert!(md.contains("✗ VIOLATED"));
+    assert!(md.contains("VERDICT: an encoded check failed"));
+    assert!(md.contains("SAT, counterexample in the next column"));
+    assert_safety_case_wording(&md);
 }
 
 #[test]
@@ -162,7 +164,8 @@ solve AeroForces with {{
 
     let md = report.to_markdown();
     assert!(md.contains("A5-7: Algorithm Verification"));
-    assert!(md.contains("✓ FORMALLY DISCHARGED"));
+    assert!(md.contains("This result is evidence about the model and not a certification."));
+    assert_safety_case_wording(&md);
 }
 
 #[test]
@@ -309,5 +312,66 @@ fn test_safety_case_cli_file_emission() {
 
     assert!(content.contains("# Formal Safety Case & Compliance Audit"));
     assert!(content.contains("wire_rate_gbps <= 50.0"));
-    assert!(content.contains("✓ FORMALLY DISCHARGED"));
+    assert!(content.contains("This result is evidence about the model and not a certification."));
+    assert_safety_case_wording(&content);
+
+    let help = Command::new(env!("CARGO_BIN_EXE_avenc"))
+        .arg("--help")
+        .output()
+        .expect("invoke avenc --help");
+    let help_text = String::from_utf8_lossy(&help.stdout);
+    let safety_line = help_text
+        .lines()
+        .skip_while(|line| !line.contains("avenc safety-case"))
+        .nth(1)
+        .unwrap_or("");
+    assert!(
+        safety_line.contains("This result is evidence about the model and not a certification."),
+        "help line: {safety_line}"
+    );
+    assert_safety_case_wording(safety_line);
+}
+
+#[test]
+fn safety_case_is_evidence_not_a_certification() {
+    let path = "examples/server_capacity.aven";
+    let src = fs::read_to_string(path).expect("read file");
+    let module = parse_aven_string(&src, path);
+    let report = SafetyCaseGenerator::generate(
+        &module,
+        path,
+        SafetyStandard::All,
+        &["wire_rate_gbps <= 50.0".to_string()],
+        None,
+    )
+    .expect("safety case generation should succeed");
+    let md = report.to_markdown();
+    assert!(md.contains("This result is evidence about the model and not a certification."));
+    assert!(md.contains("This report does not check division by zero."));
+    assert_safety_case_wording(&md);
+
+    let help = Command::new(env!("CARGO_BIN_EXE_avenc"))
+        .arg("--help")
+        .output()
+        .expect("invoke avenc --help");
+    let help_text = String::from_utf8_lossy(&help.stdout);
+    let safety_line = help_text
+        .lines()
+        .skip_while(|line| !line.contains("avenc safety-case"))
+        .nth(1)
+        .unwrap_or("");
+    assert!(
+        safety_line.contains("This result is evidence about the model and not a certification."),
+        "help line: {safety_line}"
+    );
+    assert_safety_case_wording(safety_line);
+}
+
+fn assert_safety_case_wording(text: &str) {
+    for banned in ["CERTIFIABLE", "SATISFIED", "PROVEN UNCONDITIONAL"] {
+        assert!(
+            !text.contains(banned),
+            "safety-case text must not contain {banned}: {text}"
+        );
+    }
 }

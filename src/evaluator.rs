@@ -482,6 +482,14 @@ impl Evaluator for ExternalEvaluator {
                     self.command, e
                 ))
             })?;
+            stdin.flush().map_err(|e| {
+                EvalError::DomainError(format!(
+                    "Failed to flush stdin of '{}': {}",
+                    self.command, e
+                ))
+            })?;
+            // Dropping the pipe is EOF. The adapter reads stdin to completion.
+            drop(stdin);
         }
 
         // Wait for output and check exit status

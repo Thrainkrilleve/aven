@@ -40,7 +40,7 @@ use std::fs;
 use std::io;
 use std::process;
 
-const VERSION: &str = "0.6.0";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn print_usage() {
     println!("avenc v{} — The Aven Language Toolchain", VERSION);
@@ -93,7 +93,7 @@ fn print_usage() {
         "  avenc safety-case <file.aven> [-o report.md] [--format md|json] [--standard all|do178c|iso26262] [--invariant \"<expr>\"]"
     );
     println!(
-        "                                        Generate formal safety case report for DO-178C (Table A-5) & ISO 26262 ASIL-D"
+        "                                        Write a report of this run. This result is evidence about the model and not a certification."
     );
     println!(
         "  avenc bench <file.aven> [--iterations N] [--latency-profile] [--target-hz HZ] [--compiled] [--json] [--markdown]"
@@ -1654,7 +1654,8 @@ fn cmd_safety_case(
 ) {
     let module = parse_file(path);
     println!("============================================================");
-    println!(" Aven Safety Case Generator (DO-178C / ISO 26262 ASIL-D)");
+    println!(" Aven safety-case report");
+    println!(" This result is evidence about the model and not a certification.");
     println!(" Model: '{}' | Standard: {}", path, standard);
     println!("============================================================");
 

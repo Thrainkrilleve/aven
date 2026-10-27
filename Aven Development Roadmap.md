@@ -40,12 +40,12 @@ Do these before the new compiler work. Each one is done when the command in the 
 
 | Fix | What the tree does now | Proof |
 | --- | --- | --- |
-| One version string | `Cargo.toml` says `0.1.0`. `src/main.rs` `VERSION` says `0.6.0`. The site badge says v0.6.0. | A test runs `avenc`, reads the printed version, and requires `Cargo.toml` and the site badge to use that same string. |
-| Safety-case wording | `src/smt.rs` emits `FORMALLY DISCHARGED / CERTIFIABLE` and `PROVEN UNCONDITIONAL`. The standards table marks objectives satisfied, including division-by-zero, on every report. `src/main.rs` describes the command as a DO-178C / ASIL-D audit. | `tests/safety_case_and_timing.rs` fails if the report contains `CERTIFIABLE`, `SATISFIED`, or `PROVEN UNCONDITIONAL`, and fails if the report lacks a sentence that the result is evidence about the model and not a certification. The same test covers the CLI help line. |
-| Homepage figures | `web/public/index.html` states 0.56 ms and 1,720/s from a Windows IPC bench. The caption names the machine. Nothing in CI regenerates the figures. | The page quotes a log committed beside the command that produced it, or the figures are removed. `scripts/check_docs.py` fails if the page states a throughput the log does not contain. |
-| OpenPLC stdin | `evaluations/tests/PLC-test/openplc_adapter.py` waits 150 ms for stdin, then invents `io_points`. Under the default test thread pool, `test_openplc_external_adapter_and_stream_varmap` has failed with 28 and with 32 against the required 30. Alone, it passes. | The adapter reads stdin to completion. `cargo test --release --test test_suite test_openplc_external_adapter_and_stream_varmap` passes with the default thread pool. |
+| One version string | `Cargo.toml` `version`, `avenc --version`, and each `brand-version` badge are one string. The binary reads `CARGO_PKG_VERSION`. | `printed_version_matches_cargo_toml_and_the_site_badge` in `tests/claims.rs` runs `avenc --version` and requires `Cargo.toml` and `web/public/{index,docs,registry,weather}.html` to use that string. |
+| Safety-case wording | The report and the `safety-case` help line say the result is evidence about the model and not a certification. The report does not say CERTIFIABLE, SATISFIED, or PROVEN UNCONDITIONAL. Division by zero is marked not checked. | `safety_case_is_evidence_not_a_certification` is covered by `tests/safety_case_and_timing.rs`: the golden report, the CLI report, and `avenc --help` fail on those words and fail without that sentence. |
+| Homepage figures | The key figures are 1414.9 µs and 664.3 solves/sec from `evaluations/flight_mesh/runs/2026-10-27-linux/avenc_bench.txt`. | `scripts/check_docs.py` fails if a homepage key figure's visible value is not the `data-figure` copied from its `data-log`. |
+| OpenPLC stdin | `evaluations/tests/PLC-test/openplc_adapter.py` reads stdin through EOF. It does not invent `io_points` when the read is slow. | `cargo test --release --test test_suite test_openplc_external_adapter_and_stream_varmap` passes with the default thread pool. |
 | Lint matches CI | `rust-toolchain.toml` pins channel 1.99.1 with rustfmt and clippy. The GitHub and Forgejo workflows install that file before `cargo` runs. The sources match that rustfmt, and the 1.99 clippy findings are fixed. Edition 2024 still needs rustc 1.85 or newer. | `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` exit 0 on that pin. `scripts/check_docs.py` runs the format check and fails if a linter workflow stops reading `rust-toolchain.toml`, or if `docs/proof/lint-toolchain-1.99.1.txt` does not record both exits for this channel. |
-| Hash chain, not a Merkle tree | Public docs still say Merkle in places. The ledger is a linear SHA-256 chain. | `scripts/check_docs.py` fails if the README, the site, or `STANDARDS.md` says Merkle. |
+| Hash chain, not a Merkle tree | `README.md`, `STANDARDS.md`, and `web/public/` call the ledger a SHA-256 hash chain. | `scripts/check_docs.py` fails if the README, the site, or `STANDARDS.md` says Merkle. |
 
 ## Build next
 
@@ -70,6 +70,12 @@ On channel 1.99.1, `docs/proof/lint-toolchain-1.99.1.txt`:
 - `cargo clippy --all-targets -- -D warnings`
 - `cargo test --release` (152 passed, 0 failed). Full output: `docs/proof/cargo-test-release-1.99.1.txt`
 - `python3 scripts/check_docs.py` (45 examples compiled, 2 documented outputs compared, 0 problems). Output: `docs/proof/check-docs-1.99.1.txt`
+
+On channel 1.99.1, `docs/proof/remaining-fixes-1.99.1.txt`:
+
+- `cargo test --release` (154 passed, 0 failed), including the version-string test, the safety-case wording test, and `test_openplc_external_adapter_and_stream_varmap`. Output: `docs/proof/cargo-test-release-remaining-fixes.txt`
+- `python3 scripts/check_docs.py` again, now also checking the homepage figures and the Merkle wording. Output: `docs/proof/check-docs-remaining-fixes.txt`
+- 32 parallel runs of `openplc_adapter.py`, each given `io_points` 30, each returning 30. Output: `docs/proof/openplc-stdin-parallel.txt`
 
 ## Not recorded yet
 

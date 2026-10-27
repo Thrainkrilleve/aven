@@ -1,0 +1,3 @@
+
+45 examples compiled, 5 fragments skipped, 2 documented outputs compared, 0 problem(s)
+DOCS_EXIT:0

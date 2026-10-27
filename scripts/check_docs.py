@@ -20,6 +20,10 @@ every page in web/public/:
   * `rust-toolchain.toml` pins a fixed compiler, both linter workflows install that
     file, `docs/proof/lint-toolchain-1.99.1.txt` records exit 0 for fmt and clippy
     on that same channel, and `cargo fmt --check` passes.
+  * README.md, STANDARDS.md, and web/public/ do not say Merkle. The ledger is a
+    SHA-256 hash chain.
+  * A key figure on the homepage names a committed log in data-log and a number in
+    data-figure. The visible value is that number, and the log contains it.
 
 Exits non-zero when anything does not match.
 """
@@ -131,12 +135,68 @@ def toolchain_problems():
     return problems
 
 
+def merkle_problems():
+    """The public ledger claim is a hash chain. Merkle is a different structure."""
+    paths = [ROOT / "README.md", ROOT / "STANDARDS.md"]
+    paths.extend(sorted((ROOT / "web" / "public").glob("*.html")))
+    problems = []
+    for path in paths:
+        if not path.is_file():
+            problems.append(f"{path.relative_to(ROOT)} is missing")
+            continue
+        if re.search(r"merkle", path.read_text(encoding="utf-8"), re.I):
+            problems.append(
+                f"{path.relative_to(ROOT)} says Merkle; the ledger is a SHA-256 hash chain"
+            )
+    return problems
+
+
+def homepage_figure_problems():
+    """Every homepage timing figure is a number copied from a committed log."""
+    page = ROOT / "web" / "public" / "index.html"
+    text = page.read_text(encoding="utf-8")
+    section = re.search(r'aria-label="Key figures"(.*?)</section>', text, re.S)
+    if not section:
+        return ["web/public/index.html has no key-figures section"]
+    problems = []
+    for part in re.split(r'<div class="proof-item"', section.group(1))[1:]:
+        attrs, _, rest = part.partition(">")
+        visible_m = re.search(r'class="proof-val">([^<]*)', rest)
+        visible = (visible_m.group(1) if visible_m else "").strip().replace(",", "")
+        figure = re.search(r'data-figure="([^"]*)"', attrs)
+        log_attr = re.search(r'data-log="([^"]*)"', attrs)
+        if visible in {"0", "4"} and figure is None:
+            continue
+        if figure is None or log_attr is None:
+            problems.append(
+                f"web/public/index.html figure {visible!r} is not tied to a committed log"
+            )
+            continue
+        number = figure.group(1).replace(",", "")
+        if number not in visible:
+            problems.append(
+                f"web/public/index.html shows {visible!r} but data-figure is {number!r}"
+            )
+        log_path = ROOT / log_attr.group(1)
+        if not log_path.is_file():
+            problems.append(f"web/public/index.html names missing log {log_attr.group(1)}")
+            continue
+        if number not in log_path.read_text(encoding="utf-8"):
+            problems.append(
+                f"web/public/index.html states {number}, which {log_attr.group(1)} does not contain"
+            )
+    return problems
+
+
 def main():
     if not AVENC.exists():
         sys.exit(f"{AVENC} not found; run `cargo build --release` first")
     subcommands = set(re.findall(r"^\s+avenc ([a-z][a-z-]*)", avenc("--help").stdout, re.M))
 
-    problems, compiled, fragments, outputs = toolchain_problems(), 0, 0, 0
+    problems = toolchain_problems()
+    problems.extend(merkle_problems())
+    problems.extend(homepage_figure_problems())
+    compiled, fragments, outputs = 0, 0, 0
 
     for path in doc_files():
         rel = path.relative_to(ROOT)

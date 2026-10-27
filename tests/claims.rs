@@ -851,6 +851,28 @@ solve S with {
     assert!(line.contains("\"obj\": -8"), "optimum is -8: {}", line);
 }
 
+#[test]
+fn printed_version_matches_cargo_toml_and_the_site_badge() {
+    let run = avenc(&["--version"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    let version = run
+        .stdout
+        .trim()
+        .strip_prefix("avenc ")
+        .expect("avenc --version prints 'avenc <version>'");
+    assert!(!version.is_empty());
+    let cargo = std::fs::read_to_string("Cargo.toml").expect("Cargo.toml");
+    assert!(
+        cargo.contains(&format!("version = \"{version}\"")),
+        "Cargo.toml does not use {version}"
+    );
+    for page in ["index.html", "docs.html", "registry.html", "weather.html"] {
+        let html = std::fs::read_to_string(format!("web/public/{page}")).expect(page);
+        let badge = format!("<span class=\"brand-version\">v{version}</span>");
+        assert!(html.contains(&badge), "{page} badge is not v{version}");
+    }
+}
+
 // STANDARDS.md §2.1: non-finite values are rejected, never reported as results
 #[test]
 fn standards_non_finite_results_are_rejected() {

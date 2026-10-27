@@ -16,29 +16,19 @@ import os
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CACHE_FILE = os.path.join(SCRIPT_DIR, "latest_plc.json")
 
-import threading
-
 def read_inputs():
-    """Reads JSON inputs supplied by Aven on stdin with a short timeout."""
-    buf = []
-    def reader():
-        try:
-            content = sys.stdin.read()
-            if content.strip():
-                buf.append(content)
-        except Exception:
-            pass
-
-    t = threading.Thread(target=reader, daemon=True)
-    t.start()
-    t.join(timeout=0.15)
-
-    if buf:
-        try:
-            return json.loads(buf[0])
-        except Exception:
-            return {}
-    return {}
+    """Read the JSON object Aven writes on stdin, through EOF."""
+    try:
+        content = sys.stdin.read()
+    except Exception:
+        return {}
+    if not content.strip():
+        return {}
+    try:
+        parsed = json.loads(content)
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 def get_latest_telemetry(inputs):
     """

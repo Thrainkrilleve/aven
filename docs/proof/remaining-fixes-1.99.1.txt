@@ -1,0 +1,30 @@
+channel: 1.99.1
+rustc: rustc 1.99.1 (58cf8f9c3 2026-10-13)
+recorded: 2026-10-27 16:34 America/Denver (22:34 UTC)
+
+command: cargo fmt --check
+exit: 0
+
+command: cargo clippy --all-targets -- -D warnings
+exit: 0
+
+command: cargo test --release
+exit: 0
+passed: 154
+failed: 0
+
+command: python3 scripts/check_docs.py
+exit: 0
+examples: 45
+problems: 0
+
+command: openplc_adapter.py parallel stdin reads
+runs: 32
+bad: 0
+io_points: 30
+power_w: 204.0
+
+Logs:
+- docs/proof/cargo-test-release-remaining-fixes.txt
+- docs/proof/check-docs-remaining-fixes.txt
+- docs/proof/openplc-stdin-parallel.txt

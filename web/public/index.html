@@ -119,15 +119,15 @@ solve Dynamics with {
             <div class="proof-label">External crates</div>
             <div class="proof-src">Compiler, solver and SHA-256 are Rust <code>std</code> only</div>
           </div>
-          <div class="proof-item">
-            <div class="proof-val">0.56<small>ms</small></div>
-            <div class="proof-label">Median end-to-end solve</div>
-            <div class="proof-src"><code>avenc bench</code>, live IPC daemon, flight model, 8-core Windows workstation (1.4 ms on a 4-vCPU Linux container)</div>
+          <div class="proof-item" data-log="evaluations/flight_mesh/runs/2026-10-27-linux/avenc_bench.txt" data-figure="1414.9">
+            <div class="proof-val">1414.9<small>µs</small></div>
+            <div class="proof-label">Median solve, including IPC</div>
+            <div class="proof-src"><code>avenc bench evaluations/flight_mesh/flight_mesh_ipc.aven --iterations 2000</code>. Log: <code>evaluations/flight_mesh/runs/2026-10-27-linux/avenc_bench.txt</code>. 4-vCPU Linux container, 2026-10-27.</div>
           </div>
-          <div class="proof-item">
-            <div class="proof-val">1,720<small>/s</small></div>
-            <div class="proof-label">Solves per second</div>
-            <div class="proof-src">Same benchmark and machine, one client (664/s on the Linux container)</div>
+          <div class="proof-item" data-log="evaluations/flight_mesh/runs/2026-10-27-linux/avenc_bench.txt" data-figure="664.3">
+            <div class="proof-val">664.3<small>/s</small></div>
+            <div class="proof-label">Solves per second, one client</div>
+            <div class="proof-src">Same command and log.</div>
           </div>
           <div class="proof-item">
             <div class="proof-val">4</div>

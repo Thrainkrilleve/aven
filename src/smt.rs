@@ -177,7 +177,10 @@ impl SmtTranspiler {
             "; SMT-LIB2 translation for Aven block '{}'",
             block.name
         ));
-        lines.push("; Emitted by avenc v0.6.0 -- SMT Formal Verification Engine".to_string());
+        lines.push(format!(
+            "; Emitted by avenc v{} -- SMT Formal Verification Engine",
+            env!("CARGO_PKG_VERSION")
+        ));
         lines.push(format!("; Mode: {:?}", options.mode));
         lines.push("".to_string());
 
@@ -778,14 +781,15 @@ impl SafetyCaseReport {
         md.push_str(&format!("**Audit Timestamp:** `{}`  \n\n", self.timestamp));
 
         md.push_str("## 1. Executive Summary & Verification Verdict\n\n");
+        md.push_str("This result is evidence about the model and not a certification.\n\n");
         if self.all_passed {
             md.push_str("> [!IMPORTANT]\n");
-            md.push_str("> **VERDICT: ✓ FORMALLY DISCHARGED / CERTIFIABLE**\n");
-            md.push_str("> The mathematical model is satisfiable, and all safety invariants have been proven unconditionally by SMT refutation across the operational parameter envelope.\n\n");
+            md.push_str("> **VERDICT: the encoded checks returned the expected answers**\n");
+            md.push_str("> The satisfiability query found a state, and each listed invariant's refutation query returned UNSAT.\n\n");
         } else {
             md.push_str("> [!CAUTION]\n");
-            md.push_str("> **VERDICT: ✗ INVARIANTS VIOLATED / INFEASIBLE**\n");
-            md.push_str("> Formal verification failed! One or more safety invariants were violated or no feasible operating state could be found.\n\n");
+            md.push_str("> **VERDICT: an encoded check failed**\n");
+            md.push_str("> A satisfiability query found no state, or a refutation query returned SAT with a counterexample.\n\n");
         }
 
         md.push_str("## 2. Structural Metrics & Boundary Envelope\n\n");
@@ -822,7 +826,7 @@ impl SafetyCaseReport {
         md.push_str("## 3. Model Satisfiability & Feasible Operating Envelope\n\n");
         match &self.satisfiability_status {
             SmtStatus::Sat => {
-                md.push_str("Model satisfiability status: **✓ SAT (Feasible Physical State Certified)**\n\n");
+                md.push_str("Model satisfiability status: **SAT (a state was found for the encoded query)**\n\n");
                 md.push_str("| Variable | Value | Sort |\n|---|---|---|\n");
                 let mut keys: Vec<&String> = self.solved_state.keys().collect();
                 keys.sort();
@@ -862,9 +866,9 @@ impl SafetyCaseReport {
             md.push_str("|---|---|---|---|\n");
             for p in &self.proofs {
                 let verdict_str = if p.proven {
-                    "✓ PROVEN UNCONDITIONAL"
+                    "UNSAT on the encoded query"
                 } else {
-                    "✗ VIOLATED"
+                    "SAT, counterexample in the next column"
                 };
                 let ce_str = if let Some(ref ce) = p.counterexample {
                     let items: Vec<String> = ce
@@ -889,23 +893,28 @@ impl SafetyCaseReport {
             md.push_str("### FAA DO-178C / DO-333 (Formal Methods Supplement Table A-5)\n\n");
             md.push_str("| DO-178C Objective | Verification Evidence | Status |\n");
             md.push_str("|---|---|---|\n");
-            md.push_str("| **A5-1: HLR Accuracy & Consistency** | SMT satisfiability proof confirms physical operating point exists. | ✓ SATISFIED |\n");
-            md.push_str("| **A5-2: LLR Compliance with HLR** | Refutation theorem proving verified safety constraints hold over envelope. | ✓ SATISFIED |\n");
-            md.push_str("| **A5-6: Architectural Consistency** | Dimensional homogeneity and causal acyclicity proven by compiler AST. | ✓ SATISFIED |\n");
-            md.push_str("| **A5-7: Algorithm Verification** | SMT-LIB2 logic discharge via automated theorem prover. | ✓ SATISFIED |\n\n");
+            md.push_str("| **A5-1: HLR Accuracy & Consistency** | See the satisfiability query in section 3. | note |\n");
+            md.push_str("| **A5-2: LLR Compliance with HLR** | See the refutation queries in section 4. | note |\n");
+            md.push_str("| **A5-6: Architectural Consistency** | The compiler's unit check and cycle check, when they ran, are separate from this report. | not checked here |\n");
+            md.push_str("| **A5-7: Algorithm Verification** | See the solver named above and sections 3 and 4. | note |\n\n");
         }
 
         if self.standard == SafetyStandard::All || self.standard == SafetyStandard::Iso26262 {
             md.push_str("### ISO 26262 Part 6 (ASIL-D Functional Safety)\n\n");
             md.push_str("| ISO 26262-6 Table & Method | Verification Evidence | Status |\n");
             md.push_str("|---|---|---|\n");
-            md.push_str("| **Table 1 (1e): Formal Verification** | Mathematical proof across parameter envelope via SMT-LIB2 logic. | ✓ HIGHLY RECOMMENDED (PASS) |\n");
-            md.push_str("| **Table 3 (1b): Semi-formal / Formal Design** | Exact relation AST with typed continuous and integer domains. | ✓ HIGHLY RECOMMENDED (PASS) |\n");
-            md.push_str("| **Table 7 (1c): Absence of Runtime Errors** | Division-by-zero and domain overflow refuted across operating range. | ✓ HIGHLY RECOMMENDED (PASS) |\n\n");
+            md.push_str(
+                "| **Table 1 (1e): Formal Verification** | See sections 3 and 4. | note |\n",
+            );
+            md.push_str("| **Table 3 (1b): Semi-formal / Formal Design** | The relation text is in section 2. | note |\n");
+            md.push_str("| **Table 7 (1c): Absence of Runtime Errors** | This report does not check division by zero. | not checked |\n\n");
         }
 
         md.push_str("## 6. Tool Qualification Record (DO-330 / ISO 26262 TCL-1)\n\n");
-        md.push_str("- **Compiler:** `avenc v0.6.0` (pure-Rust standard library toolchain)\n");
+        md.push_str(&format!(
+            "- **Compiler:** `avenc v{}` (pure-Rust standard library toolchain)\n",
+            env!("CARGO_PKG_VERSION")
+        ));
         md.push_str(&format!(
             "- **SMT Theorem Prover:** `{}`\n",
             self.solver_used
