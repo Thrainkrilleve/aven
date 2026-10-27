@@ -42,10 +42,11 @@ def find_echo_sites(n, min_dbz):
     from concurrent.futures import ThreadPoolExecutor
 
     grid = [(lat / 2, -lon / 2) for lat in range(52, 96, 3) for lon in range(140, 246, 3)]
+    image_ms = wa.radar_times()[-1]
 
     def probe(pt):
         try:
-            return wa.radar_dbz(*pt)[0], pt[0], pt[1]
+            return wa.radar_dbz(*pt, image_ms)[0], pt[0], pt[1]
         except Exception:  # noqa: BLE001 - outside coverage
             return None
 
@@ -126,7 +127,9 @@ def main():
         print(f"[cycle {cycle}] {len(sites)} echo sites: {sites}", flush=True)
         for lat, lon in sites:
             env, err = forecast(lat, lon)
-            issued = time.time() * 1000
+            # The image the adapter read: the latest one when it ran (a new image can appear
+            # during a run, so this is right to within one image interval, about 4 minutes)
+            issued = wa.radar_times()[-1]
             if env is None:
                 print(f"  {lat},{lon}: no forecast ({err})", flush=True)
                 log({"type": "error", "issued_ms": issued, "lat": lat, "lon": lon, "error": err})
@@ -146,7 +149,16 @@ def main():
             due, rec, lead = pending.pop(0)
             time.sleep(max(0.0, due / 1000 - time.time()))
             try:
-                observed, radar_ms = wa.radar_dbz(rec["lat"], rec["lon"])
+                # Score against the archived image nearest the valid time (within 3 minutes),
+                # waiting for it to be published if need be
+                times = wa.radar_times()
+                while times[-1] < due - 180_000:
+                    time.sleep(60)
+                    times = wa.radar_times()
+                image = min(times, key=lambda t: abs(t - due))
+                if abs(image - due) > 180_000:
+                    raise RuntimeError(f"no radar image within 3 minutes of {due}")
+                observed, radar_ms = wa.radar_dbz(rec["lat"], rec["lon"], image)
             except Exception as e:  # noqa: BLE001 - recorded, not invented
                 log({"type": "error", "lat": rec["lat"], "lon": rec["lon"], "error": str(e)})
                 continue
