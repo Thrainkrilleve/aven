@@ -1,6 +1,10 @@
 # AERIC Roadmap & Engineering Standard
 
-**Status:** living document · **Rev:** 0.1 · **Last updated:** 2026-10-25
+**Status:** historical detail · **Active plan:** [Aven roadmap](<../Aven Development Roadmap.md>)
+
+Level 1, and the finished Level 2 behavior (state, clamp, rate limit, named faults, HOLD), stay part of the product. Level 3 and the unfinished real-time items are parked until a named machine and a named deadline ask for them. Checkboxes below are evidence notes, not the plan.
+
+**Rev:** 0.1 · **Last updated:** 2026-10-25
 **Scope:** the standalone C99 runtime in `aeric/` that executes AVEN's AOT-compiled
 models (`avenc emit-c`) on edge/embedded targets.
 
