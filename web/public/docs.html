@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aven Documentation & Guides</title>
+  <meta name="description" content="Official documentation, getting started guides, language tutorials, and engineering standards for Aven.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    .docs-layout {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 2.5rem;
+      padding: 3rem 0;
+      align-items: start;
+    }
+    .docs-sidebar {
+      position: sticky;
+      top: 5.5rem;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 1.5rem;
+    }
+    .sidebar-section {
+      margin-bottom: 1.5rem;
+    }
+    .sidebar-title {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-dim);
+      margin-bottom: 0.75rem;
+    }
+    .sidebar-menu {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+    .sidebar-link {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      display: block;
+      padding: 0.35rem 0.6rem;
+      border-radius: var(--radius-sm);
+      transition: var(--transition);
+    }
+    .sidebar-link:hover, .sidebar-link.active {
+      color: #ffffff;
+      background: rgba(0, 242, 254, 0.1);
+      color: var(--accent-cyan);
+    }
+    .docs-content {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 2.5rem;
+    }
+    .docs-content h2 {
+      margin-top: 2rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--border-subtle);
+    }
+    .docs-content h2:first-of-type {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: none;
+    }
+    .docs-content pre {
+      background: var(--bg-code);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 1.25rem;
+      margin: 1.25rem 0;
+      overflow-x: auto;
+      font-size: 0.88rem;
+      line-height: 1.5;
+    }
+    .docs-content table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1.5rem 0;
+      font-size: 0.9rem;
+    }
+    .docs-content th, .docs-content td {
+      padding: 0.75rem 1rem;
+      border: 1px solid var(--border-subtle);
+      text-align: left;
+    }
+    .docs-content th {
+      background: var(--bg-surface-elevated);
+      color: #ffffff;
+      font-weight: 600;
+    }
+    @media (max-width: 900px) {
+      .docs-layout { grid-template-columns: 1fr; }
+      .docs-sidebar { position: static; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Navigation -->
+  <nav class="navbar">
+    <a href="/" class="brand">
+      <span>▲ AVEN</span>
+      <span class="brand-badge">v0.9.0</span>
+    </a>
+    <ul class="nav-links">
+      <li><a href="/">Home</a></li>
+      <li><a href="/#playground">Playground</a></li>
+      <li><a href="/docs.html" class="active">Documentation</a></li>
+      <li><a href="/registry.html">Packages</a></li>
+      <li><a href="https://github.com/Thrainkrilleve/aven" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+    <div class="nav-actions">
+      <a href="/#install" class="btn btn-primary btn-sm">Install CLI</a>
+    </div>
+  </nav>
+
+  <main class="container">
+    <div class="docs-layout">
+      <!-- Sidebar -->
+      <aside class="docs-sidebar">
+        <div class="sidebar-section">
+          <div class="sidebar-title">Getting Started</div>
+          <ul class="sidebar-menu">
+            <li><a href="#quickstart" class="sidebar-link active">15-Minute Quickstart</a></li>
+            <li><a href="#relational-mindset" class="sidebar-link">The Relational Mindset</a></li>
+            <li><a href="#first-relation" class="sidebar-link">Your First Relation</a></li>
+          </ul>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="sidebar-title">Cookbook Recipes</div>
+          <ul class="sidebar-menu">
+            <li><a href="#recipe-omnidirectional" class="sidebar-link">Omnidirectional Solving</a></li>
+            <li><a href="#recipe-units" class="sidebar-link">Units & Dimensions</a></li>
+            <li><a href="#recipe-optimization" class="sidebar-link">Mixed-Integer Optimization</a></li>
+            <li><a href="#recipe-c-codegen" class="sidebar-link">C99 Code Generation</a></li>
+            <li><a href="#recipe-wasm" class="sidebar-link">WebAssembly Emission</a></li>
+            <li><a href="#recipe-debugging" class="sidebar-link">Time-Travel Debugger</a></li>
+          </ul>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="sidebar-title">Reference & Specs</div>
+          <ul class="sidebar-menu">
+            <li><a href="#cheat-sheet" class="sidebar-link">Syntax Cheat Sheet</a></li>
+            <li><a href="#standards" class="sidebar-link">Engineering Standards</a></li>
+            <li><a href="#package-spec" class="sidebar-link">Package Format (.avenpkg)</a></li>
+          </ul>
+        </div>
+      </aside>
+
+      <!-- Main Content Area -->
+      <article class="docs-content">
+        <section id="quickstart">
+          <h1>Getting Started with Aven</h1>
+          <p style="font-size: 1.15rem; margin-top: 0.5rem; color: var(--text-muted);">
+            Aven is the non-procedural programming language that replaces fragile imperative scripts with unbreakable mathematical invariants and cryptographic audit trails.
+          </p>
+
+          <h2>1. Installation</h2>
+          <pre><code># Linux, macOS & BSD:
+curl -proto '=https' --tlsv1.2 -sSf https://avenc.dev/install.sh | sh
+
+# Windows (PowerShell):
+iwr -useb https://avenc.dev/install.ps1 | iex
+
+# Or build from pure-standard-library Rust source:
+cargo install --git https://github.com/Thrainkrilleve/aven.git</code></pre>
+        </section>
+
+        <section id="relational-mindset">
+          <h2>2. The Relational Mindset</h2>
+          <p>In procedural code, functions are one-way arrows:</p>
+          <pre><code># Procedural thinking (one function per unknown):
+def calc_force(mass, acceleration): return mass * acceleration
+def calc_mass(force, acceleration):  return force / acceleration</code></pre>
+          <p>In Aven, you declare physical invariants once:</p>
+          <pre><code>relation Dynamics {
+    force = mass * acceleration
+}</code></pre>
+          <p>Aven solves for <code>force</code>, <code>mass</code>, or <code>acceleration</code> dynamically using exact symbolic Jacobians and Newton-Raphson relaxation.</p>
+        </section>
+
+        <section id="recipe-omnidirectional">
+          <h2>3. Omnidirectional Solving Example</h2>
+          <pre><code>// dynamics.aven
+relation Dynamics {
+    force = mass * acceleration
+}
+
+// Forward: Solve for force given mass and acceleration
+solve Dynamics with {
+    mass = 1200.0
+    acceleration = 3.5
+}
+
+// Backward: Solve for mass given target acceleration and available force
+solve Dynamics with {
+    force = 4200.0
+    acceleration = 5.0
+}</code></pre>
+          <p>Run the model:</p>
+          <pre><code>avenc run dynamics.aven</code></pre>
+        </section>
+
+        <section id="recipe-units">
+          <h2>4. Physical Units & 7-D Dimensional Tensors</h2>
+          <p>Aven validates physical dimensions at compile-time across SI base dimensions: Mass $[M]$, Length $[L]$, Time $[T]$, Current $[I]$, Temperature $[\Theta]$, Substance $[N]$, and Luminous Intensity $[J]$.</p>
+          <pre><code>signal speed : km/h
+signal time_elapsed : s
+signal distance_travelled : m
+
+relation Kinematics {
+    distance_travelled = speed * time_elapsed
+    acceleration = speed / time_elapsed
+    force = mass * acceleration
+}
+
+solve Kinematics with {
+    speed = 100 km/h
+    time_elapsed = 10 s
+    mass = 1500 kg
+}</code></pre>
+          <p>If you accidentally add seconds to speed (<code>speed + 10 s</code>), Aven immediately rejects compilation before any code executes.</p>
+        </section>
+
+        <section id="recipe-optimization">
+          <h2>5. Mixed-Integer Optimization & Constraints</h2>
+          <p>Physical systems require discrete integer decisions (e.g. integer servers, hard drives, gear teeth). Aven natively incorporates branch-and-bound mixed-integer simplex solving:</p>
+          <pre><code>relation ServerProvisioning {
+    int nodes
+    total_cores = nodes * cores_per_node
+    total_ram_gb = nodes * ram_per_node_gb
+    total_cost_monthly = nodes * node_monthly_cost
+    
+    // Invariant inequalities:
+    total_cores >= required_cores
+    total_ram_gb >= required_ram_gb
+}
+
+solve ServerProvisioning with {
+    cores_per_node = 16.0
+    ram_per_node_gb = 64.0
+    node_monthly_cost = 145.0
+    required_cores = 100.0
+    required_ram_gb = 350.0
+    minimize(nodes)
+}</code></pre>
+        </section>
+
+        <section id="recipe-c-codegen">
+          <h2>6. Compiling to Freestanding C99</h2>
+          <p>For embedded microcontrollers or automotive ECUs, <code>forward</code> blocks compile to branchless, solver-free ANSI C99:</p>
+          <pre><code>avenc emit-c governor.aven -o governor.c</code></pre>
+        </section>
+
+        <section id="recipe-wasm">
+          <h2>7. Compiling to WebAssembly</h2>
+          <pre><code># Emit standard binary WASM
+avenc emit-wasm governor.aven -o governor.wasm
+
+# Inspect WebAssembly Text format
+avenc emit-wasm governor.aven --wat</code></pre>
+        </section>
+
+        <section id="cheat-sheet">
+          <h2>8. Built-in Mathematical Functions</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Function</th>
+                <th>Description</th>
+                <th>Valid Domain</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><code>sqrt(x)</code></td><td>Square root</td><td>$x \ge 0$</td></tr>
+              <tr><td><code>abs(x)</code></td><td>Absolute value</td><td>$\mathbb{R}$</td></tr>
+              <tr><td><code>ceil(x)</code></td><td>Ceiling integer step</td><td>$\mathbb{R}$</td></tr>
+              <tr><td><code>floor(x)</code></td><td>Floor integer step</td><td>$\mathbb{R}$</td></tr>
+              <tr><td><code>round(x)</code></td><td>Nearest integer rounding</td><td>$\mathbb{R}$</td></tr>
+              <tr><td><code>sign(x)</code></td><td>Signum (-1, 0, +1)</td><td>$\mathbb{R}$</td></tr>
+              <tr><td><code>ln(x)</code> / <code>log(x)</code></td><td>Natural logarithm</td><td>$x > 0$</td></tr>
+              <tr><td><code>exp(x)</code></td><td>Natural exponential ($e^x$)</td><td>$\mathbb{R}$</td></tr>
+              <tr><td><code>sin(x)</code>, <code>cos(x)</code>, <code>tan(x)</code></td><td>Trigonometry</td><td>$\mathbb{R}$ (dimensionless)</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="package-spec">
+          <h2>9. Package Registry & Commands</h2>
+          <pre><code># Initialize a new package with Aven.toml
+avenc pkg init my_physics_lib
+
+# Pack into a cryptographic .avenpkg archive sealed with SHA-256
+avenc pkg pack
+
+# Install into local registry
+avenc pkg install my_physics_lib-0.1.0.avenpkg
+
+# List installed packages
+avenc pkg list</code></pre>
+        </section>
+      </article>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <div class="container" style="text-align: center;">
+      <p>&copy; 2026 Aven Contributors. Open source under MIT License &bull; avenc.dev</p>
+    </div>
+  </footer>
+
+</body>
+</html>
