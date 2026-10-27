@@ -115,5 +115,7 @@
         ]
       }
     ]
-  }
+  },
+  "license": "MIT",
+  "author": "Austin Thompson"
 }

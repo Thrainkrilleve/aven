@@ -1,2 +1,2 @@
 ---
-*Aven Relational Programming Language • Open Source under MIT License • Maintained by Thrain Krill*
+*Aven Relational Programming Language • Open source under the [MIT License](https://github.com/Thrainkrilleve/aven/blob/main/LICENSE) • © 2026 Austin Thompson • Maintained by Thrain Krill*

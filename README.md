@@ -289,4 +289,4 @@ The SMT and safety-case tests need `z3` (or `cvc5`) on `PATH`; CI installs it. `
 
 ## License
 
-This project is licensed under the MIT License — see the repository for details.
+Aven is released under the [MIT License](LICENSE). Copyright © 2026 Austin Thompson.
