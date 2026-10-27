@@ -6,7 +6,8 @@
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "./public",
-    "binding": "ASSETS"
+    "binding": "ASSETS",
+    "not_found_handling": "404-page"
   },
   "d1_databases": [
     {
@@ -17,7 +18,7 @@
     }
   ],
   "vars": {
-    "AVEN_VERSION": "0.9.0",
+    "AVEN_VERSION": "0.6.0",
     "REGISTRY_URL": "https://avenc.dev",
     "ENVIRONMENT": "production"
   }

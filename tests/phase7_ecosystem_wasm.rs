@@ -507,3 +507,58 @@ fn test_cli_pkg_and_wasm_subprocesses() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+// ---------------------------------------------------------------------------
+// Regression: `^` must compile to exact arithmetic, never to a multiplication
+// ---------------------------------------------------------------------------
+#[test]
+fn test_wasm_pow_matches_native_evaluation() {
+    let src = "forward Powers {\n\
+                   cube     = x ^ 3\n\
+                   inv_sq   = x ^ -2\n\
+                   root     = x ^ 0.5\n\
+                   one      = x ^ 0\n\
+                   nested   = (x * 2) ^ 2\n\
+               }\n";
+    let module = parse_module_from_str(src, "powers");
+    let bundle = WasmTranspiler::transpile(&module).expect("integer and 0.5 exponents compile");
+    assert!(!bundle.wat.contains("approximation"));
+
+    let fractional = parse_module_from_str("forward Bad {\n y = x ^ 1.5\n}\n", "bad");
+    assert!(WasmTranspiler::transpile(&fractional).is_err(), "non-integer exponents must be rejected");
+
+    if Command::new("node").arg("--version").output().is_err() {
+        return;
+    }
+    let dir = create_temp_dir("wasm_pow");
+    let wasm_path = dir.join("powers.wasm");
+    fs::write(&wasm_path, &bundle.wasm_bytes).unwrap();
+    let node_code = format!(
+        "const bytes = require('fs').readFileSync('{file}');\n\
+         WebAssembly.instantiate(bytes).then(({{ instance }}) => {{\n\
+             const mem = new Float64Array(instance.exports.memory.buffer);\n\
+             mem[0] = 3.0;\n\
+             instance.exports.aven_solve(0, 1024);\n\
+             console.log(Array.from(mem.slice(128, 133)).join(','));\n\
+         }}).catch(e => {{ console.error(e); process.exit(1); }});",
+        file = wasm_path.to_str().unwrap().replace('\\', "/")
+    );
+    let out = Command::new("node").args(["-e", &node_code]).output().unwrap();
+    assert!(out.status.success(), "node wasm execution failed");
+    let got: Vec<f64> = String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .split(',')
+        .map(|v| v.parse().unwrap())
+        .collect();
+    let mut expected: HashMap<&str, f64> = HashMap::new();
+    expected.insert("cube", 27.0);
+    expected.insert("inv_sq", 1.0 / 9.0);
+    expected.insert("root", 3.0_f64.sqrt());
+    expected.insert("one", 1.0);
+    expected.insert("nested", 36.0);
+    for (i, name) in bundle.output_names.iter().enumerate() {
+        let want = expected[name.as_str()];
+        assert!((got[i] - want).abs() < 1e-12, "{}: wasm {} != {}", name, got[i], want);
+    }
+    let _ = fs::remove_dir_all(&dir);
+}

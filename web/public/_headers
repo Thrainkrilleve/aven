@@ -1,0 +1,15 @@
+# Cloudflare static-asset headers. Assets are served without running the worker,
+# so headers for pages and files must be set here rather than in src/index.ts.
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+
+# Models are rebuilt in place (no content hash in the name), so they must revalidate
+# to stay in step with manifest.json.
+/models/*
+  Cache-Control: public, max-age=0, must-revalidate
+
+/install.sh
+  Content-Type: text/plain; charset=utf-8

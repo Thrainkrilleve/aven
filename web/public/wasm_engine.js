@@ -1,65 +1,41 @@
-// wasm_engine.js — Client-Side Aven WebAssembly Solver Engine
-// Runs pure standard WebAssembly Core 1.0 bytecode directly in the browser
+// wasm_engine.js — Runs models emitted by `avenc emit-wasm` in the browser.
+//
+// ABI (see src/codegen_wasm.rs): aven_solve(in_ptr, out_ptr) reads one f64 per input,
+// in sorted-name order, and writes one f64 per output, in evaluation order. The order
+// for each model is recorded in models/manifest.json by scripts/build-models.mjs.
+
+const IN_PTR = 0;
+const OUT_PTR = 1024;
 
 export class AvenWasmEngine {
   constructor() {
-    this.moduleCache = new Map();
+    this.instances = new Map();
   }
 
-  async loadModel(modelName) {
-    if (this.moduleCache.has(modelName)) {
-      return this.moduleCache.get(modelName);
-    }
-
-    const response = await fetch(`/models/${modelName}.wasm`);
-    if (!response.ok) {
-      throw new Error(`Failed to load WASM model '${modelName}': HTTP ${response.status}`);
-    }
-
-    const buffer = await response.arrayBuffer();
-    const wasmModule = await WebAssembly.compile(buffer);
-    const instance = await WebAssembly.instantiate(wasmModule, {});
-
-    const bundle = { module: wasmModule, instance };
-    this.moduleCache.set(modelName, bundle);
-    return bundle;
+  async load(model) {
+    if (this.instances.has(model.key)) return;
+    const response = await fetch(`/models/${model.key}.wasm`);
+    if (!response.ok) throw new Error(`Failed to load model '${model.key}': HTTP ${response.status}`);
+    const { instance } = await WebAssembly.instantiate(await response.arrayBuffer(), {});
+    this.instances.set(model.key, instance);
   }
 
-  solve(modelName, inputsArray, outputCount = 10) {
-    const bundle = this.moduleCache.get(modelName);
-    if (!bundle) {
-      throw new Error(`Model '${modelName}' not loaded. Call loadModel() first.`);
-    }
+  /** Solves `model` for the given values (an object keyed by input name). */
+  solve(model, values) {
+    const instance = this.instances.get(model.key);
+    if (!instance) throw new Error(`Model '${model.key}' is not loaded`);
+    const memory = instance.exports.memory.buffer;
+    new Float64Array(memory, IN_PTR, model.inputs.length).set(model.inputs.map((i) => values[i.name]));
+    instance.exports.aven_solve(IN_PTR, OUT_PTR);
+    const raw = new Float64Array(memory, OUT_PTR, model.outputs.length);
+    return Object.fromEntries(model.outputs.map((name, i) => [name, raw[i]]));
+  }
 
-    const instance = bundle.instance;
-    const memory = instance.exports.memory;
-    const avenSolve = instance.exports.aven_solve;
-
+  /** Mean wall-clock time of one aven_solve call on the inputs last passed to solve(), in µs. */
+  timeSolve(model, iterations = 2000) {
+    const solve = this.instances.get(model.key).exports.aven_solve;
     const t0 = performance.now();
-
-    // In-memory buffer pointers:
-    // Inputs start at offset 0; outputs start at offset 1024
-    const inPtr = 0;
-    const outPtr = 1024;
-
-    const inView = new Float64Array(memory.buffer, inPtr, inputsArray.length);
-    for (let i = 0; i < inputsArray.length; i++) {
-      inView[i] = inputsArray[i];
-    }
-
-    // Execute solver
-    const status = avenSolve(inPtr, outPtr);
-
-    const t1 = performance.now();
-    const solveTimeUs = (t1 - t0) * 1000.0;
-
-    const outView = new Float64Array(memory.buffer, outPtr, outputCount);
-    const outputs = Array.from(outView);
-
-    return {
-      status,
-      solveTimeUs: Math.max(0.1, parseFloat(solveTimeUs.toFixed(2))),
-      outputs,
-    };
+    for (let i = 0; i < iterations; i++) solve(IN_PTR, OUT_PTR);
+    return ((performance.now() - t0) * 1000) / iterations;
   }
 }

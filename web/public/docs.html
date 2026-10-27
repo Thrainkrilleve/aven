@@ -3,245 +3,221 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Aven Documentation & Guides</title>
-  <meta name="description" content="Official documentation, getting started guides, language tutorials, and engineering standards for Aven.">
+  <title>Aven Docs</title>
+  <meta name="description" content="Install Aven, write your first relation, and learn units, optimization, code generation, audit ledgers and the avenc command line.">
+  <meta name="theme-color" content="#070a10">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
-  <style>
-    .docs-layout {
-      display: grid;
-      grid-template-columns: 280px 1fr;
-      gap: 2.5rem;
-      padding: 3rem 0;
-      align-items: start;
-    }
-    .docs-sidebar {
-      position: sticky;
-      top: 5.5rem;
-      background: var(--bg-surface);
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-lg);
-      padding: 1.5rem;
-    }
-    .sidebar-section {
-      margin-bottom: 1.5rem;
-    }
-    .sidebar-title {
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--text-dim);
-      margin-bottom: 0.75rem;
-    }
-    .sidebar-menu {
-      list-style: none;
-      display: flex;
-      flex-direction: column;
-      gap: 0.4rem;
-    }
-    .sidebar-link {
-      color: var(--text-muted);
-      font-size: 0.9rem;
-      display: block;
-      padding: 0.35rem 0.6rem;
-      border-radius: var(--radius-sm);
-      transition: var(--transition);
-    }
-    .sidebar-link:hover, .sidebar-link.active {
-      color: #ffffff;
-      background: rgba(0, 242, 254, 0.1);
-      color: var(--accent-cyan);
-    }
-    .docs-content {
-      background: var(--bg-surface);
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-lg);
-      padding: 2.5rem;
-    }
-    .docs-content h2 {
-      margin-top: 2rem;
-      padding-top: 1.5rem;
-      border-top: 1px solid var(--border-subtle);
-    }
-    .docs-content h2:first-of-type {
-      margin-top: 0;
-      padding-top: 0;
-      border-top: none;
-    }
-    .docs-content pre {
-      background: var(--bg-code);
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-md);
-      padding: 1.25rem;
-      margin: 1.25rem 0;
-      overflow-x: auto;
-      font-size: 0.88rem;
-      line-height: 1.5;
-    }
-    .docs-content table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 1.5rem 0;
-      font-size: 0.9rem;
-    }
-    .docs-content th, .docs-content td {
-      padding: 0.75rem 1rem;
-      border: 1px solid var(--border-subtle);
-      text-align: left;
-    }
-    .docs-content th {
-      background: var(--bg-surface-elevated);
-      color: #ffffff;
-      font-weight: 600;
-    }
-    @media (max-width: 900px) {
-      .docs-layout { grid-template-columns: 1fr; }
-      .docs-sidebar { position: static; }
-    }
-  </style>
 </head>
 <body>
 
-  <!-- Navigation -->
-  <nav class="navbar">
-    <a href="/" class="brand">
-      <span>▲ AVEN</span>
-      <span class="brand-badge">v0.9.0</span>
-    </a>
-    <ul class="nav-links">
-      <li><a href="/">Home</a></li>
-      <li><a href="/#playground">Playground</a></li>
-      <li><a href="/docs.html" class="active">Documentation</a></li>
-      <li><a href="/registry.html">Packages</a></li>
-      <li><a href="https://github.com/Thrainkrilleve/aven" target="_blank" rel="noopener">GitHub</a></li>
-    </ul>
-    <div class="nav-actions">
-      <a href="/#install" class="btn btn-primary btn-sm">Install CLI</a>
+  <nav class="nav" aria-label="Main">
+    <div class="container">
+      <a href="/" class="brand" aria-label="Aven home">
+        <img src="/favicon.svg" alt="" class="brand-mark">
+        AVEN
+        <span class="brand-version">v0.6.0</span>
+      </a>
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" aria-label="Menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <ul class="nav-links" id="nav-links">
+        <li><a href="/#playground">Playground</a></li>
+        <li><a href="/docs.html" aria-current="page">Docs</a></li>
+        <li><a href="/registry.html">Packages</a></li>
+        <li><a href="https://github.com/Thrainkrilleve/aven" rel="noopener">GitHub</a></li>
+      </ul>
+      <div class="nav-actions">
+        <a href="#install" class="btn btn-primary btn-sm">Install</a>
+      </div>
     </div>
   </nav>
 
   <main class="container">
-    <div class="docs-layout">
-      <!-- Sidebar -->
-      <aside class="docs-sidebar">
-        <div class="sidebar-section">
-          <div class="sidebar-title">Getting Started</div>
-          <ul class="sidebar-menu">
-            <li><a href="#quickstart" class="sidebar-link active">15-Minute Quickstart</a></li>
-            <li><a href="#relational-mindset" class="sidebar-link">The Relational Mindset</a></li>
-            <li><a href="#first-relation" class="sidebar-link">Your First Relation</a></li>
-          </ul>
-        </div>
-
-        <div class="sidebar-section">
-          <div class="sidebar-title">Cookbook Recipes</div>
-          <ul class="sidebar-menu">
-            <li><a href="#recipe-omnidirectional" class="sidebar-link">Omnidirectional Solving</a></li>
-            <li><a href="#recipe-units" class="sidebar-link">Units & Dimensions</a></li>
-            <li><a href="#recipe-optimization" class="sidebar-link">Mixed-Integer Optimization</a></li>
-            <li><a href="#recipe-c-codegen" class="sidebar-link">C99 Code Generation</a></li>
-            <li><a href="#recipe-wasm" class="sidebar-link">WebAssembly Emission</a></li>
-            <li><a href="#recipe-debugging" class="sidebar-link">Time-Travel Debugger</a></li>
-          </ul>
-        </div>
-
-        <div class="sidebar-section">
-          <div class="sidebar-title">Reference & Specs</div>
-          <ul class="sidebar-menu">
-            <li><a href="#cheat-sheet" class="sidebar-link">Syntax Cheat Sheet</a></li>
-            <li><a href="#standards" class="sidebar-link">Engineering Standards</a></li>
-            <li><a href="#package-spec" class="sidebar-link">Package Format (.avenpkg)</a></li>
-          </ul>
-        </div>
+    <div class="docs">
+      <aside class="docs-nav" aria-label="On this page">
+        <h4>Getting started</h4>
+        <ul>
+          <li><a href="#install">Install</a></li>
+          <li><a href="#first-model">Your first model</a></li>
+          <li><a href="#any-direction">Solving in any direction</a></li>
+        </ul>
+        <h4>Language</h4>
+        <ul>
+          <li><a href="#language">Relations, solves, forward</a></li>
+          <li><a href="#units">Units and dimensions</a></li>
+          <li><a href="#optimization">Optimization</a></li>
+          <li><a href="#functions">Functions and constants</a></li>
+          <li><a href="#adapters">External data</a></li>
+        </ul>
+        <h4>Tooling</h4>
+        <ul>
+          <li><a href="#cli">Command reference</a></li>
+          <li><a href="#codegen">C and WebAssembly</a></li>
+          <li><a href="#ledger">Audit ledger</a></li>
+          <li><a href="#debugging">Explaining results</a></li>
+          <li><a href="#packages">Packages</a></li>
+          <li><a href="#more">Further reading</a></li>
+        </ul>
       </aside>
 
-      <!-- Main Content Area -->
-      <article class="docs-content">
-        <section id="quickstart">
-          <h1>Getting Started with Aven</h1>
-          <p style="font-size: 1.15rem; margin-top: 0.5rem; color: var(--text-muted);">
-            Aven is the non-procedural programming language that replaces fragile imperative scripts with unbreakable mathematical invariants and cryptographic audit trails.
+      <article class="prose">
+        <div class="docs-jump">
+          <label class="sr-only" for="docs-jump">Jump to section</label>
+          <select id="docs-jump">
+            <option value="#install">Install</option>
+            <option value="#first-model">Your first model</option>
+            <option value="#any-direction">Solving in any direction</option>
+            <option value="#language">Relations, solves, forward</option>
+            <option value="#units">Units and dimensions</option>
+            <option value="#optimization">Optimization</option>
+            <option value="#functions">Functions and constants</option>
+            <option value="#adapters">External data</option>
+            <option value="#cli">Command reference</option>
+            <option value="#codegen">C and WebAssembly</option>
+            <option value="#ledger">Audit ledger</option>
+            <option value="#debugging">Explaining results</option>
+            <option value="#packages">Packages</option>
+            <option value="#more">Further reading</option>
+          </select>
+        </div>
+
+        <section id="install">
+          <span class="eyebrow">Getting started</span>
+          <h1>Aven documentation</h1>
+          <p class="lede">
+            Aven is a relational language: you state equations that must hold, give it the values you know,
+            and it settles the rest. This page takes you from installation to compiled code. Every example
+            here runs as written with <code>avenc</code> v0.6.0.
           </p>
 
-          <h2>1. Installation</h2>
-          <pre><code># Linux, macOS & BSD:
-curl -proto '=https' --tlsv1.2 -sSf https://avenc.dev/install.sh | sh
-
-# Windows (PowerShell):
-iwr -useb https://avenc.dev/install.ps1 | iex
-
-# Or build from pure-standard-library Rust source:
-cargo install --git https://github.com/Thrainkrilleve/aven.git</code></pre>
+          <h2 style="margin-top:2rem">Install</h2>
+          <p>Aven builds from source with a standard Rust toolchain (install one from <a href="https://rustup.rs" rel="noopener">rustup.rs</a>). The compiler has no external crate dependencies.</p>
+          <div class="code"><pre>cargo install --git https://github.com/Thrainkrilleve/aven.git avenc</pre></div>
+          <p>Or clone the repository, which also gives you the examples used throughout this guide:</p>
+          <div class="code"><pre>git clone https://github.com/Thrainkrilleve/aven.git
+cd aven
+cargo install --path .</pre></div>
+          <p>The one-line installers at <a href="/install.sh"><code>avenc.dev/install.sh</code></a> and <a href="/install.ps1"><code>avenc.dev/install.ps1</code></a> run the same <code>cargo install</code>. Prebuilt binaries are not published yet.</p>
+          <div class="code"><pre>avenc --version
+avenc check examples/server_capacity.aven</pre></div>
         </section>
 
-        <section id="relational-mindset">
-          <h2>2. The Relational Mindset</h2>
-          <p>In procedural code, functions are one-way arrows:</p>
-          <pre><code># Procedural thinking (one function per unknown):
-def calc_force(mass, acceleration): return mass * acceleration
-def calc_mass(force, acceleration):  return force / acceleration</code></pre>
-          <p>In Aven, you declare physical invariants once:</p>
-          <pre><code>relation Dynamics {
-    force = mass * acceleration
-}</code></pre>
-          <p>Aven solves for <code>force</code>, <code>mass</code>, or <code>acceleration</code> dynamically using exact symbolic Jacobians and Newton-Raphson relaxation.</p>
-        </section>
-
-        <section id="recipe-omnidirectional">
-          <h2>3. Omnidirectional Solving Example</h2>
-          <pre><code>// dynamics.aven
+        <section id="first-model">
+          <h2>Your first model</h2>
+          <p>A <code>relation</code> holds equations. A <code>solve</code> block supplies the values you observed. Save this as <code>dynamics.aven</code>:</p>
+          <div class="code"><div class="code-label">dynamics.aven</div><pre data-lang="aven">
 relation Dynamics {
     force = mass * acceleration
 }
 
-// Forward: Solve for force given mass and acceleration
 solve Dynamics with {
     mass = 1200.0
     acceleration = 3.5
-}
+}</pre></div>
+          <div class="code"><pre>avenc run dynamics.aven</pre></div>
+          <div class="code output"><pre>Solver Trace:
+  [force = mass * acceleration] force &lt;- forward eval
 
-// Backward: Solve for mass given target acceleration and available force
+Settled Environment:
+  acceleration     = 3.5000
+  force            = 4200.0000
+  mass             = 1200.0000
+
+Fact Ledger: 3 facts settled.</pre></div>
+        </section>
+
+        <section id="any-direction">
+          <h2>Solving in any direction</h2>
+          <p>The equation does not fix which side is the input. Change the solve block to give the force and acceleration instead, and Aven solves for mass with Newton–Raphson:</p>
+          <div class="code"><pre data-lang="aven">
 solve Dynamics with {
     force = 4200.0
     acceleration = 5.0
-}</code></pre>
-          <p>Run the model:</p>
-          <pre><code>avenc run dynamics.aven</code></pre>
+}</pre></div>
+          <div class="code output"><pre>Solver Trace:
+  [force = mass * acceleration] mass &lt;- backward Newton
+
+Settled Environment:
+  acceleration     = 5.0000
+  force            = 4200.0000
+  mass             = 840.0000</pre></div>
+          <div class="notice info">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v5h1"/></svg>
+            <p>All <code>solve</code> blocks in one file contribute to a single settled state. Put alternative scenarios in separate files; two contradictory scenarios in one file are reported as an inconsistency.</p>
+          </div>
         </section>
 
-        <section id="recipe-units">
-          <h2>4. Physical Units & 7-D Dimensional Tensors</h2>
-          <p>Aven validates physical dimensions at compile-time across SI base dimensions: Mass $[M]$, Length $[L]$, Time $[T]$, Current $[I]$, Temperature $[\Theta]$, Substance $[N]$, and Luminous Intensity $[J]$.</p>
-          <pre><code>signal speed : km/h
-signal time_elapsed : s
-signal distance_travelled : m
-
-relation Kinematics {
-    distance_travelled = speed * time_elapsed
-    acceleration = speed / time_elapsed
-    force = mass * acceleration
-}
-
-solve Kinematics with {
-    speed = 100 km/h
-    time_elapsed = 10 s
-    mass = 1500 kg
-}</code></pre>
-          <p>If you accidentally add seconds to speed (<code>speed + 10 s</code>), Aven immediately rejects compilation before any code executes.</p>
+        <section id="language">
+          <span class="eyebrow">Language</span>
+          <h2>Relations, solves and forward blocks</h2>
+          <ul>
+            <li><strong><code>relation</code></strong> declares equations and inequalities that must all hold. Any variable can be the unknown.</li>
+            <li><strong><code>solve … with</code></strong> binds observed values, and may add bounds or an objective.</li>
+            <li><strong><code>forward</code></strong> pins the direction: each equation computes its left-hand side from values already known. Forward blocks run without a solver and are what <code>emit-c</code> and <code>emit-wasm</code> compile.</li>
+          </ul>
+          <div class="code"><div class="code-label">examples/server_capacity.aven (excerpt)</div><pre data-lang="aven">
+forward ProductionProfile {
+    raw_workers       = (reqs_per_second * avg_latency_ms) / 1000
+    allocated_workers = ceil(raw_workers / target_utilization)
+    total_ram_needed  = (allocated_workers * (ram_per_worker + socket_buffer_mb)) + os_kernel_ram_mb
+    payload_gbps      = (reqs_per_second * avg_payload_kb * 8) / 1000000
+    wire_rate_gbps    = payload_gbps * framing_overhead_ratio
+}</pre></div>
+          <p>Operators, from highest to lowest precedence: <code>^</code> (right-associative), <code>*</code> <code>/</code>, <code>+</code> <code>-</code>, then the comparisons <code>&lt;</code> <code>&lt;=</code> <code>&gt;</code> <code>&gt;=</code>. Comments start with <code>//</code>.</p>
         </section>
 
-        <section id="recipe-optimization">
-          <h2>5. Mixed-Integer Optimization & Constraints</h2>
-          <p>Physical systems require discrete integer decisions (e.g. integer servers, hard drives, gear teeth). Aven natively incorporates branch-and-bound mixed-integer simplex solving:</p>
-          <pre><code>relation ServerProvisioning {
+        <section id="units">
+          <h2>Units and dimensions</h2>
+          <p>Declare a signal's unit with <code>signal name : unit</code>, or attach a unit to a value in a solve block. <code>avenc check</code> infers the dimension of every variable and rejects equations that mix incompatible dimensions:</p>
+          <div class="code"><pre data-lang="aven">
+signal speed : km/h
+signal t : s
+
+relation Mixed {
+    bad = speed + t
+}</pre></div>
+          <div class="code output"><pre>✗ Type Error at line 5, col 5: dimensional mismatch in expression '(speed + t)'
+  — cannot perform '+/-' between [m·s^-1] and [s]</pre></div>
+          <p>The checker tracks ten base dimensions: length, time, mass, electric current, temperature and amount of substance from SI, plus angle, money, data and transactions. Built-in units include:</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Dimension</th><th>Units</th></tr></thead>
+              <tbody>
+                <tr><td>Length</td><td><code>m</code> <code>km</code> <code>cm</code> <code>mm</code> <code>in</code> <code>ft</code> <code>mi</code></td></tr>
+                <tr><td>Time</td><td><code>s</code> <code>ms</code> <code>us</code> <code>ns</code> <code>min</code> <code>h</code> <code>hr</code> <code>day</code></td></tr>
+                <tr><td>Mass</td><td><code>kg</code> <code>g</code> <code>mg</code> <code>lb</code></td></tr>
+                <tr><td>Current</td><td><code>A</code> <code>mA</code></td></tr>
+                <tr><td>Temperature</td><td><code>K</code> <code>degC</code></td></tr>
+                <tr><td>Amount</td><td><code>mol</code></td></tr>
+                <tr><td>Angle</td><td><code>rad</code> <code>deg</code></td></tr>
+                <tr><td>Money</td><td><code>$</code> <code>usd</code> <code>eur</code> <code>gbp</code></td></tr>
+                <tr><td>Data</td><td><code>b</code> <code>bit</code> <code>byte</code> <code>KB</code> <code>MB</code> <code>GB</code> <code>TB</code> <code>PB</code> <code>KiB</code> <code>MiB</code> <code>GiB</code> <code>TiB</code></td></tr>
+                <tr><td>Transactions</td><td><code>req</code> <code>iop</code> <code>pkt</code> <code>tx</code></td></tr>
+                <tr><td>Derived</td><td><code>W</code> <code>kW</code> <code>J</code> <code>kJ</code> <code>kWh</code> <code>Hz</code> <code>kHz</code> <code>MHz</code> <code>GHz</code> <code>bps</code> … <code>Tbps</code> <code>iops</code> <code>rps</code> <code>pph</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>Compound units are written with <code>/</code>, as in <code>km/h</code>. Unit names are case-insensitive.</p>
+          <div class="notice">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3 2 21h20z"/><path d="M12 10v4M12 17h.01"/></svg>
+            <p>Units are checked for consistency, but <code>avenc run</code> does not currently rescale numbers between units. Write the values in a model in one consistent set of units.</p>
+          </div>
+        </section>
+
+        <section id="optimization">
+          <h2>Optimization</h2>
+          <p>Declare integer variables with <code>int</code>, constrain with inequalities, and add <code>minimize(…)</code> or <code>maximize(…)</code> to the solve block:</p>
+          <div class="code"><div class="code-label">examples/tutorial/03_optimization_and_bounds.aven</div><pre data-lang="aven">
+relation ServerProvisioning {
     int nodes
     total_cores = nodes * cores_per_node
     total_ram_gb = nodes * ram_per_node_gb
     total_cost_monthly = nodes * node_monthly_cost
-    
-    // Invariant inequalities:
+
     total_cores >= required_cores
     total_ram_gb >= required_ram_gb
 }
@@ -253,71 +229,171 @@ solve ServerProvisioning with {
     required_cores = 100.0
     required_ram_gb = 350.0
     minimize(nodes)
-}</code></pre>
+}</pre></div>
+          <div class="code output"><pre>Solver Trace:
+  [optimize] simplex branch-and-bound (1 nodes) — objective = 7.000000 (proven optimal)
+             [bound = 7.000000, duality_gap = 0.00e0, cuts = 1, dual_norm = 3.00e0]
+
+Settled Environment:
+  nodes            = 7 (int)
+  total_cores      = 112.0000
+  total_cost_monthly = 1015.0000
+  total_ram_gb     = 448.0000</pre></div>
+          <p>A result is reported as <em>proven optimal</em> only when the bound and duality gap certify it. To explore a trade-off instead of a single optimum, sweep one variable with <code>avenc pareto &lt;file&gt; &lt;var&gt; &lt;min&gt; &lt;max&gt;</code>.</p>
         </section>
 
-        <section id="recipe-c-codegen">
-          <h2>6. Compiling to Freestanding C99</h2>
-          <p>For embedded microcontrollers or automotive ECUs, <code>forward</code> blocks compile to branchless, solver-free ANSI C99:</p>
-          <pre><code>avenc emit-c governor.aven -o governor.c</code></pre>
+        <section id="functions">
+          <h2>Functions and constants</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Function</th><th>Meaning</th><th>Domain</th></tr></thead>
+              <tbody>
+                <tr><td><code>sqrt(x)</code></td><td>Square root</td><td>x ≥ 0</td></tr>
+                <tr><td><code>abs(x)</code></td><td>Absolute value</td><td>all x</td></tr>
+                <tr><td><code>ceil(x)</code>, <code>floor(x)</code></td><td>Round up / down (snaps within 1e-9 of an integer)</td><td>all x</td></tr>
+                <tr><td><code>round(x)</code></td><td>Nearest integer</td><td>all x</td></tr>
+                <tr><td><code>sign(x)</code></td><td>−1, 0 or +1</td><td>all x</td></tr>
+                <tr><td><code>ln(x)</code>, <code>log(x)</code></td><td>Natural logarithm</td><td>x &gt; 0</td></tr>
+                <tr><td><code>exp(x)</code></td><td>e<sup>x</sup></td><td>all x</td></tr>
+                <tr><td><code>sin(x)</code>, <code>cos(x)</code>, <code>tan(x)</code></td><td>Trigonometry, radians</td><td>tan: x ≠ π/2 + kπ</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>Constants: <code>pi</code>, <code>e</code> and <code>tau</code> (upper-case spellings also work). There is no <code>log10</code>; use <code>ln(x) / 2.302585092994046</code>.</p>
         </section>
 
-        <section id="recipe-wasm">
-          <h2>7. Compiling to WebAssembly</h2>
-          <pre><code># Emit standard binary WASM
-avenc emit-wasm governor.aven -o governor.wasm
+        <section id="adapters">
+          <h2>External data</h2>
+          <p>A relation can take its facts from a live source with a <code>using</code> clause. Each fact from an adapter records the SHA-256 of the adapter's raw output in the ledger.</p>
+          <div class="code"><pre data-lang="aven">
+// A subprocess that prints JSON facts
+relation Flame using external("python", "evaluations/tests/flame_eval.py") {
+}
 
-# Inspect WebAssembly Text format
-avenc emit-wasm governor.aven --wat</code></pre>
+// A persistent local daemon over TCP
+relation FlightAtmosphericDynamics using ipc("127.0.0.1:9090") {
+    speed_of_sound_ms = sqrt(1.4 * 287.058 * ambient_temp_k)
+    mach_number = velocity_ms / speed_of_sound_ms
+}</pre></div>
+          <p>Two more backends exist for low-latency use: <code>shm("name")</code> reads a shared-memory ring buffer, and <code>native("lib.so")</code> calls a C or Rust dynamic library in process.</p>
+          <p>Facts can carry a time-to-live. If a decision depends on a fact older than its TTL, <code>avenc run</code> prints <code>DECISION BLOCKED</code> and exits with code 3 unless you pass <code>--allow-stale</code>.</p>
         </section>
 
-        <section id="cheat-sheet">
-          <h2>8. Built-in Mathematical Functions</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Function</th>
-                <th>Description</th>
-                <th>Valid Domain</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td><code>sqrt(x)</code></td><td>Square root</td><td>$x \ge 0$</td></tr>
-              <tr><td><code>abs(x)</code></td><td>Absolute value</td><td>$\mathbb{R}$</td></tr>
-              <tr><td><code>ceil(x)</code></td><td>Ceiling integer step</td><td>$\mathbb{R}$</td></tr>
-              <tr><td><code>floor(x)</code></td><td>Floor integer step</td><td>$\mathbb{R}$</td></tr>
-              <tr><td><code>round(x)</code></td><td>Nearest integer rounding</td><td>$\mathbb{R}$</td></tr>
-              <tr><td><code>sign(x)</code></td><td>Signum (-1, 0, +1)</td><td>$\mathbb{R}$</td></tr>
-              <tr><td><code>ln(x)</code> / <code>log(x)</code></td><td>Natural logarithm</td><td>$x > 0$</td></tr>
-              <tr><td><code>exp(x)</code></td><td>Natural exponential ($e^x$)</td><td>$\mathbb{R}$</td></tr>
-              <tr><td><code>sin(x)</code>, <code>cos(x)</code>, <code>tan(x)</code></td><td>Trigonometry</td><td>$\mathbb{R}$ (dimensionless)</td></tr>
-            </tbody>
-          </table>
+        <section id="cli">
+          <span class="eyebrow">Tooling</span>
+          <h2>Command reference</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+              <tbody>
+                <tr><td><code>avenc run &lt;file&gt;</code></td><td>Solve and print the settled environment. <code>--json</code>, <code>--ledger out.jsonl</code>, <code>--key</code>, <code>--allow-stale</code>.</td></tr>
+                <tr><td><code>avenc check &lt;file&gt;</code></td><td>Validate syntax, units and degrees of freedom.</td></tr>
+                <tr><td><code>avenc why &lt;file&gt; &lt;var&gt;</code></td><td>Print the derivation tree of a value.</td></tr>
+                <tr><td><code>avenc pareto &lt;file&gt; [var] [min] [max]</code></td><td>Sweep a variable, print the Pareto frontier and its knee point.</td></tr>
+                <tr><td><code>avenc stream &lt;file&gt;</code></td><td>Read JSON facts from stdin and re-settle as they arrive.</td></tr>
+                <tr><td><code>avenc emit-c &lt;file&gt; [-o out.c]</code></td><td>Compile the forward block to standalone C. <code>build --aeric-shim --out-dir</code> emits an AERIC deployment bundle.</td></tr>
+                <tr><td><code>avenc emit-wasm &lt;file&gt; [-o out.wasm] [--wat]</code></td><td>Compile the forward block to WebAssembly 1.0.</td></tr>
+                <tr><td><code>avenc emit-smt &lt;file&gt; [--prove]</code></td><td>Translate to SMT-LIB2 for Z3 or CVC5. <code>verify-smt</code> runs the solver.</td></tr>
+                <tr><td><code>avenc safety-case &lt;file&gt;</code></td><td>Draft a safety-case report structured for DO-178C (Table A-5) or ISO 26262. A starting point for review, not a certification.</td></tr>
+                <tr><td><code>avenc bench &lt;file&gt;</code></td><td>Measure solve latency and jitter; <code>--latency-profile</code>, <code>--target-hz</code>.</td></tr>
+                <tr><td><code>avenc verify-ledger &lt;log&gt;</code></td><td>Check an audit log's hash chain and HMAC signatures.</td></tr>
+                <tr><td><code>avenc compact-ledger &lt;in&gt; -o &lt;out&gt;</code></td><td>Compact a long audit log.</td></tr>
+                <tr><td><code>avenc debug &lt;file&gt; [ledger]</code></td><td>Time-travel debugger; <code>--goto</code>, <code>--what-if</code>, <code>--diff</code>.</td></tr>
+                <tr><td><code>avenc pkg init|pack|install|list</code></td><td>Package manager (see <a href="#packages">Packages</a>).</td></tr>
+                <tr><td><code>avenc demo</code></td><td>Run the built-in self-check.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <h3>Exit codes</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Code</th><th>Meaning</th></tr></thead>
+              <tbody>
+                <tr><td><code>0</code></td><td>Settled; all equations and constraints hold.</td></tr>
+                <tr><td><code>1</code></td><td>Solve error: inconsistent, unsolvable, singular, or a syntax/type error.</td></tr>
+                <tr><td><code>2</code></td><td>Converged, but a bound or safety constraint is violated.</td></tr>
+                <tr><td><code>3</code></td><td>Decision blocked on stale input.</td></tr>
+              </tbody>
+            </table>
+          </div>
         </section>
 
-        <section id="package-spec">
-          <h2>9. Package Registry & Commands</h2>
-          <pre><code># Initialize a new package with Aven.toml
-avenc pkg init my_physics_lib
+        <section id="codegen">
+          <h2>C and WebAssembly</h2>
+          <p>Both targets compile a model's <code>forward</code> block. Equations are topologically ordered, so the output is straight-line code with no solver, and the C output includes a <code>main</code> that runs the example's solve-block values.</p>
+          <div class="code"><pre>avenc emit-c examples/server_capacity.aven -o capacity.c
+cc -O2 capacity.c -lm -o capacity &amp;&amp; ./capacity</pre></div>
+          <div class="code"><pre>avenc emit-wasm examples/server_capacity.aven -o capacity.wasm
+avenc emit-wasm examples/server_capacity.aven --wat</pre></div>
+          <p>The WebAssembly module exports <code>memory</code>, a function named after the block that takes each input as a parameter, and <code>aven_solve(in_ptr, out_ptr)</code>, which reads inputs as consecutive <code>f64</code> values in alphabetical order of name and writes outputs in evaluation order:</p>
+          <div class="code"><pre>const { instance } = await WebAssembly.instantiate(bytes);
+const mem = new Float64Array(instance.exports.memory.buffer);
+mem.set([20, 64, 1.04, 4096, 16, 50000, 4, 0.7], 0);  // inputs, sorted by name
+instance.exports.aven_solve(0, 1024);
+console.log(mem.slice(128, 133));  // raw_workers, allocated_workers, ...</pre></div>
+          <p>WebAssembly has no power instruction, so <code>x ^ n</code> compiles only when <code>n</code> is an integer constant (|n| ≤ 64) or <code>0.5</code>; other exponents are rejected at compile time. The playground on the homepage runs modules produced this way.</p>
+        </section>
 
-# Pack into a cryptographic .avenpkg archive sealed with SHA-256
-avenc pkg pack
+        <section id="ledger">
+          <h2>Audit ledger</h2>
+          <p>Every settled fact extends a SHA-256 hash chain. Write it with <code>--ledger</code>; sign it by setting <code>AVEN_LEDGER_KEY</code> or passing <code>--key</code>.</p>
+          <div class="code"><pre>avenc run examples/server_capacity.aven --ledger audit.jsonl
+avenc verify-ledger audit.jsonl</pre></div>
+          <div class="code output"><pre>Ledger OK: 13 fact(s), chain intact (signatures not checked: pass --key &lt;code&gt;
+or set AVEN_LEDGER_KEY), head 1e61a9c5de48af4c628242f5088dba27a5051ed1a3270057c5b4579d90987bf8</pre></div>
+          <p>Editing, deleting, reordering or truncating any entry makes <code>verify-ledger</code> fail with exit code 1 and name the first bad line.</p>
+        </section>
 
-# Install into local registry
-avenc pkg install my_physics_lib-0.1.0.avenpkg
+        <section id="debugging">
+          <h2>Explaining results</h2>
+          <p><code>avenc why</code> prints how a value was derived, down to the bindings it came from:</p>
+          <div class="code"><pre>avenc why examples/server_capacity.aven allocated_workers</pre></div>
+          <p><code>avenc debug</code> replays a run. With <code>--what-if</code> it branches the timeline and shows the effect of a change on every output:</p>
+          <div class="code"><pre>avenc debug thermostat.aven --what-if "current_temp_c=35.0"</pre></div>
+          <div class="code output"><pre>Counterfactual What-If Result (mutating 'current_temp_c' = 35 at t0):
+  Output Variable                 Nominal         Branch          Delta
+  --------------------------------------------------------------------
+  compressor_amps                 -3.7500        -7.0000        -3.2500
+  cooling_power_w               -900.0000     -1680.0000      -780.0000
+  temp_delta_c                    -7.5000       -14.0000        -6.5000</pre></div>
+          <p>In the interactive debugger: <code>step</code>, <code>prev</code>, <code>goto &lt;n&gt;</code>, <code>why &lt;var&gt;</code>, <code>what-if &lt;var&gt;=&lt;val&gt;</code>, <code>diff</code>, <code>vars</code>, <code>help</code>, <code>quit</code>.</p>
+        </section>
 
-# List installed packages
-avenc pkg list</code></pre>
+        <section id="packages">
+          <h2>Packages</h2>
+          <p>A package is a directory with an <code>Aven.toml</code> manifest and a <code>lib.aven</code> entry file, sealed into an <code>.avenpkg</code> archive with a SHA-256 digest.</p>
+          <div class="code"><pre>mkdir my_physics &amp;&amp; cd my_physics
+avenc pkg init my_physics              # writes Aven.toml and lib.aven here
+avenc pkg pack                         # → my_physics-0.1.0.avenpkg
+avenc pkg install my_physics-0.1.0.avenpkg
+avenc pkg list</pre></div>
+          <p>Packages install into <code>.aven/packages</code> in the current project. Installing by name from a remote registry is not implemented yet; see the <a href="/registry.html">package index</a> for its status, and the <a href="https://github.com/Thrainkrilleve/aven/blob/main/docs/PACKAGE_SPEC.md" rel="noopener">package specification</a> for the manifest format.</p>
+        </section>
+
+        <section id="more">
+          <h2>Further reading</h2>
+          <p>The full guides live in the repository:</p>
+          <ul>
+            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/docs/GETTING_STARTED.md" rel="noopener">Getting started</a> — the fifteen-minute walkthrough, including SMT export.</li>
+            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/docs/TUTORIAL.md" rel="noopener">Aven by example</a> — ten progressive recipes.</li>
+            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/docs/CHEAT_SHEET.md" rel="noopener">Cheat sheet</a> — syntax, functions and commands on one page.</li>
+            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/STANDARDS.md" rel="noopener">Engineering standards</a> — numerical, cryptographic and code-generation rules.</li>
+            <li><a href="https://github.com/Thrainkrilleve/aven/blob/main/docs/AVEN_AI_MODEL_GUIDE.md" rel="noopener">Guide for AI models</a> — writing Aven with a language model.</li>
+          </ul>
         </section>
       </article>
     </div>
   </main>
 
   <footer class="footer">
-    <div class="container" style="text-align: center;">
-      <p>&copy; 2026 Aven Contributors. Open source under MIT License &bull; avenc.dev</p>
+    <div class="container">
+      <div class="footer-bottom" style="margin-top:0;border-top:none;padding-top:0">
+        <span>&copy; 2026 Aven contributors &middot; MIT License</span>
+        <span><a href="https://github.com/Thrainkrilleve/aven/tree/main/web/public/docs.html" rel="noopener">Edit this page</a></span>
+      </div>
     </div>
   </footer>
 
+  <script type="module" src="/site.js"></script>
 </body>
 </html>

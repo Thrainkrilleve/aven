@@ -1,38 +1,22 @@
 #!/bin/sh
-# Aven Universal Installer for Linux, macOS & BSD
-# https://avenc.dev
-set -e
+# Aven installer for Linux and macOS — https://avenc.dev
+#
+# Builds avenc from source with cargo. Prebuilt binaries are not published yet,
+# so a Rust toolchain is required (https://rustup.rs).
+set -eu
 
-AVEN_VERSION="0.9.0"
-echo "==> Installing Aven Relational Compiler (avenc v${AVEN_VERSION})..."
+REPO="https://github.com/Thrainkrilleve/aven.git"
 
-OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-ARCH="$(uname -m)"
-
-case "$ARCH" in
-  x86_64|amd64) ARCH="x86_64" ;;
-  aarch64|arm64) ARCH="aarch64" ;;
-  *) echo "Error: Unsupported architecture '$ARCH'"; exit 1 ;;
-esac
-
-TARGET="${ARCH}-unknown-${OS}-musl"
-if [ "$OS" = "darwin" ]; then
-  TARGET="${ARCH}-apple-darwin"
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "error: cargo was not found." >&2
+  echo "Install a Rust toolchain first:" >&2
+  echo "  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh" >&2
+  echo "then re-run this installer." >&2
+  exit 1
 fi
 
-INSTALL_DIR="${HOME}/.cargo/bin"
-mkdir -p "${INSTALL_DIR}"
-
-if command -v cargo >/dev/null 2>&1; then
-  echo "==> Rust toolchain detected. Building from pure-std source..."
-  cargo install --git https://github.com/Thrainkrilleve/aven.git --tag "v${AVEN_VERSION}" --force
-else
-  DOWNLOAD_URL="https://github.com/Thrainkrilleve/aven/releases/download/v${AVEN_VERSION}/avenc-${TARGET}.tar.gz"
-  echo "==> Downloading pre-compiled binary from ${DOWNLOAD_URL}..."
-  curl -sSfL "${DOWNLOAD_URL}" | tar -xz -C "${INSTALL_DIR}"
-  chmod +x "${INSTALL_DIR}/avenc"
-fi
+echo "==> Building avenc from ${REPO} (this takes about a minute)..."
+cargo install --git "${REPO}" avenc --locked
 
 echo ""
-echo "==> Success! avenc has been installed to ${INSTALL_DIR}/avenc"
-echo "==> Verify installation with: avenc --help"
+echo "==> Installed. Check it with: avenc --version"

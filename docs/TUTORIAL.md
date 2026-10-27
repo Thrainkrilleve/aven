@@ -268,23 +268,21 @@ WebAssembly.instantiate(wasmBuffer).then(({ instance }) => {
 
 Aven connects to live sensors, message brokers, and telemetry streams via subprocesses, IPC sockets, or shared memory rings:
 
+A `using` clause attaches a backend to a relation; the backend supplies facts and the relation's equations are solved over them:
+
 ```aven
-// Ingest from external Python simulator:
-using external("python", "sensor_stream.py") {
-    current_altitude_m
-    outside_temp_c
+// Ingest from an external Python simulator (prints JSON facts):
+relation Altimeter using external("python", "sensor_stream.py") {
+    altitude_ft = current_altitude_m * 3.28084
 }
 
-// Ingest from persistent local TCP daemon:
-using ipc("127.0.0.1:9090") {
-    turbine_vibration_g
-}
-
-// Ingest from shared memory ring buffer (< 15 microseconds latency):
-using shm("/dev/shm/telemetry_ring") {
-    shaft_torque_nm
+// Ingest from a persistent local TCP daemon:
+relation Turbine using ipc("127.0.0.1:9090") {
+    vibration_ms2 = turbine_vibration_g * 9.80665
 }
 ```
+
+See `examples/flame.aven` and `evaluations/flight_mesh/flight_mesh_ipc.aven` for complete, runnable models.
 
 Every external fact records the SHA-256 fingerprint of the incoming payload in the cryptographic fact ledger.
 

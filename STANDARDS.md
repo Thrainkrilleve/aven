@@ -42,17 +42,13 @@ All implementations, compiler modifications, codegen backends, and community con
 
 ## 3. Dimensional Homogeneity & Physical Units
 
-### 3.1 7-Dimensional SI Base Tensor
-Aven enforces compile-time dimensional checking across the 7 fundamental SI base quantities:
-$$[M, L, T, I, \Theta, N, J]$$
-Where:
-- $M$: Mass (kilogram, `kg`)
-- $L$: Length (meter, `m`)
-- $T$: Time (second, `s`)
-- $I$: Electric Current (ampere, `A`)
-- $\Theta$: Thermodynamic Temperature (kelvin, `K`)
-- $N$: Amount of Substance (mole, `mol`)
-- $J$: Luminous Intensity (candela, `cd`)
+### 3.1 Base Dimensions
+Aven enforces compile-time dimensional checking across ten base dimensions (`Dim` in `src/units.rs`):
+- Six SI base quantities: mass (`kg`), length (`m`), time (`s`), electric current (`A`), thermodynamic temperature (`K`) and amount of substance (`mol`). Luminous intensity is not modelled.
+- Four engineering dimensions: angle (`rad`), money (`$`), data (`b`) and transactions (`tx`).
+- Packages and modules may add named custom dimensions.
+
+Units are checked for consistency only; `avenc run` does not rescale numeric values between units.
 
 ### 3.2 Homogeneity Rules
 1. **Equation Invariance**: In any equation $LHS = RHS$, the dimensional vectors of $LHS$ and $RHS$ must be identical ($[d_{LHS}] == [d_{RHS}]$).
@@ -122,6 +118,7 @@ Where:
 - Dual-ABI compliance:
   1. **Direct Calculation**: Exported function taking numeric inputs as parameters and returning settled outputs directly on the WebAssembly operand stack.
   2. **Memory-Mapped Solver**: Standard `(export "aven_solve") (param $in_ptr i32) (param $out_ptr i32) (result i32)` reading IEEE-754 `f64` values from linear memory and returning status code (0 for success).
+- WebAssembly 1.0 has no power instruction: `x ^ n` is lowered to exact multiplication for integer constants `|n| <= 64`, and to `f64.sqrt` for `n = 0.5`. Any other exponent is a compile error, never an approximation.
 
 ---
 

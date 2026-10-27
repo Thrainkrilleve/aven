@@ -43,10 +43,15 @@ signal altitude  : m
 ```
 
 ### Telemetry Adapters & IPC
+A `using` clause attaches a backend to a relation:
 ```aven
-using external("python", "adapter.py") { sensor_var }
-using ipc("127.0.0.1:9090") { telemetry_var }
-using shm("/dev/shm/aven_ring") { high_rate_var }
+relation Sensors using external("python", "adapter.py") {
+    // equations over the adapter's facts
+}
+
+relation Telemetry using ipc("127.0.0.1:9090") {
+    // equations over the daemon's facts
+}
 ```
 
 ### Namespaced Package Imports
@@ -100,10 +105,26 @@ All mathematical functions are unary expressions and validate inputs against num
 
 ## 4. Standard Physical Units
 
-Aven verifies dimensions across the 7 SI base quantities: $[M, L, T, I, \Theta, N, J]$.
+Aven checks dimensions across ten base dimensions: the SI quantities mass, length, time, current, temperature and amount of substance, plus angle, money, data and transactions. Unit names are case-insensitive; compound units use `/` (e.g. `km/h`).
 
-| Symbol | Quantity | SI Base Dimension | Compatible Aliases |
-|:---:|:---|:---:|:---|
+| Dimension | Built-in units |
+|:---|:---|
+| Length | `m`, `km`, `cm`, `mm`, `in`, `ft`, `mi` |
+| Time | `s`, `ms`, `us`, `ns`, `min`, `h`, `hr`, `day` |
+| Mass | `kg`, `g`, `mg`, `lb` |
+| Current | `A`, `mA` |
+| Temperature | `K`, `degC` |
+| Amount | `mol` |
+| Angle | `rad`, `deg` |
+| Money | `$`, `usd`, `eur`, `gbp` |
+| Data | `b`, `bit`, `byte`, `KB`, `MB`, `GB`, `TB`, `PB`, `KiB`, `MiB`, `GiB`, `TiB` |
+| Transactions | `req`, `iop`, `pkt`, `tx` |
+| Derived | `W`, `kW`, `J`, `kJ`, `kWh`, `Hz`, `kHz`, `MHz`, `GHz`, `bps` … `Tbps`, `iops`, `rps`, `pph` |
+
+> [!NOTE]
+> Units are checked for consistency, but `avenc run` does not rescale numeric values between units. Write a model's values in one consistent set of units.
+
+---:|:---|:---:|:---|
 | `kg` | Mass | $[M]$ | `g`, `mg`, `ton`, `lb` |
 | `m` | Length | $[L]$ | `km`, `cm`, `mm`, `nm`, `ft`, `in`, `mile` |
 | `s` | Time | $[T]$ | `ms`, `us`, `ns`, `min`, `h`, `day` |
@@ -147,14 +168,14 @@ avenc safety-case <file.aven> [-o <path.md>] [--standard do178c|iso26262]
 avenc bench <file.aven> [--latency-profile]
 
 # Interactive Time-Travel Debugger REPL
-avenc debug [--ledger <path.jsonl>]
+avenc debug <file.aven> [ledger.jsonl] [--goto <N>] [--what-if "<var>=<val>"] [--diff <t1>,<t2>]
 
 # Segmented Ledger Audit Compaction
 avenc compact-ledger <path.jsonl> [-o <compacted.jsonl>]
 
 # Package Management
-avenc pkg init <pkg_name>
-avenc pkg pack [--out <file.avenpkg>]
+avenc pkg init [pkg_name]          # writes Aven.toml and lib.aven in the current directory
+avenc pkg pack [dir] [-o <file.avenpkg>]
 avenc pkg install <file.avenpkg>
 avenc pkg list
 ```
