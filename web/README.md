@@ -70,7 +70,7 @@ Each task (`src/weather/cycle.ts`) first writes a row to `weather_cycles` and co
 2. Picks a site: the strongest cell in the contiguous U.S. not visited in the last 20 minutes, else a fixed airport in rotation.
 3. For each site, gathers METAR stations in a box around it (AWC), the primary station's NWS observation, winds aloft (AWC, cached an hour), radar reflectivity at the site and upstream along the steering wind and the storm motion (all from one named image), the nearest USGS rain gauge, NWS alerts and the NWS hourly forecast.
 4. Runs `models/weather.wasm` (`examples/weather_nowcast.aven`) and applies the data-quality gate (the bounds of `evaluations/possible/weather-predict.aven`).
-5. Stores the inputs, outputs and every request in `weather_runs`, and the forecasts (+15, +30, +60 min; steering wind, storm motion, persistence) in `weather_forecasts`.
+5. Stores the inputs, outputs and every request in `weather_runs`, and the forecasts (+15, +30, +60 min; steering wind, storm motion, persistence, each with the NWS hourly forecast's chance of rain for that hour) in `weather_forecasts`.
 
 The scoring task scores due forecasts against the archived radar image nearest their valid time. A site task makes about 15 outbound requests and a scoring task a few (at most 45; Workers limit subrequests per invocation, 50 on the free plan). Replayed from recorded responses in Node, a whole two-site cycle takes 11–24 ms of CPU; split in three, each task is a fraction of that. Workers on the free plan get 10 ms of CPU per invocation, so if `weather_cycles` shows tasks that never finish, the account needs the paid plan or the work split further.
 
@@ -107,7 +107,7 @@ The worker is configured for the existing `avenc_db` D1 database (see `wrangler.
 
 ```bash
 npm run typecheck
-npm run db:migrate:prod   # applies pending migrations (0002–0006 as of this release)
+npm run db:migrate:prod   # applies pending migrations (0002–0007 as of this release)
 npm run deploy
 ```
 
@@ -135,7 +135,7 @@ The custom domain `avenc.dev` is set by `routes` in `wrangler.jsonc`.
 | `/api/v1/models/share`, `/api/v1/telemetry` | `POST` | Removed; answer `410 Gone`. |
 | `/api/v1/weather/latest` | `GET` | Newest nowcast runs with inputs, outputs, sources and forecasts (`?limit=`, up to 40). |
 | `/api/v1/weather/runs/:id` | `GET` | One run in full. |
-| `/api/v1/weather/skill` | `GET` | Scores by lead and method: count, MAE, bias, CSI (`?kind=storm_cell\|anchor\|all`). |
-| `/api/v1/weather/verifications` | `GET` | The latest scored forecasts (`?limit=`, up to 500). |
+| `/api/v1/weather/skill` | `GET` | Rain / no-rain calls that matched the radar, by lead and forecaster (Aven storm motion, Aven winds aloft, no change, NWS), with hits, misses, false alarms, echo error and Brier score (`?kind=storm_cell\|anchor\|all`). |
+| `/api/v1/weather/verifications` | `GET` | The latest outcomes: per place and time, every forecaster's call and what the radar showed (`?limit=`, up to 200). |
 
 All `GET` routes also answer `HEAD`.

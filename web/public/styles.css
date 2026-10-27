@@ -1313,3 +1313,49 @@ td:first-child { white-space: nowrap; }
   .wx-grid { grid-template-columns: minmax(6rem, auto) repeat(4, 1fr); font-size: 0.8rem; gap: 0.3rem 0.4rem; }
   .wx-run { padding: 1rem; }
 }
+/* /weather: forecasters, calls and outcomes */
+.wx-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 0.75rem; margin: 2rem 0 0; }
+.wx-who { border: 1px solid var(--border); border-left-width: 3px; border-radius: var(--radius); padding: 0.8rem 1rem; background: var(--surface); }
+.wx-who h3 { font-size: 0.95rem; margin: 0 0 0.3rem; }
+.wx-who p { font-size: 0.86rem; color: var(--text-muted); margin: 0; }
+.wx-who.aven { border-left-color: var(--accent); }
+.wx-who.base { border-left-color: var(--text-dim); }
+.wx-who.nws { border-left-color: var(--amber); }
+.wx-legend-foot { grid-column: 1 / -1; margin: 0.25rem 0 0; }
+.wx-headline { font-size: 1.05rem; color: var(--text); max-width: 52rem; margin: 0 0 1rem; }
+.wx-fname { font-weight: 600; color: var(--text); white-space: nowrap; text-align: left; }
+.wx-row-aven .wx-fname { color: var(--accent); }
+.wx-row-base .wx-fname { color: var(--text-muted); }
+.wx-row-nws .wx-fname { color: var(--amber); }
+.wx-row-outcome .wx-fname { color: var(--text); }
+.wx-row-outcome td, .wx-row-outcome th { border-top: 1px solid var(--border-strong); background: var(--bg-raised); }
+.wx-score b { font-size: 1.05rem; }
+.wx-now { margin: 0; font-size: 0.92rem; color: var(--text-muted); }
+.wx-alert { color: var(--amber); }
+.wx-rain { color: var(--accent); font-weight: 600; }
+.wx-dry { color: var(--text-muted); }
+.wx-mark { display: inline-block; width: 1.1rem; font-weight: 700; }
+.wx-mark.ok { color: var(--green); }
+.wx-mark.bad { color: var(--red); }
+.wx-q-wrap { overflow-x: auto; }
+.wx-q { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.wx-q th, .wx-q td { padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
+.wx-q thead th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); font-weight: 600; background: none; }
+.wx-q td:first-child, .wx-q th:first-child { padding-left: 0; }
+.wx-ver td { white-space: nowrap; }
+.wx-call small { font-size: 0.75rem; }
+.wx-more summary { cursor: pointer; color: var(--text-muted); font-size: 0.88rem; }
+.wx-more[open] { display: flex; flex-direction: column; gap: 0.75rem; }
+.wx-more[open] summary { margin-bottom: 0.25rem; }
+.wx-section .wx-more { margin-top: 1rem; }
+ul.wx-sources { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.82rem; }
+ul.wx-sources li { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.wx-q tbody th { text-transform: none; letter-spacing: 0; font-size: 0.88rem; background: none; }
+.wx-score .wx-n { display: block; font-size: 0.72rem; }
+@media (max-width: 600px) {
+  .wx-score th, .wx-score td { padding: 0.6rem 0.5rem; }
+  .wx-score thead th { white-space: normal; }
+  .wx-q small { display: none; }
+  .wx-q th, .wx-q td { padding: 0.45rem 0.35rem; }
+  .wx-q .wx-fname { white-space: normal; }
+}

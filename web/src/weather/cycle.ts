@@ -240,7 +240,7 @@ async function forecastSite(env: WeatherEnv, c: Client, site: Site, cells: Storm
   let hourly: HourlyForecast[] = [];
   if (point.forecastHourly) {
     try {
-      hourly = await cached(env, c, "nws_hourly_forecast", `hourly:${point.forecastHourly}`, 30 * 60 * 1000, () => nwsHourly(c, point.forecastHourly!));
+      hourly = await cached(env, c, "nws_hourly_forecast", `hourly:${point.forecastHourly}`, 30 * 60 * 1000, () => nwsHourly(c, point.forecastHourly!, 3));
     } catch {}
   }
 
@@ -324,10 +324,13 @@ async function forecastSite(env: WeatherEnv, c: Client, site: Site, cells: Storm
   }
   // Issued at the time of the radar image the forecast is based on: leads count from the data
   const issued = image_ms;
+  // The official forecast for the same moment: NWS's chance of precipitation for the hour
+  // the valid time falls in, scored against the same radar outcome
+  const popAt = (t: number) => hourly.find((h) => h.start_ms <= t && t < h.start_ms + 3600_000)?.pop_pct ?? null;
   await env.DB.batch(rows.map(([lead, method, dbz]) =>
     env.DB.prepare(
-      "INSERT INTO weather_forecasts (run_id, site_kind, lat, lon, lead_min, method, issued_ms, valid_ms, predicted_dbz) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).bind(runId, site.kind, lat, lon, lead, method, issued, issued + lead * 60_000, dbz)
+      "INSERT INTO weather_forecasts (run_id, site_kind, lat, lon, lead_min, method, issued_ms, valid_ms, predicted_dbz, nws_pop_pct) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).bind(runId, site.kind, lat, lon, lead, method, issued, issued + lead * 60_000, dbz, popAt(issued + lead * 60_000))
   ));
 }
 

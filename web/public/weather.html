@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Aven Live Radar Nowcast</title>
-  <meta name="description" content="An Aven model compiled to WebAssembly, run every five minutes on live NOAA, NWS and USGS data, with every forecast scored against the radar.">
+  <title>Aven Live Rain Forecast</title>
+  <meta name="description" content="Will it rain here in the next hour? An Aven model, a no-change baseline and the National Weather Service forecast, run on live data every five minutes and scored against the radar.">
   <meta name="theme-color" content="#070a10">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -40,47 +40,75 @@
   <main class="container">
     <header class="page-head">
       <span class="eyebrow"><span class="wx-live" id="wx-live-dot"></span> Live</span>
-      <h1>Radar nowcast on live data</h1>
-      <p>Every five minutes a scheduled job finds the strongest storm cells the NEXRAD radar network is tracking, gathers observations for each from NOAA, NWS and USGS, and runs an Aven model compiled to WebAssembly on them. Each forecast is scored against the radar once its time arrives.</p>
+      <h1>Will it rain here in the next hour?</h1>
+      <p>Every five minutes this page picks places where the NEXRAD radar network is tracking a storm and asks four forecasters whether it will be raining there 15, 30 and 60 minutes later. When that time comes, the radar shows who was right.</p>
       <div class="wx-status" id="wx-status" aria-live="polite">Loading…</div>
     </header>
 
+    <section class="wx-legend" aria-label="The forecasters">
+      <div class="wx-who aven">
+        <h3>Aven · storm motion</h3>
+        <p>The Aven model moves the rain the radar sees now along the direction and speed the radar network measured for the storm.</p>
+      </div>
+      <div class="wx-who aven">
+        <h3>Aven · winds aloft</h3>
+        <p>The same model, but moving the rain with the winds 9,000 to 18,000 ft up, from NOAA's winds-aloft forecast.</p>
+      </div>
+      <div class="wx-who base">
+        <h3>No change</h3>
+        <p>Assumes whatever is falling now keeps falling. The standard baseline: a forecast is only useful if it beats this.</p>
+      </div>
+      <div class="wx-who nws">
+        <h3>NWS forecast</h3>
+        <p>The National Weather Service's official hourly forecast for that spot: its chance of rain for the hour. Counted as calling rain at 50% or more.</p>
+      </div>
+      <p class="wx-note wx-legend-foot"><b>Rain</b> means the radar shows an echo of 20 dBZ or more at the spot (about 0.65 mm/h, light rain). The comparison with NWS is indicative: its forecast is the chance of measurable rain at any time during the hour, while the radar check is a single moment.</p>
+    </section>
+
     <section class="wx-section" aria-labelledby="score-h">
       <div class="wx-section-head">
-        <h2 id="score-h">Scoreboard</h2>
-        <div class="wx-seg" role="tablist" aria-label="Sites">
-          <button type="button" role="tab" data-kind="storm_cell" aria-selected="true">Storm cells</button>
+        <h2 id="score-h">Who called it right</h2>
+        <div class="wx-seg" role="tablist" aria-label="Places">
+          <button type="button" role="tab" data-kind="storm_cell" aria-selected="true">Storm locations</button>
           <button type="button" role="tab" data-kind="anchor" aria-selected="false">Fixed airports</button>
           <button type="button" role="tab" data-kind="all" aria-selected="false">All</button>
         </div>
       </div>
-      <p class="wx-note">Three ways to predict the radar echo at a site 15, 30 and 60 minutes ahead. <b>Persistence</b> assumes the echo stays as it is, the standard baseline; the other two carry the echo now upstream along the steering wind (NOAA winds aloft) or along the storm motion the radar network measured. A method shows skill only where it beats persistence. MAE is the mean absolute error in dBZ (lower is better); CSI is the critical success index for rain at 20 dBZ or more (higher is better).</p>
+      <p class="wx-headline" id="wx-headline"></p>
       <div class="table-wrap">
         <table class="wx-score">
-          <thead>
-            <tr><th>Lead</th><th>Method</th><th class="num">Scored</th><th class="num">MAE (dBZ)</th><th class="num">Bias (dBZ)</th><th class="num">CSI</th><th class="num">Hits · misses · false alarms</th></tr>
-          </thead>
-          <tbody id="wx-score"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+          <thead><tr><th>Forecaster</th><th class="num">15 min ahead</th><th class="num">30 min ahead</th><th class="num">60 min ahead</th></tr></thead>
+          <tbody id="wx-score"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody>
         </table>
       </div>
       <p class="wx-note" id="wx-score-foot"></p>
+      <details class="wx-more">
+        <summary>Detailed scores</summary>
+        <div class="table-wrap">
+          <table class="wx-score">
+            <thead><tr><th>Lead</th><th>Forecaster</th><th class="num">Scored</th><th class="num">Rain called and seen</th><th class="num">Rain missed</th><th class="num">False alarms</th><th class="num">Dry called and seen</th><th class="num">Echo error (dBZ)</th><th class="num">Brier score</th></tr></thead>
+            <tbody id="wx-score-detail"></tbody>
+          </table>
+        </div>
+        <p class="wx-note">Echo error is the mean absolute difference between the predicted and observed radar echo, for the forecasters that predict one. The Brier score measures a probability forecast (0 is perfect; always saying 50% scores 0.25); for Aven and no change it is the share of wrong calls, since they say rain or no rain outright.</p>
+      </details>
     </section>
 
     <section class="wx-section" aria-labelledby="runs-h">
       <div class="wx-section-head">
-        <h2 id="runs-h">Latest runs</h2>
+        <h2 id="runs-h">Latest forecasts</h2>
         <button type="button" class="btn btn-ghost btn-sm" id="wx-refresh">Refresh</button>
       </div>
       <div id="wx-runs" class="wx-runs"><div class="empty">Loading…</div></div>
     </section>
 
     <section class="wx-section" aria-labelledby="ver-h">
-      <h2 id="ver-h">Recent scores</h2>
-      <p class="wx-note">Each forecast is compared with the radar image nearest its valid time (within 3 minutes), at the forecast point.</p>
+      <h2 id="ver-h">Recent outcomes</h2>
+      <p class="wx-note">Each row is one place and time: every forecaster's call and what the radar showed (the image nearest that time, within 3 minutes).</p>
       <div class="table-wrap">
         <table class="wx-ver">
-          <thead><tr><th>Valid (UTC)</th><th>Site</th><th class="num">Lead</th><th>Method</th><th class="num">Predicted</th><th class="num">Observed</th><th class="num">Error</th></tr></thead>
-          <tbody id="wx-ver"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+          <thead><tr><th>Time (UTC)</th><th>Place</th><th class="num">Ahead</th><th>Aven · storm motion</th><th>Aven · winds aloft</th><th>No change</th><th>NWS</th><th>Radar showed</th></tr></thead>
+          <tbody id="wx-ver"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
         </table>
       </div>
     </section>
