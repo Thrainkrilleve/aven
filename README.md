@@ -2,7 +2,7 @@
 
 **Declarative Invariant Programming & Relational Multi-Physics Engine**
 
-[![Build & Test](https://img.shields.io/badge/tests-101%20passed-brightgreen.svg)](#key-capabilities)
+[![Build & Test](https://img.shields.io/badge/tests-130%20passed-brightgreen.svg)](#key-capabilities)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-pure%20Rust%20std-blue.svg)](#key-capabilities)
 [![Throughput](https://img.shields.io/badge/IPC%20Throughput-1%2C720%20solves%2Fsec-orange.svg)](#live-multi-stream-flight-dynamics-mesh)
 [![Median Latency](https://img.shields.io/badge/Median%20Latency-0.56%20ms-purple.svg)](#live-multi-stream-flight-dynamics-mesh)
@@ -11,6 +11,20 @@
 Aven is a domain-specific relational programming language and deterministic solver engine designed for physical systems, telemetry fusion, automated control, and multi-objective optimization. 
 
 Unlike traditional imperative languages where functions require hardcoded input/output parameters, Aven relations represent **omnidirectional mathematical invariants**. Define your physical laws once, and Aven dynamically solves for any unknown variable via symbolic differentiation, analytical substitution, and Newton-Raphson numerical relaxation—or transpiles directly to branchless, solver-free ANSI C code.
+
+---
+
+## Documentation & Learning Path
+
+| Guide | Description | Target Audience |
+|:---|:---|:---|
+| **[Getting Started Guide](docs/GETTING_STARTED.md)** | 15-minute quickstart from installation to first model solve | First-time visitors |
+| **[Aven by Example (Cookbook)](docs/TUTORIAL.md)** | 10 progressive, executable code recipes covering units, C99/WASM codegen, and debugging | Hands-on learners |
+| **[Quick Reference Cheat Sheet](docs/CHEAT_SHEET.md)** | Syntax tables, built-in functions, units, CLI commands, and exit codes | Daily reference |
+| **[Engineering Standards](STANDARDS.md)** | Mathematical stability, IEEE-754 semantics, cryptographic ledger, and safety rules | Systems & compliance engineers |
+| **[Package Specification](docs/PACKAGE_SPEC.md)** | `Aven.toml` schema and `.avenpkg` SHA-256 sealed distribution format | Package authors |
+| **[Contributing Guide](CONTRIBUTING.md)** | Architectural ground rules ("Rust compiles, C runs") and PR guidelines | Contributors |
+| **[RFC Process](RFC_PROCESS.md)** | Language evolution lifecycle and decision framework | Protocol & compiler designers |
 
 ---
 
