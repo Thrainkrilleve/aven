@@ -1,91 +1,72 @@
-# Aven Development Roadmap
-### From prototype core (v0.2) to 1.0 release
+# Aven roadmap
 
-*Aven: relations settle; time flows; you can always row back.*
+**Theme:** provide the proof in the code, not with words.
 
-> This is the plan written at v0.2, kept for history. Each phase item is marked with its status in `avenc` v0.6.0: ✅ done, ⚠️ partly done, ❌ not done. The status table below is current.
+The public tree is GitHub. Forgejo stays private. An experiment becomes a public claim only when a test in this repository fails if the claim is false.
 
----
+## Goal
 
-## Where We Are — Honest Status
+Replace one spreadsheet or Python sizing script with one `.aven` file. `avenc` and AERIC ship as one toolchain. The proof is this sequence, run by a test:
 
-| Capability | Status |
-|---|---|
-| Expression parsing, evaluation | ✅ Solid |
-| Symbolic differentiation (product/chain/power rule, functions) | ✅ Solid |
-| Single-unknown backward solving (Newton + symbolic derivative) | ✅ Solid |
-| Coupled multi-unknown system solving (multidim Newton, analytic Jacobian) | ✅ Solid (with rank-deficiency diagnostics & minimal fixes) |
-| Dimensional/unit algebra | ✅ Ten base dimensions (six SI plus angle, money, data, transactions), custom dimensions, run-time unit conversion |
-| Direction-pinned C transpilation | ✅ C99 output checked against `avenc run` (`verify/c_diff.py`), plus AERIC deployment bundles |
-| WebAssembly backend | ✅ Completed (WASM Core 1.0 binary & WAT text emission) |
-| Fact ledger, provenance (`why`), rewind/fork/branch, irreversibility guards | ✅ Completed (with segmented compaction & time-travel debugger) |
-| Package manager & registry | ⚠️ Local packages done (Aven.toml, .avenpkg with SHA-256 integrity check, install, import); dependencies are not fetched and the online index is a preview |
-| Formal verification & safety cases | ✅ SMT-LIB2 export and Z3/CVC5 runs; ⚠️ safety-case reports are drafts structured for DO-178C / ISO 26262, not certification evidence |
+1. The equations exist once, as a `relation`.
+2. `avenc check` accepts that file and rejects a unit that does not match.
+3. `avenc run` prints a settled value the test names.
+4. `avenc run --ledger` writes a chain, `avenc verify-ledger` accepts it, and a one-byte edit fails verification.
+5. `avenc emit-c` compiles to a program that prints the same values as `avenc run` on the same inputs. The compiler derives that causal form from the `relation`. A second, hand-written `forward` copy is not the source.
+6. The AERIC loop generated with that C ticks the function. A non-finite input or the wrong arity latches HOLD and publishes the fail-safe. A later clean tick publishes the solve again.
 
----
+The site may show this. It may not show a number the repository cannot regenerate.
 
-## Phase 4 — Realism (v0.3)
-*Goal: Aven stops being a demo and becomes a tool you'd actually reach for.*
+## Parked
 
-1. ⚠️ **Full grammar & front-end.** (Done except `when` clauses, which were never implemented.) A real lexer/parser for `.aven` files: `relation`/`forward` blocks, `solve ... with`, `signal` declarations, `when` clauses, comments. ANTLR or hand-written; generate good error messages from day one (they are a feature, not polish).
-2. ✅ **Type checker.** The unit system generalizes beyond 4 hardcoded dimensions: extensible dimension registries, unit literals (`90 km/h`), full compile-time propagation through relation graphs.
-3. ✅ **Under-determination reporting.** The coupled solver currently stalls silently on rank-deficient systems. It must *explain*: which variables remain free, why, and what additional binding would pin them. An under-constrained program should feel like an unbalanced equation in math class — obvious and educational.
-4. ✅ **Test suite.** Golden-file tests for the solver (analytic cross-checks), transpiler (compare emitted C vs handwritten), and debugger (deterministic replay fuzzing).
-5. ✅ **CLI:** `avenc run file.aven`, `avenc build file.aven --emit-c`, and an interactive REPL (shipped as `avenc debug`).
+Do not build these until a named machine and a named deadline ask for them.
 
----
+- AERIC Level 3: `SCHED_FIFO`, worst-case execution time, MISRA, and a DO-178C or ISO 26262 traceability matrix.
+- The unfinished Level 2 real-time items: a dedicated real-time thread, `mlockall`, and a measured shared-memory cycle.
+- A shared-memory cycle as evidence that the solver is fast. Solver time is the emitted function, or one `avenc` solve with parsing left out. Loop time is a different measurement, and only after the payload is raw doubles in memory.
+- A general-purpose language, and any new adapter, desktop shell, or live-data demo.
 
-## Phase 5 — The Contract with the Machine (v0.4)
-*Goal: performance claims become enforced guarantees, not benchmarks.*
+Level 1 and the finished Level 2 behavior stay. That is state carried tick to tick, clamp and rate limit, faults named sensor, solver, deadline, or transport, and HOLD under all of them.
 
-1. ⚠️ **`extern "C"` interop.** (Shipped as `using native("lib.so")`, which calls a C/Rust library function in process; no unit-safe wrappers for libc, SDL or sqlite exist.) Bind C libraries directly — instant stdlib by theft. FFI bindings with unit-safe wrappers for common crates (libc, SDL, sqlite).
-2. ⚠️ **Tiered compilation formalized.** (`forward` blocks compile without solver calls; the `@region` tier and annotation-checked contract were not built.) The escape ladder (solver → pinned → `@region` → `extern`) becomes an explicit annotation-checked contract. The compiler *refuses* to emit solver-runtime calls in pinned blocks — already true in the prototype; now enforced uniformly with clear diagnostics.
-3. ❌ **Benchmark suite in CI.** (`avenc bench` and `benchmarks/` exist, but no timing regression budget runs in CI.) The phase-2 timing-parity test plus SIMD-bound and allocation-heavy workloads. Regression budgets: pinned code within 10% of handwritten C, always.
-4. ⚠️ **Determinism spec.** (Fixed solver seeds and bit-exact ledger values make replay deterministic on one machine; cross-platform bit-for-bit replay is not tested.) Document and test: identical ledger + identical inputs ⟹ identical replay, bit-for-bit, across platforms. This is the load-bearing wall for the debugger; it must never crack.
+## Rule
 
----
+A sentence in the README, the site, the wiki, or a checkbox on this page is allowed only when a test or a script in this repository fails if the sentence is wrong. `scripts/check_docs.py` is that script for documented solves. A checkbox with no test is a sentence. Delete it.
 
-## Phase 6 — Time Made Rigorous (v0.5)
-*Goal: the temporal semantics stop being intuitive and start being specified.*
+When a sentence and a test disagree, change the sentence.
 
-1. ⚠️ **Signal calculus formalization.** (Implemented as a library API in `src/temporal.rs`; not part of the language syntax, and no denotational semantics document exists.) Denotational semantics of temporal streams: bounded FIFO retention windows, staleness decay models (Linear, Exponential, Step), discrete rate-of-change ($dv/dt$), moving average, EMA, variance, and cross-signal alignment (`src/temporal.rs`).
-2. ✅ **Rewind guarantees, specified.** Exact semantics of the irreversibility boundary: what `committed-effect` means, enforcing commit barrier guards against accidental time-travel rewind without explicit `--force` override.
-3. ⚠️ **Ledger storage & compaction.** (`avenc compact-ledger` ships; segment rotation and segment verification are library APIs not used by the CLI.) Bounded memory via segmented JSONL audit logs (`SegmentedLedgerWriter`), cross-segment cryptographic chain continuity audits (`verify_segmented_directory`), and historical snapshot compaction (`LedgerCompactor`, `avenc compact-ledger`).
-4. ✅ **Interactive debugger UI & REPL.** `avenc debug` — timeline scrubbing (`goto`, `step`, `prev`), causal provenance DAG rendering (`why`), counterfactual what-if branching (`what-if`), and timeline diffing (`diff`).
+## Fixes
 
----
+Do these before the new compiler work. Each one is done when the command in the last column fails on today's tree and passes after the change.
 
-## Phase 7 — Ecosystem Bootstrap (v0.6)
-*Goal: someone chooses Aven for a real project and doesn't regret it.*
+| Fix | What the tree does now | Proof |
+| --- | --- | --- |
+| One version string | `Cargo.toml` says `0.1.0`. `src/main.rs` `VERSION` says `0.6.0`. The site badge says v0.6.0. | A test runs `avenc`, reads the printed version, and requires `Cargo.toml` and the site badge to use that same string. |
+| Safety-case wording | `src/smt.rs` emits `FORMALLY DISCHARGED / CERTIFIABLE` and `PROVEN UNCONDITIONAL`. The standards table marks objectives satisfied, including division-by-zero, on every report. `src/main.rs` describes the command as a DO-178C / ASIL-D audit. | `tests/safety_case_and_timing.rs` fails if the report contains `CERTIFIABLE`, `SATISFIED`, or `PROVEN UNCONDITIONAL`, and fails if the report lacks a sentence that the result is evidence about the model and not a certification. The same test covers the CLI help line. |
+| Homepage figures | `web/public/index.html` states 0.56 ms and 1,720/s from a Windows IPC bench. The caption names the machine. Nothing in CI regenerates the figures. | The page quotes a log committed beside the command that produced it, or the figures are removed. `scripts/check_docs.py` fails if the page states a throughput the log does not contain. |
+| OpenPLC stdin | `evaluations/tests/PLC-test/openplc_adapter.py` waits 150 ms for stdin, then invents `io_points`. Under the default test thread pool, `test_openplc_external_adapter_and_stream_varmap` has failed with 28 and with 32 against the required 30. Alone, it passes. | The adapter reads stdin to completion. `cargo test --release --test test_suite test_openplc_external_adapter_and_stream_varmap` passes with the default thread pool. |
+| Lint matches CI | `.github/workflows/linter.yml` runs `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` on stable. Both fail on rustc 1.99.1. Edition 2024 also needs rustc 1.85 or newer; 1.83 cannot build the tree. | `rust-toolchain.toml` pins a compiler for which both commands pass. The workflow installs that pin. |
+| Hash chain, not a Merkle tree | Public docs still say Merkle in places. The ledger is a linear SHA-256 chain. | `scripts/check_docs.py` fails if the README, the site, or `STANDARDS.md` says Merkle. |
 
-1. ⚠️ **Package manager & registry.** Dimension-checked relation packages with `Aven.toml` manifests, packed with a SHA-256 integrity digest (`avenc pkg pack`), installed from a local archive (`avenc pkg install`), listed (`avenc pkg list`), and imported (`import <pkg>;`). Manifest dependencies are not fetched, and the avenc.dev index is a read-only preview.
-2. ✅ **Reference applications.**
-   - Financial Engineering: three-asset allocation with capital conservation, expected return, a diversification-discounted volatility estimate and the Sharpe ratio (`examples/portfolio_rebalancing.aven`). It does not model covariances or Black–Litterman views, and computes rather than maximizes the Sharpe ratio.
-   - Avionics & Aerospace: multi-rotor drone aerodynamics $T=4 \cdot c_T \cdot \rho \cdot \omega^2 \cdot D^4$, thrust-to-weight ratio, vertical climb rate, battery internal resistance voltage sag ($V_{term} = V_{oc} - I \cdot R_{int}$), and electrical power budgeting (`examples/quadcopter_avionics.aven`).
-3. ✅ **Docs with a weekend-first promise.** Onboarding tutorial (`docs/GETTING_STARTED.md`) and package manifest specification (`docs/PACKAGE_SPEC.md`) enabling motivated practitioners to build and deploy verified relation packages in under 15 minutes.
-4. ✅ **Interop bridge & WebAssembly.** Dual-mode WebAssembly emission (`avenc emit-wasm`): human-readable WebAssembly Text (`.wat`) and standard binary WebAssembly Core 1.0 bytecode (`.wasm`) with LEB128 encoding, zero-overhead direct calculation exports, and zero-copy memory-mapped `aven_solve(in_ptr, out_ptr)` buffers runnable directly in web browsers and Node.js V8 engines without external dependencies.
-5. ✅ **Community scaffolding.** Formal governance lifecycle (`RFC_PROCESS.md`), Contributor Covenant v2.1 (`CODE_OF_CONDUCT.md`), and standard development guidelines (`CONTRIBUTING.md`) codifying zero external crate dependencies and deterministic PRNG testing.
+## Build next
 
----
+One feature, then the runtime that wraps it.
 
-## Phase 8 — 1.0 (no date promised)
-Ship when: semantics frozen, debugger flagship-quality, two real production users who aren't us, and the spec passes its own test suite under fuzzing. **No dates.** Date-driven language releases ship their roadmap; quality-driven ones ship their promises.
+1. **Derived C.** For a `relation` whose equations are already assignments, `avenc emit-c` emits C from that relation. Start with `examples/server_capacity.aven`: `WorkerScaling` is the source. The test compiles the C and compares its printed numbers to `avenc run`. Delete the hand-written `forward` copy of those equations once the numbers match. Do not add a second model until this one is green.
+2. **Generated tick loop.** `avenc emit-c --aeric-shim` for that model, then `examples/pi_controller.aven`. The test builds the generated files, checks HOLD on a non-finite input, checks recovery on the next clean ticks, and runs `avenc verify-ledger` on the C ledger. The test rebuilds the shim. A hand-edited shim is a failure.
 
----
+## Suggestions
 
-## Standing Risks (tracked, not solved)
+- Keep the public pages to the README, `docs/GETTING_STARTED.md`, the site, and this file. The wiki either restates a tested sentence or it is marked historical.
+- Treat the private Forgejo branch as a lab. The shared-memory round trip there showed that the C side can read the Rust ring layout. It also showed `aeric_shm_demo.c` does not build with `-Wall -Wextra -Wpedantic -Werror` as committed, and that the ring publishes the sequence number before the length. Leave it private until a test in this repository owns it.
+- Solver uniqueness is still the deep limit. Newton finds a root near the start. Say that next to any solve, and add a test only when a model has more than one root and the compiler reports which one it took. Do not paper over it with a safety-case sentence.
 
-- **Newton fragility.** Multistart Newton finds roots, not *the* root you meant. Mitigation trajectory: constraint intervals (interval arithmetic for bounds), then SMT-assisted uniqueness proofs where possible. Long-term this is the deepest theoretical gap.
-- **Rank deficiency / under-determination.** Identified in v0.2's coupled solver; now reported with free variables and minimal fixes (Phase 4.3).
-- **The coup problem.** Excel dominates the "bidirectional arithmetic for normal humans" niche. Aven's wedge is typed, compilable, testable, and debuggable in time. We don't beat spreadsheets at spreadsheets; we replace them where they hurt.
-- **Solo-project gravity well.** Everything above assumes sustained effort and eventually collaborators. The roadmap is deliberately ordered so each phase leaves a *useful artifact even if the project stops there* — v0.3 alone is a decent constraint-solving toolkit.
+## Done
 
----
+CI on the pinned toolchain runs all of these, and this page lists no capability they do not cover:
 
-## What I'd Do Next, Concretely
-
-*(Written at v0.2; both items below are now done.)* The single highest-leverage next task is **Phase 4.3 (under-determination reporting)**, because it converts the coupled solver's biggest weakness into the language's best teaching feature — errors that explain themselves. Second choice: the real `.aven` grammar, because everything downstream of the front-end gets harder the longer it's fed by demo strings.
-
----
-
-*Aven v0.2 — the paradigm computes. Now we make it a product.*
+- `cargo test --release`
+- `cargo fmt --check`
+- `cargo clippy --all-targets -- -D warnings`
+- `python3 scripts/check_docs.py`
+- the derived-C comparison
+- the generated AERIC HOLD and ledger check

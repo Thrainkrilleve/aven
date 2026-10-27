@@ -1,6 +1,6 @@
 # Roadmap and Future Vision
 
-From an experimental relational solver toward a multi-physics compiler, Aven aims to provide **deterministic, checkable models for physical and autonomous systems**.
+The active plan is [Aven roadmap](<../Aven Development Roadmap.md>). The milestones below are history. A box being checked here is not a claim unless a test in the repository fails when the behavior is absent.
 
 ---
 
