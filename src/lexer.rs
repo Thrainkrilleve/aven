@@ -14,6 +14,8 @@ pub enum TokenKind {
     KwUsing,
     KwExternal,
     KwIpc,
+    KwShm,
+    KwNative,
     KwInt,
 
     // Literals & Identifiers
@@ -139,6 +141,31 @@ impl<'a> Lexer<'a> {
                         break;
                     }
                     self.advance();
+                }
+                continue;
+            }
+
+            // Skip block comments: /* ... */
+            if c == '/' && self.peek_next() == Some('*') {
+                let (open_line, open_col) = (self.line, self.col);
+                self.advance();
+                self.advance();
+                let mut closed = false;
+                while let Some(ch) = self.peek() {
+                    if ch == '*' && self.peek_next() == Some('/') {
+                        self.advance();
+                        self.advance();
+                        closed = true;
+                        break;
+                    }
+                    self.advance();
+                }
+                if !closed {
+                    return Err(LexError {
+                        message: "unterminated block comment".to_string(),
+                        line: open_line,
+                        col: open_col,
+                    });
                 }
                 continue;
             }
@@ -352,6 +379,8 @@ impl<'a> Lexer<'a> {
             "using" => TokenKind::KwUsing,
             "external" => TokenKind::KwExternal,
             "ipc" => TokenKind::KwIpc,
+            "shm" => TokenKind::KwShm,
+            "native" => TokenKind::KwNative,
             "unit" => TokenKind::KwUnit,
             "signal" => TokenKind::KwSignal,
             "minimize" => TokenKind::KwMinimize,

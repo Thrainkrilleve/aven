@@ -48,6 +48,11 @@ Settled Environment:
 Fact Ledger: 25 facts settled.
 ```
 
+Options:
+- `--json`: print `{"status", "optimality", "env"}` with full-precision values instead of the table.
+- `--ledger out.jsonl`: write the hash-chained audit log (signed when `AVEN_LEDGER_KEY` is set).
+- `--allow-stale`: settle even when an input's TTL has expired (non-production use).
+
 ### 2.2 `avenc check <file.aven>`
 Performs static analysis without solving:
 - Validates syntax, token spans, and equation structure.
@@ -78,6 +83,7 @@ avenc pareto examples/server_capacity.aven reqs_per_second 100 50000
 ```
 
 Flags:
+- `--steps N`: Number of sweep intervals (N + 1 points; default 5).
 - `--backend native|external`: Selects solver backend.
 - `--cmd <command>`: Specifies command for external Pareto sweeps.
 
@@ -90,6 +96,9 @@ avenc bench evaluations/flight_mesh/flight_mesh_ipc.aven
 
 ---
 
+### 2.6 `avenc verify-ledger <out.jsonl>`
+Recomputes an audit log's hash chain, seal and (with `AVEN_LEDGER_KEY`) signatures. Exit 0 when intact; exit 1 naming the first tampered line.
+
 ## 3. Environment Variables
 
 | Variable | Description | Default |
@@ -98,6 +107,7 @@ avenc bench evaluations/flight_mesh/flight_mesh_ipc.aven
 | `AVEN_SNAPSHOT_FILE` | Path to pre-warmed telemetry snapshot JSON for zero-lock solves. | Unset |
 | `AVEN_FLIGHT_INDEX` | Target aircraft index when querying multi-stream flight meshes. | `0` |
 | `AVEN_FLIGHT_CALLSIGN` | Target flight callsign filter (e.g. `UAL605`). | Unset |
+| `AVEN_LEDGER_KEY` | Key for HMAC-SHA256 signing of ledgers and for `verify-ledger` signature checks. | Unset (unsigned) |
 | `AVENC_BIN` | Explicit path to compiled `avenc` binary for testing harnesses. | Auto-discovered |
 
 ---

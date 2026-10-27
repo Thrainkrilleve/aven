@@ -737,7 +737,7 @@ fn test_first_class_external_relation_syntax_and_autobinding() {
                 seed: 42,
             }
         }
-        BackendDecl::Native | BackendDecl::Ipc { .. } => OrchestratorConfig::default(),
+        _ => OrchestratorConfig::default(),
     };
 
     let orchestrator = Orchestrator::from_config(&config, blk.equations.clone());
@@ -1384,6 +1384,112 @@ fn test_underdetermination_rank_deficiency_and_minimal_fixes() {
             .report()
             .contains("DEGENERATE / REDUNDANT EQUATION(S)")
     );
+}
+
+#[test]
+fn test_diagnostics_scale_invariance_across_disparate_physical_units() {
+    use avenc::ast::*;
+    use avenc::diagnostics::Diagnostician;
+    use std::collections::HashMap;
+
+    // Equation 1 has massive scale (e.g. latent heat / vapor pressure ~ 1e16)
+    let eq_macro = Equation {
+        lhs: "vapor_press".to_string(),
+        op: ConstraintOp::Equal,
+        rhs: Expr::Bin(
+            BinaryOp::Mul,
+            Box::new(Expr::Num(1e16)),
+            Box::new(Expr::Var("temp_ratio".to_string())),
+        ),
+        original_text: "vapor_press = 1e16 * temp_ratio".to_string(),
+        line: 1,
+        col: 1,
+    };
+
+    // Equation 2 has standard unit scale (coefficients = 1.0)
+    let eq_unit = Equation {
+        lhs: "wind_speed".to_string(),
+        op: ConstraintOp::Equal,
+        rhs: Expr::Bin(
+            BinaryOp::Add,
+            Box::new(Expr::Var("u".to_string())),
+            Box::new(Expr::Var("v".to_string())),
+        ),
+        original_text: "wind_speed = u + v".to_string(),
+        line: 2,
+        col: 1,
+    };
+
+    let unknowns = vec![
+        "vapor_press".to_string(),
+        "temp_ratio".to_string(),
+        "wind_speed".to_string(),
+        "u".to_string(),
+        "v".to_string(),
+    ];
+    let env = HashMap::new();
+
+    let diag = Diagnostician::new().diagnose(&unknowns, &[eq_macro, eq_unit], &env);
+    // Both equations are structurally independent despite spanning 16 orders of magnitude
+    assert_eq!(diag.rank, 2);
+    assert_eq!(diag.dof, 3);
+    assert!(diag.degenerate_equations.is_empty());
+}
+
+#[test]
+fn test_randomized_ledger_key_generation_and_cli_verification() {
+    use avenc::ledger::{generate_random_key, verify_jsonl, Fact, Ledger};
+
+    // 1. Generate two independent keys from OS entropy and system clocks
+    let k1 = generate_random_key();
+    let k2 = generate_random_key();
+
+    // 2. Both must be 256-bit hexadecimal strings (64 chars)
+    assert_eq!(k1.len(), 64);
+    assert_eq!(k2.len(), 64);
+    assert!(k1.chars().all(|c| c.is_ascii_hexdigit()));
+    assert!(k2.chars().all(|c| c.is_ascii_hexdigit()));
+
+    // 3. Consecutive keys must be distinct (high-entropy randomization)
+    assert_ne!(k1, k2);
+
+    // 4. Create an audit log signed with the randomized key k1
+    let mut ledger = Ledger::with_key(k1.as_bytes());
+    ledger.append(Fact {
+        seq: 1,
+        tick: 0,
+        kind: "input".to_string(),
+        name: "sensor_temp".to_string(),
+        value: 23.5,
+        causes: Vec::new(),
+        origin: "telemetry".to_string(),
+        metadata: None,
+    });
+    ledger.append(Fact {
+        seq: 2,
+        tick: 0,
+        kind: "derived".to_string(),
+        name: "temp_k".to_string(),
+        value: 296.65,
+        causes: vec![1],
+        origin: "physics".to_string(),
+        metadata: None,
+    });
+    let jsonl = ledger.to_jsonl();
+
+    // 5. Verification with the correct key k1 must succeed and confirm every signature valid
+    let verified = verify_jsonl(&jsonl, Some(k1.as_bytes())).expect("valid key must verify signatures");
+    assert_eq!(verified.facts, 2);
+    assert!(verified.signed);
+
+    // 6. Verification with an unauthorized key k2 must be rejected
+    let rejected_wrong_key = verify_jsonl(&jsonl, Some(k2.as_bytes()));
+    assert!(rejected_wrong_key.is_err());
+    let err_msg = rejected_wrong_key.err().unwrap();
+    assert!(err_msg.contains("invalid signature"));
+
+    // 7. Verification with dummy key must be rejected
+    assert!(verify_jsonl(&jsonl, Some(b"unauthorized-attacker-key")).is_err());
 }
 
 #[test]

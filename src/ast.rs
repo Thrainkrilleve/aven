@@ -59,6 +59,24 @@ impl Expr {
         }
     }
 
+    /// Height of the expression tree, computed without recursion.
+    pub fn depth(&self) -> usize {
+        let mut max = 0;
+        let mut stack = vec![(self, 1usize)];
+        while let Some((e, d)) = stack.pop() {
+            max = max.max(d);
+            match e {
+                Expr::Num(_) | Expr::Var(_) => {}
+                Expr::UnaryMinus(a) | Expr::Call(_, a) => stack.push((a, d + 1)),
+                Expr::Bin(_, l, r) => {
+                    stack.push((l, d + 1));
+                    stack.push((r, d + 1));
+                }
+            }
+        }
+        max
+    }
+
     pub fn vars(&self) -> std::collections::BTreeSet<String> {
         let mut set = std::collections::BTreeSet::new();
         self.collect_vars(&mut set);
@@ -196,6 +214,13 @@ pub enum BackendDecl {
     },
     Ipc {
         endpoint: String,
+    },
+    Shm {
+        path: String,
+    },
+    NativeFfi {
+        lib_path: String,
+        symbol: String,
     },
 }
 

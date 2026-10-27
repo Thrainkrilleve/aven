@@ -1,0 +1,18 @@
+// 02_units_and_dimensions.aven — Kinematics with Physical Units
+// Demonstrates unit annotations and dimensional verification in Aven.
+
+signal speed : km/h
+signal time_elapsed : s
+signal distance_travelled : m
+
+relation Kinematics {
+    distance_travelled = speed * time_elapsed
+    acceleration = speed / time_elapsed
+    force = mass * acceleration
+}
+
+solve Kinematics with {
+    speed = 100 km/h
+    time_elapsed = 10 s
+    mass = 1500 kg
+}

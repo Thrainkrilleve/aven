@@ -24,11 +24,21 @@ impl std::error::Error for ParseError {}
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    /// Current expression nesting (parentheses, unary minus, exponents)
+    nesting: usize,
 }
+
+/// Deepest expression accepted. Deeper input is rejected with a parse error instead of
+/// exhausting the stack in later recursive passes (evaluation, differentiation, units).
+pub const MAX_EXPR_DEPTH: usize = 1000;
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Self { tokens, pos: 0 }
+        Self {
+            tokens,
+            pos: 0,
+            nesting: 0,
+        }
     }
 
     fn peek(&self) -> &Token {
@@ -254,9 +264,82 @@ impl Parser {
                 self.expect(&TokenKind::RightParen, "')'")?;
                 Ok(BackendDecl::Ipc { endpoint })
             }
+            TokenKind::KwShm => {
+                self.take(); // consume 'shm'
+                self.expect(&TokenKind::LeftParen, "'('")?;
+                let path = match self.peek().kind.clone() {
+                    TokenKind::Str(s) => {
+                        self.take();
+                        s
+                    }
+                    _ => {
+                        let (t_line, t_col, t_text) = {
+                            let t = self.peek();
+                            (t.line, t.col, t.text.clone())
+                        };
+                        return Err(ParseError {
+                            message: format!(
+                                "expected string literal path/name in shm(...) declaration (e.g. shm(\"aven_shm\")), found '{}'",
+                                t_text
+                            ),
+                            line: t_line,
+                            col: t_col,
+                        });
+                    }
+                };
+                self.expect(&TokenKind::RightParen, "')'")?;
+                Ok(BackendDecl::Shm { path })
+            }
+            TokenKind::KwNative => {
+                self.take(); // consume 'native'
+                self.expect(&TokenKind::LeftParen, "'('")?;
+                let lib_path = match self.peek().kind.clone() {
+                    TokenKind::Str(s) => {
+                        self.take();
+                        s
+                    }
+                    _ => {
+                        let (t_line, t_col, t_text) = {
+                            let t = self.peek();
+                            (t.line, t.col, t.text.clone())
+                        };
+                        return Err(ParseError {
+                            message: format!(
+                                "expected library path string in native(...) declaration, found '{}'",
+                                t_text
+                            ),
+                            line: t_line,
+                            col: t_col,
+                        });
+                    }
+                };
+                self.expect(&TokenKind::Comma, "','")?;
+                let symbol = match self.peek().kind.clone() {
+                    TokenKind::Str(s) => {
+                        self.take();
+                        s
+                    }
+                    _ => {
+                        let (t_line, t_col, t_text) = {
+                            let t = self.peek();
+                            (t.line, t.col, t.text.clone())
+                        };
+                        return Err(ParseError {
+                            message: format!(
+                                "expected symbol name string in native(...) declaration, found '{}'",
+                                t_text
+                            ),
+                            line: t_line,
+                            col: t_col,
+                        });
+                    }
+                };
+                self.expect(&TokenKind::RightParen, "')'")?;
+                Ok(BackendDecl::NativeFfi { lib_path, symbol })
+            }
             _ => Err(ParseError {
                 message: format!(
-                    "expected 'external(...)' or 'ipc(...)', found '{}'",
+                    "expected 'external(...)', 'ipc(...)', 'shm(...)', or 'native(...)', found '{}'",
                     tok_text
                 ),
                 line: tok_line,
@@ -342,7 +425,7 @@ impl Parser {
                 continue;
             }
 
-            // Check for objectives: minimize(x) or maximize(x)
+            // Check for objectives: minimize(x) / maximize(x), or minimize x / maximize x
             if self.peek().kind == TokenKind::KwMinimize
                 || self.peek().kind == TokenKind::KwMaximize
             {
@@ -351,9 +434,14 @@ impl Parser {
                     TokenKind::KwMaximize => ObjectiveKind::Maximize,
                     _ => unreachable!(),
                 };
-                self.expect(&TokenKind::LeftParen, "'('")?;
+                let parenthesized = self.peek().kind == TokenKind::LeftParen;
+                if parenthesized {
+                    self.take();
+                }
                 let (target_var, o_line, o_col) = self.expect_ident()?;
-                self.expect(&TokenKind::RightParen, "')'")?;
+                if parenthesized {
+                    self.expect(&TokenKind::RightParen, "')'")?;
+                }
                 objectives.push(Objective {
                     kind,
                     target: target_var,
@@ -530,7 +618,21 @@ impl Parser {
     // Expression parsing with operator precedence:
     // additive (+ -) < multiplicative (* /) < unary (-) < power (^) < atoms
     pub fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-        self.parse_additive()
+        let top_level = self.nesting == 0;
+        let start = self.peek().clone();
+        let expr = self.parse_additive()?;
+        // Long operator chains are built iteratively, so check the finished tree's depth too
+        if top_level && expr.depth() > MAX_EXPR_DEPTH {
+            return Err(ParseError {
+                message: format!(
+                    "expression is nested more than {} levels deep",
+                    MAX_EXPR_DEPTH
+                ),
+                line: start.line,
+                col: start.col,
+            });
+        }
+        Ok(expr)
     }
 
     fn parse_additive(&mut self) -> Result<Expr, ParseError> {
@@ -562,13 +664,27 @@ impl Parser {
     }
 
     fn parse_unary(&mut self) -> Result<Expr, ParseError> {
-        if self.peek().kind == TokenKind::Minus {
+        // Every recursive path (unary minus, exponents, parentheses) passes through here
+        self.nesting += 1;
+        if self.nesting > MAX_EXPR_DEPTH {
+            let tok = self.peek().clone();
+            return Err(ParseError {
+                message: format!(
+                    "expression is nested more than {} levels deep",
+                    MAX_EXPR_DEPTH
+                ),
+                line: tok.line,
+                col: tok.col,
+            });
+        }
+        let result = if self.peek().kind == TokenKind::Minus {
             self.take();
-            let operand = self.parse_unary()?;
-            Ok(Expr::UnaryMinus(Box::new(operand)))
+            self.parse_unary().map(|operand| Expr::UnaryMinus(Box::new(operand)))
         } else {
             self.parse_power()
-        }
+        };
+        self.nesting -= 1;
+        result
     }
 
     fn parse_power(&mut self) -> Result<Expr, ParseError> {

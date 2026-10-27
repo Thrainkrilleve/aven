@@ -1,0 +1,23 @@
+// examples/pi_controller.aven -- discrete PI controller (stateful).
+//
+// A control law with memory: the integral accumulator carries across ticks.
+// AERIC feeds the previous accumulator back in as i_prev and stores the new
+// one (i_next) as state. Gains are baked: Kp = 0.5, Ki*dt = 0.1.
+//
+//   error  = r - y                       (setpoint minus measurement)
+//   i_next = i_prev + Ki*dt * error      (integral update, the state)
+//   u      = Kp * error + i_next         (control output / setpoint)
+//
+// Free inputs (avenc sorts alphabetically): i_prev, r, y
+// Outputs (equation order):                 u, i_next
+forward PIController {
+    u = 0.5 * (r - y) + i_next
+    i_next = i_prev + 0.1 * (r - y)
+}
+
+// Demo bindings (first tick of a unit step, zero initial integral).
+solve PIController with {
+    r      = 1.0
+    y      = 0.0
+    i_prev = 0.0
+}

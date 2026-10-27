@@ -111,7 +111,8 @@ solve FlightMesh with {
 - Relational: `<=`, `>=`, `<`, `>`
 
 ### 4.3 Integer Variables
-To enforce discrete solutions (e.g. server instances, pods, workers), declare integer constraints:
+To enforce discrete solutions (e.g. server instances, pods, workers), declare integer constraints.
+Integer variables represent counts: **without an explicit lower bound they are constrained to be `>= 0`**. Declare a bound (e.g. `offset >= -10`) for an integer that may be negative.
 ```aven
 relation ClusterAllocation {
     int workers
@@ -121,6 +122,10 @@ relation ClusterAllocation {
 ```
 
 ### 4.4 Optimization Directives
+Objectives may be written `minimize total_cost_usd` or `minimize(total_cost_usd)`. The first objective is optimized; use `avenc pareto` to explore trade-offs between several.
+
+Linear models are solved exactly (simplex with branch-and-bound) and the result is proven optimal. Nonlinear models are solved locally and then certified by interval branch-and-bound; `avenc run --json` reports `"optimality": "proven"` when the certificate completes (global optimum within a relative gap of 1e-6) and `"local"` when it cannot (for example, an unbounded variable that constraint propagation cannot bound).
+
 Multi-objective optimization targets are declared inside `solve`:
 ```aven
 solve CapacityPlan with {

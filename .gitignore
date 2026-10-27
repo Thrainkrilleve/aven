@@ -44,3 +44,11 @@ node_modules/
 
 # Tauri v2 generated capability schemas
 **/src-tauri/gen/
+
+# Python verification environment (SciPy, HiGHS)
+.venv/
+
+# Transient verification harness output
+verify/failures/
+verify/nowcast_results.jsonl
+.wrangler/

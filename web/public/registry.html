@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aven Package Registry — Unit-Verified Relation Packages</title>
+  <meta name="description" content="Discover, inspect, and install unit-verified relation packages sealed with SHA-256 cryptographic provenance for Aven.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    .registry-hero {
+      padding: 3.5rem 0 2rem;
+      text-align: center;
+    }
+    .search-box {
+      max-width: 650px;
+      margin: 1.5rem auto 3rem;
+      display: flex;
+      gap: 0.5rem;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 0.5rem;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+    }
+    .search-input {
+      flex-grow: 1;
+      background: transparent;
+      border: none;
+      color: #ffffff;
+      font-family: var(--font-sans);
+      font-size: 1rem;
+      padding: 0.5rem 1rem;
+      outline: none;
+    }
+    .package-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 5rem;
+    }
+    .pkg-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 1.75rem;
+      display: flex;
+      flex-direction: column;
+      transition: var(--transition);
+    }
+    .pkg-card:hover {
+      border-color: rgba(0, 242, 254, 0.4);
+      transform: translateY(-3px);
+      box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+    }
+    .pkg-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 0.5rem;
+    }
+    .pkg-name {
+      font-family: var(--font-display);
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: #ffffff;
+    }
+    .pkg-ver {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: var(--accent-cyan);
+      background: rgba(0, 242, 254, 0.1);
+      padding: 0.15rem 0.5rem;
+      border-radius: var(--radius-sm);
+    }
+    .pkg-desc {
+      font-size: 0.92rem;
+      color: var(--text-muted);
+      margin-bottom: 1.25rem;
+      flex-grow: 1;
+    }
+    .pkg-units-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin-bottom: 1.25rem;
+    }
+    .unit-tag {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      background: rgba(16, 185, 129, 0.1);
+      color: var(--accent-emerald);
+      border: 1px solid rgba(16, 185, 129, 0.25);
+      padding: 0.15rem 0.45rem;
+      border-radius: var(--radius-sm);
+    }
+    .pkg-meta {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      padding-top: 1rem;
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .pkg-seal {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 140px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Navigation -->
+  <nav class="navbar">
+    <a href="/" class="brand">
+      <span>▲ AVEN</span>
+      <span class="brand-badge">v0.9.0</span>
+    </a>
+    <ul class="nav-links">
+      <li><a href="/">Home</a></li>
+      <li><a href="/#playground">Playground</a></li>
+      <li><a href="/docs.html">Documentation</a></li>
+      <li><a href="/registry.html" class="active">Packages</a></li>
+      <li><a href="https://github.com/Thrainkrilleve/aven" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+    <div class="nav-actions">
+      <a href="/#install" class="btn btn-primary btn-sm">Install CLI</a>
+    </div>
+  </nav>
+
+  <main class="container">
+    <section class="registry-hero">
+      <h1>Unit-Verified Package Registry</h1>
+      <p style="max-width: 650px; margin: 0.5rem auto 0; color: var(--text-muted);">
+        Every package is cryptographically sealed with SHA-256 and verified for physical dimensional homogeneity prior to publishing. Powered by Cloudflare D1.
+      </p>
+
+      <div class="search-box">
+        <input type="text" id="pkg-search" class="search-input" placeholder="Search packages by name, keyword, or physical unit...">
+        <button class="btn btn-primary btn-sm" id="search-btn">Search</button>
+      </div>
+    </section>
+
+    <div class="package-grid" id="packages-list">
+      <div style="grid-column: 1 / -1; text-align: center; color: var(--text-dim); padding: 3rem;">
+        Loading packages from Cloudflare D1 database...
+      </div>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <div class="container" style="text-align: center;">
+      <p>&copy; 2026 Aven Contributors. Open source under MIT License &bull; avenc.dev</p>
+    </div>
+  </footer>
+
+  <script>
+    async function loadPackages(query = '') {
+      const listEl = document.getElementById('packages-list');
+      try {
+        const url = query ? `/api/v1/packages?q=${encodeURIComponent(query)}` : '/api/v1/packages';
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('API request failed');
+        const data = await res.json();
+
+        if (!data.packages || data.packages.length === 0) {
+          listEl.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: var(--text-muted); padding: 3rem;">No packages matched your query.</div>`;
+          return;
+        }
+
+        listEl.innerHTML = '';
+        data.packages.forEach(pkg => {
+          let units = [];
+          try { units = JSON.parse(pkg.verified_units || '[]'); } catch (_) {}
+
+          const card = document.createElement('div');
+          card.className = 'pkg-card';
+          card.innerHTML = `
+            <div class="pkg-header">
+              <span class="pkg-name">${pkg.name}</span>
+              <span class="pkg-ver">v${pkg.version}</span>
+            </div>
+            <div class="pkg-desc">${pkg.description || 'No description provided.'}</div>
+            
+            <div class="pkg-units-list">
+              ${units.map(u => `<span class="unit-tag">[${u}]</span>`).join('')}
+            </div>
+
+            <div style="margin-bottom: 1rem;">
+              <code style="font-size: 0.78rem; background: var(--bg-code); padding: 0.35rem 0.6rem; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); display: block; color: var(--accent-cyan);">
+                avenc pkg install ${pkg.name}
+              </code>
+            </div>
+
+            <div class="pkg-meta">
+              <span>SHA-256: <span class="pkg-seal" title="${pkg.sha256_seal}">${pkg.sha256_seal.slice(0, 16)}...</span></span>
+              <span>${(pkg.downloads || 0).toLocaleString()} dl</span>
+            </div>
+          `;
+          listEl.appendChild(card);
+        });
+      } catch (err) {
+        listEl.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #ef4444; padding: 3rem;">Failed to load packages from D1 database.</div>`;
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      loadPackages();
+
+      const searchInput = document.getElementById('pkg-search');
+      const searchBtn = document.getElementById('search-btn');
+
+      searchBtn.addEventListener('click', () => {
+        loadPackages(searchInput.value.trim());
+      });
+
+      searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          loadPackages(searchInput.value.trim());
+        }
+      });
+    });
+  </script>
+</body>
+</html>

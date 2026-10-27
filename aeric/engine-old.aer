@@ -1,0 +1,286 @@
+// aeric.h — standalone AERIC orchestrator (C99, no stdlib)
+#ifndef AERIC_H
+#define AERIC_H
+
+#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
+
+/* ===== Tick Schema ===== */
+typedef struct {
+    uint32_t version;   /* Schema version for .aer evolution */
+    size_t   input_size;/* Raw bytes expected per tick (sensor data) */
+    size_t   output_size;/* Structured decisions per tick (setpoints) */
+} tick_schema_t;
+
+/* ===== Ingress / Egress Results ===== */
+typedef struct {
+    bool     valid;     /* true = passed validation */
+    uint16_t error_code;/* 0=OK, 1=schema mismatch, 2=malformed */
+    char     error_msg[32];
+} ingress_result_t;
+
+typedef struct {
+    bool     sent;      /* true = data accepted by downstream */
+    bool     timeout;   /* e.g., gRPC/Modbus didn't ACK in N ms */
+} egress_result_t;
+
+/* ===== AVEN Output (must match .aven ABI) ===== */
+typedef struct {
+    bool     valid;     /* true = constraints satisfied */
+    float    setpoints[8]; /* Control outputs per tick; extend as needed */
+    uint16_t flags;     /* Bit flags: 0x1=HOLD, 0x2=CLAMP, 0x4=ERROR */
+} aven_output_t;
+
+/* ===== AERIC Runtime State ===== */
+typedef struct {
+    tick_schema_t schema;
+    void       *aven_input_ptr;   /* Staging area for incoming raw bytes */
+    void       *aven_output_ptr;  /* Arena buffer for AVEN setpoints */
+ 
+    void       *ledger_buf;       /* Arena buffer for tick hash + metadata */
+
+    /* Internal state (protected by external timer) */
+    bool     hold_mode;           /* Enter HOLD on fault; persists until reset */
+    uint64_t last_tick_hash;      /* For audit/replay */
+} aeric_runtime_t;
+
+/* ===== Public API ===== */
+
+/* Initialize AERIC runtime. Call once at startup.
+ * aven_input_buf_size must be >= schema.input_size.
+ * aven_output_buf_size must be >= schema.output_size * sizeof(float).
+ * ledger_buf_size must be >= 64 bytes (for deterministic hashing).
+ */
+bool AERIC_Init(aeric_runtime_t *rt,
+                const tick_schema_t *schema,
+                void *aven_input_buf, size_t aven_input_buf_size,
+                void *aven_output_buf, size_t aven_output_buf_size,
+                void *ledger_buf, size_t ledger_buf_size);
+
+/* Main tick loop. Called once per control cycle (sub-ms target).
+ * Returns: 0=OK, -1=fault (HOLD fallback engaged), -2=shutdown.
+ */
+int AERIC_Tick(aeric_runtime_t *rt, const void *raw_input_bytes);
+
+/* Cleanup at shutdown. */
+void AERIC_Shutdown(aeric_runtime_t *rt);
+
+#endif /* AERIC_H */
+
+
+// aeric.c — memory-safe orchestrator implementation (C99)
+#include "aeric.h"
+#include <string.h>   // For memset, memcpy
+
+/* ===== Internal Arena Allocator (O(1), no malloc) ===== */
+static const size_t ARENA_CAPACITY = 2048;
+
+typedef struct {
+    uint8_t buffer[ARENA_CAPACITY];
+    size_t  write_pos;
+} arena_t;
+
+static inline void arena_init(arena_t *a) {
+    a->write_pos = 0;
+    memset(a->buffer, 0, ARENA_CAPACITY); // Deterministic wipe
+}
+
+static inline void* arena_alloc(arena_t *a, size_t bytes) {
+    if (a->write_pos + bytes > ARENA_CAPACITY) {
+        return NULL; // Should never happen if bounded by schema
+    }
+    void *ptr = (uint8_t*)a->buffer + a->write_pos;
+    a->write_pos += bytes;
+    return ptr;
+}
+ 
+static inline void arena_reset(arena_t *a) {
+    a->write_pos = 0;
+    memset(a->buffer, 0, ARENA_CAPACITY); // O(1) wipe for determinism
+}
+
+/* ===== Ring Buffer (Lock-free, simplified for single-producer/consumer) ===== */
+static const size_t RING_CAPACITY = 1024;
+
+typedef struct {
+    uint8_t buffer[RING_CAPACITY];
+    size_t head;
+    size_t tail;
+} ringbuf_t;
+
+static inline bool ringbuf_push(ringbuf_t *rb, const void *data, size_t len) {
+    if (len > RING_CAPACITY) return false;
+    memcpy(&rb->buffer[rb->tail], data, len);
+    rb->tail = (rb->tail + len) % RING_CAPACITY;
+    return true;
+}
+
+static inline bool ringbuf_pop(ringbuf_t *rb, void *dst, size_t len) {
+    if ((rb->head + len) > RING_CAPACITY) return false;
+    memcpy(dst, &rb->buffer[rb->head], len);
+    rb->head = (rb->head + len) % RING_CAPACITY;
+    return true;
+}
+
+/* ===== Deterministic Ledger Hash (FNV-1a 64-bit) ===== */
+static inline uint64_t hash_tick(const void *data, size_t len) {
+    const uint8_t *bytes = (const uint8_t*)data;
+    uint64_t h = 14695981039346656037ULL; // FNV offset basis
+    for (size_t i = 0; i < len; ++i) {
+        h ^= bytes[i];
+        h *= 1099511628211ULL; // FNV prime
+    }
+    return h;
+}
+
+/* ===== Ingress Validation ===== */
+static inline ingress_result_t validate_ingress(const void *raw, size_t expected_size, const tick_schema_t *schema) {
+    if (raw == NULL || expected_size != schema->input_size) {
+        ingress_result_t err = { false, 2, "malformed payload" };
+        return err;
+    }
+    // Additional checks: CRC, signature, etc. would go here.
+    return (ingress_result_t){ true, 0, "" };
+}
+
+/* ===== Egress Stub (Replace with real gRPC/Modbus driver) ===== */
+static inline egress_result_t send_egress(const float *setpoints, size_t count) {
+    // Simulated: in production, wire to your transport layer.
+ 
+    // Timeout detection would be handled by the transport itself.
+    return (egress_result_t){ true, false };
+}
+
+/* ===== Public Implementation ===== */
+
+bool AERIC_Init(aeric_runtime_t *rt,
+                const tick_schema_t *schema,
+                void *aven_input_buf, size_t aven_input_buf_size,
+                void *aven_output_buf, size_t aven_output_buf_size,
+                void *ledger_buf, size_t ledger_buf_size) {
+    if (!rt || !schema || aven_input_buf_size < schema->input_size ||
+        aven_output_buf_size < schema->output_size * sizeof(float) ||
+        ledger_buf_size < 64) {
+        return false; // Invalid init parameters
+    }
+
+    memset(rt, 0, sizeof(aeric_runtime_t)); // Zero out runtime state
+
+    rt->schema = *schema;
+    rt->aven_input_ptr = aven_input_buf;
+    rt->aven_output_ptr = aven_output_buf;
+    rt->ledger_buf = ledger_buf;
+
+    rt->hold_mode = false;
+    rt->last_tick_hash = 0;
+
+    return true;
+}
+
+int AERIC_Tick(aeric_runtime_t *rt, const void *raw_input_bytes) {
+    if (!rt || !raw_input_bytes) {
+        return -2; // Shutdown error
+    }
+
+    /* 1. Ingress validation */
+    ingress_result_t in = validate_ingress(raw_input_bytes, ARENA_CAPACITY, &rt->schema);
+    if (!in.valid) {
+        // Fault: skip this tick, enter HOLD mode
+        rt->hold_mode = true;
+        return -1;
+    }
+
+    /* 2. Arena allocation for AVEN output (O(1)) */
+    float *setpoints = (float*)arena_alloc((arena_t*)&rt->aven_output_ptr,
+                                          rt->schema.output_size * sizeof(float));
+    if (!setpoints) {
+        rt->hold_mode = true;
+        return -1;
+    }
+
+    /* 3. Call AVEN solver (externally linked C99 library) */
+    extern void aven_solve(const void *input_ptr, float *output_ptr,
+                           uint16_t *flags_ptr, bool *valid_out);
+
+    uint16_t flags = 0;
+    bool valid = true;
+ 
+    aven_solve(rt->aven_input_ptr, setpoints, &flags, &valid);
+
+    /* 4. Fault handling: AVEN returned invalid or error flags */
+    if (!valid || (flags & 0x4)) { // 0x4 = ERROR flag
+        rt->hold_mode = true;
+        return -1;
+    }
+
+    /* 5. Egress layer */
+    egress_result_t eg = send_egress(setpoints, rt->schema.output_size);
+    if (!eg.sent) {
+        // If egress fails, fallback to HOLD mode for next tick
+        rt->hold_mode = true;
+        return -1;
+    }
+
+    /* 6. Ledger: hash tick data for audit/replay */
+    const uint8_t *tick_data = (const uint8_t*)rt->aven_output_ptr;
+    size_t len = rt->schema.output_size * sizeof(float);
+    uint64_t tick_hash = hash_tick(tick_data, len);
+    rt->last_tick_hash = tick_hash;
+
+    /* 7. Arena reset (O(1) wipe for next tick) */
+    arena_reset((arena_t*)&rt->aven_output_ptr);
+
+    return 0; // Success
+}
+
+void AERIC_Shutdown(aeric_runtime_t *rt) {
+    if (!rt) return;
+    memset(rt, 0, sizeof(aeric_runtime_t));
+}
+
+
+Minimal test driver (main.c):
+
+#include <stdio.h>
+#include <string.h>
+#include "aeric.h"
+
+int main(void) {
+    tick_schema_t schema = {
+        .version   = 1,
+        .input_size = 64,
+        .output_size = 8
+    };
+
+    void *aven_input_buf  = malloc(64);
+    void *aven_output_buf = malloc(8 * sizeof(float));
+    void *ledger_buf      = malloc(64);
+    memset(aven_input_buf, 0, 64);
+
+    aeric_runtime_t rt;
+    if (!AERIC_Init(&rt, &schema, aven_input_buf, 64, aven_output_buf, 8*sizeof(float), ledger_buf, 64)) {
+        fprintf(stderr, "Init failed\n");
+        return 1;
+    }
+
+    // Simulate 3 ticks of control data
+    for (int tick = 0; tick < 3; ++tick) {
+        uint8_t input[64] = { (uint8_t)(tick + 1), ... }; // Replace with real sensor data
+        int status = AERIC_Tick(&rt, input);
+        if (status == 0) {
+ 
+            printf("Tick %d: OK, hash=0x%016llX\n", tick, rt.last_tick_hash);
+        } else if (status == -1) {
+            printf("Tick %d: FAULT (HOLD fallback engaged)\n", tick);
+        } else {
+            printf("Tick %d: SHUTDOWN\n", tick);
+        }
+    }
+
+    AERIC_Shutdown(&rt);
+    free(aven_input_buf);
+    free(aven_output_buf);
+    free(ledger_buf);
+    return 0;
+}

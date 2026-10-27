@@ -302,18 +302,15 @@ impl Diagnostician {
             .cloned()
             .collect();
 
-        // Minimal fixes: find if removing unknown v leaves sub-matrix with rank n - 1
+        // Minimal fixes exist only with exactly one degree of freedom. The Jacobian then has a
+        // one-dimensional null space z, and binding v removes it exactly when z_v != 0, so a
+        // single row reduction finds every fix (instead of one rank computation per variable).
         let mut minimal_fixes = Vec::new();
-        if n > 1 {
+        if n > 1 && n == rank + 1 {
+            let z = null_vector(&jac, n);
+            let scale = z.iter().map(|v| v.abs()).fold(0.0, f64::max);
             for (v_idx, v) in unknowns.iter().enumerate() {
-                let keep_cols: Vec<usize> = (0..n).filter(|&c| c != v_idx).collect();
-                let sub_jac: Vec<Vec<f64>> = jac
-                    .iter()
-                    .map(|row| keep_cols.iter().map(|&c| row[c]).collect())
-                    .collect();
-
-                let (sub_rank, _, _) = rank_and_pivots(&sub_jac);
-                if sub_rank == n - 1 {
+                if z[v_idx].abs() > 1e-9 * scale {
                     let others: Vec<&String> = unknowns.iter().filter(|u| *u != v).collect();
                     let others_str: Vec<String> = others.into_iter().cloned().collect();
                     minimal_fixes.push(format!(
@@ -357,6 +354,55 @@ impl Diagnostician {
 }
 
 /// Gaussian elimination on matrix copy to compute rank, pivot columns, and degenerate rows
+/// A vector spanning the null space of `mat` (m × n) when that space is one-dimensional:
+/// reduces to row echelon form, sets the single free variable to 1 and back-substitutes.
+fn null_vector(mat: &[Vec<f64>], n: usize) -> Vec<f64> {
+    let mut a: Vec<Vec<f64>> = mat.to_vec();
+    let rows = a.len();
+    let scale = a
+        .iter()
+        .flat_map(|r| r.iter())
+        .map(|v| v.abs())
+        .fold(0.0, f64::max)
+        .max(1e-300);
+    let mut pivot_cols = Vec::new();
+    let mut r = 0;
+    for c in 0..n {
+        if r >= rows {
+            break;
+        }
+        let (best, val) = (r..rows)
+            .map(|i| (i, a[i][c].abs()))
+            .fold((r, 0.0), |acc, x| if x.1 > acc.1 { x } else { acc });
+        if val <= 1e-9 * scale {
+            continue;
+        }
+        a.swap(r, best);
+        let p = a[r][c];
+        for j in c..n {
+            a[r][j] /= p;
+        }
+        for i in 0..rows {
+            if i != r && a[i][c] != 0.0 {
+                let f = a[i][c];
+                for j in c..n {
+                    a[i][j] -= f * a[r][j];
+                }
+            }
+        }
+        pivot_cols.push(c);
+        r += 1;
+    }
+    let mut z = vec![0.0; n];
+    if let Some(free) = (0..n).find(|c| !pivot_cols.contains(c)) {
+        z[free] = 1.0;
+        for (i, &pc) in pivot_cols.iter().enumerate() {
+            z[pc] = -a[i][free];
+        }
+    }
+    z
+}
+
 fn rank_and_pivots(mat: &[Vec<f64>]) -> (usize, Vec<usize>, Vec<usize>) {
     let rows = mat.len();
     if rows == 0 {
@@ -366,13 +412,19 @@ fn rank_and_pivots(mat: &[Vec<f64>]) -> (usize, Vec<usize>, Vec<usize>) {
     let mut a: Vec<Vec<f64>> = mat.to_vec();
     let mut row_indices: Vec<usize> = (0..rows).collect();
 
-    // Dynamically scale tolerance to matrix magnitude to handle both micro (1e-9) and macro (1e9) scales
-    let max_entry: f64 = mat
-        .iter()
-        .flat_map(|row| row.iter())
-        .map(|v| v.abs())
-        .fold(0.0f64, f64::max);
-    let pivot_tol = 1e-12 * max_entry.max(1e-15);
+    // Row-equilibrate (normalize each non-zero row by its infinity norm)
+    // so equations across vastly different physical units (e.g. Joules ~ 1e6, Pa ~ 1e5, m/s ~ 1, s^-1 ~ 1e-4)
+    // do not artificially suppress pivot selection for other independent equations.
+    for row in a.iter_mut() {
+        let r_max = row.iter().map(|v| v.abs()).fold(0.0f64, f64::max);
+        if r_max > 1e-15 {
+            for val in row.iter_mut() {
+                *val /= r_max;
+            }
+        }
+    }
+
+    let pivot_tol = 1e-9;
 
     let mut pivots = Vec::new();
     let mut r = 0;

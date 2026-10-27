@@ -1,5 +1,6 @@
 ### Documentation
 - [[Home|Home]]
+- [[AI Model Guide & Cookbook|AI-Model-Guide-and-Language-Cookbook]]
 - [[Architecture & Design|Architecture-and-Design]]
 - [[Language Specification|Language-Specification]]
 - [[Compiler Toolchain (avenc)|Compiler-Toolchain-avenc]]

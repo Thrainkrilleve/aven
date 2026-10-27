@@ -131,6 +131,9 @@ impl VarMap {
     }
 }
 
+/// JSON keys that carry freshness metadata rather than model values
+const FRESHNESS_KEYS: &[&str] = &["timestamp_ms", "timestamp", "ttl_ms", "ttl"];
+
 /// Evaluation result returned by any backend.
 #[derive(Clone, Debug)]
 pub struct EvalResult {
@@ -140,6 +143,8 @@ pub struct EvalResult {
     pub timestamp_ms: Option<u64>,
     pub ttl_ms: Option<u64>,
     pub warnings: Vec<String>,
+    /// SHA-256 of the raw bytes the backend returned (None for in-process evaluation)
+    pub payload_sha256: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -263,6 +268,7 @@ impl Evaluator for NativeEvaluator {
             timestamp_ms: None,
             ttl_ms: None,
             warnings: Vec::new(),
+            payload_sha256: None,
         })
     }
 
@@ -571,9 +577,9 @@ impl Evaluator for ExternalEvaluator {
 
         let mut out_values = inputs.values.clone();
         out_values.extend(parsed_numbers);
-        if !out_values.contains_key("value") {
-            let first_val = out_values.values().next().copied().unwrap_or(0.0);
-            out_values.insert("value".to_string(), first_val);
+        // Freshness metadata is not a model variable
+        for meta_key in FRESHNESS_KEYS {
+            out_values.remove(*meta_key);
         }
 
         Ok(EvalResult {
@@ -583,6 +589,7 @@ impl Evaluator for ExternalEvaluator {
             timestamp_ms,
             ttl_ms,
             warnings,
+            payload_sha256: Some(sha256_hex(&output.stdout)),
         })
     }
 
@@ -610,6 +617,55 @@ impl IpcEvaluator {
     pub fn with_required_keys(mut self, keys: &[String]) -> Self {
         self.required_keys = keys.to_vec();
         self
+    }
+
+    /// Streams real-time actuation commands back to the IPC daemon.
+    pub fn actuate(&self, commands: &HashMap<String, f64>) -> Result<(), EvalError> {
+        use std::io::Write;
+        use std::net::TcpStream;
+
+        let addr_str = if !self.endpoint.contains(':') {
+            format!("127.0.0.1:{}", self.endpoint)
+        } else if self.endpoint.starts_with("localhost:") {
+            self.endpoint.replacen("localhost:", "127.0.0.1:", 1)
+        } else {
+            self.endpoint.clone()
+        };
+
+        let socket_addr: std::net::SocketAddr = addr_str.parse().map_err(|e| {
+            EvalError::DomainError(format!("Invalid IPC socket address '{}': {}", addr_str, e))
+        })?;
+
+        let mut stream = TcpStream::connect_timeout(&socket_addr, std::time::Duration::from_millis(500))
+            .map_err(|e| {
+                EvalError::BlackBoxFailure(format!(
+                    "Failed to connect to IPC daemon at '{}' for actuation: {}",
+                    addr_str, e
+                ))
+            })?;
+        let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(1)));
+
+        let mut json_str = String::from("{\"action\": \"actuate\", \"commands\": {");
+        let mut first = true;
+        let mut sorted_keys: Vec<&String> = commands.keys().collect();
+        sorted_keys.sort();
+        for k in sorted_keys {
+            if !first {
+                json_str.push_str(", ");
+            }
+            use std::fmt::Write as FmtWrite;
+            let _ = write!(json_str, "\"{}\": {}", k, commands[k]);
+            first = false;
+        }
+        json_str.push_str("}}\n");
+
+        stream.write_all(json_str.as_bytes()).map_err(|e| {
+            EvalError::DomainError(format!("Failed to send actuation packet: {}", e))
+        })?;
+        stream
+            .flush()
+            .map_err(|e| EvalError::DomainError(format!("Failed to flush socket: {}", e)))?;
+        Ok(())
     }
 }
 
@@ -745,9 +801,9 @@ impl Evaluator for IpcEvaluator {
 
         let mut out_values = inputs.values.clone();
         out_values.extend(parsed_numbers);
-        if !out_values.contains_key("value") {
-            let first_val = out_values.values().next().copied().unwrap_or(0.0);
-            out_values.insert("value".to_string(), first_val);
+        // Freshness metadata is not a model variable
+        for meta_key in FRESHNESS_KEYS {
+            out_values.remove(*meta_key);
         }
 
         Ok(EvalResult {
@@ -757,6 +813,765 @@ impl Evaluator for IpcEvaluator {
             timestamp_ms,
             ttl_ms,
             warnings,
+            payload_sha256: Some(sha256_hex(response_line.as_bytes())),
+        })
+    }
+
+    fn name(&self) -> &str {
+        &self.backend_id
+    }
+}
+
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
+
+/// Pure standard library Shared Memory Ring Buffer.
+/// Supports zero-socket IPC, sub-100µs telemetry ingestion, and bidirectional reverse actuation.
+#[derive(Debug)]
+pub struct ShmRingBuffer {
+    pub file_path: PathBuf,
+    file: File,
+    pub capacity: usize,
+    pub slot_count: usize,
+    pub slot_size: usize,
+}
+
+impl ShmRingBuffer {
+    const MAGIC: &'static [u8; 16] = b"AVEN_SHM_RING_01";
+    const HEADER_SIZE: usize = 64;
+    const ACTUATION_ZONE_SIZE: usize = 448; // offsets 64..512
+    const SLOTS_OFFSET: usize = 512;
+
+    /// Resolves an SHM name or path to an absolute path.
+    pub fn resolve_path(path_str: &str) -> PathBuf {
+        let p = Path::new(path_str);
+        if p.is_absolute() || path_str.contains('/') || path_str.contains('\\') || path_str.contains(':') {
+            p.to_path_buf()
+        } else {
+            std::env::temp_dir().join(format!("{}.shm", path_str))
+        }
+    }
+
+    /// Creates or opens an SHM ring buffer file with given slot count and slot size.
+    pub fn create_or_open(path: &Path, slot_count: u32, slot_size: u32) -> Result<Self, EvalError> {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path)
+            .map_err(|e| {
+                EvalError::BlackBoxFailure(format!(
+                    "Failed to open/create SHM ring buffer at '{:?}': {}",
+                    path, e
+                ))
+            })?;
+
+        let total_needed = Self::SLOTS_OFFSET + (slot_count as usize) * (slot_size as usize);
+        let existing_len = file.metadata().map(|m| m.len()).unwrap_or(0);
+
+        if existing_len < total_needed as u64 {
+            let mut init_buf = vec![0u8; total_needed];
+            init_buf[0..16].copy_from_slice(Self::MAGIC);
+            init_buf[16..20].copy_from_slice(&(total_needed as u32).to_le_bytes());
+            init_buf[20..24].copy_from_slice(&slot_count.to_le_bytes());
+            init_buf[24..28].copy_from_slice(&slot_size.to_le_bytes());
+
+            file.seek(SeekFrom::Start(0)).map_err(|e| {
+                EvalError::BlackBoxFailure(format!("Failed to seek in SHM file '{:?}': {}", path, e))
+            })?;
+            file.write_all(&init_buf).map_err(|e| {
+                EvalError::BlackBoxFailure(format!("Failed to initialize SHM file '{:?}': {}", path, e))
+            })?;
+            file.flush().map_err(|e| {
+                EvalError::BlackBoxFailure(format!("Failed to flush SHM file '{:?}': {}", path, e))
+            })?;
+        }
+
+        Ok(Self {
+            file_path: path.to_path_buf(),
+            file,
+            capacity: total_needed,
+            slot_count: slot_count as usize,
+            slot_size: slot_size as usize,
+        })
+    }
+
+    /// Opens an existing SHM ring buffer file.
+    pub fn open(path: &Path) -> Result<Self, EvalError> {
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .map_err(|e| {
+                EvalError::BlackBoxFailure(format!(
+                    "Failed to open SHM ring buffer at '{:?}': {}. Ensure the producer process created it.",
+                    path, e
+                ))
+            })?;
+
+        let mut header = [0u8; Self::HEADER_SIZE];
+        file.seek(SeekFrom::Start(0)).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to seek header in SHM '{:?}': {}", path, e))
+        })?;
+        file.read_exact(&mut header).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to read header from SHM '{:?}': {}", path, e))
+        })?;
+
+        if &header[0..16] != Self::MAGIC {
+            return Err(EvalError::MalformedOutput(format!(
+                "Invalid magic header in SHM file '{:?}', expected {:?}",
+                path,
+                Self::MAGIC
+            )));
+        }
+
+        let capacity = u32::from_le_bytes(header[16..20].try_into().unwrap()) as usize;
+        let slot_count = u32::from_le_bytes(header[20..24].try_into().unwrap()) as usize;
+        let slot_size = u32::from_le_bytes(header[24..28].try_into().unwrap()) as usize;
+
+        if slot_count == 0 || slot_size < 32 {
+            return Err(EvalError::MalformedOutput(format!(
+                "Corrupt SHM ring buffer header in '{:?}': slot_count={}, slot_size={}",
+                path, slot_count, slot_size
+            )));
+        }
+
+        Ok(Self {
+            file_path: path.to_path_buf(),
+            file,
+            capacity,
+            slot_count,
+            slot_size,
+        })
+    }
+
+    /// Producer writes a new telemetry frame into the next circular slot.
+    pub fn write_telemetry(&mut self, json_payload: &str, timestamp_ns: u64) -> Result<u64, EvalError> {
+        let payload_bytes = json_payload.as_bytes();
+        if payload_bytes.len() + 20 > self.slot_size {
+            return Err(EvalError::DomainError(format!(
+                "Telemetry payload length ({} bytes) exceeds slot payload capacity ({} bytes)",
+                payload_bytes.len(),
+                self.slot_size - 20
+            )));
+        }
+
+        // Read current write_seq
+        self.file.seek(SeekFrom::Start(28)).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to seek write_seq in '{:?}': {}", self.file_path, e))
+        })?;
+        let mut seq_buf = [0u8; 8];
+        self.file.read_exact(&mut seq_buf).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to read write_seq in '{:?}': {}", self.file_path, e))
+        })?;
+        let next_seq = u64::from_le_bytes(seq_buf).wrapping_add(1);
+
+        let slot_idx = (next_seq % (self.slot_count as u64)) as usize;
+        let slot_offset = Self::SLOTS_OFFSET + slot_idx * self.slot_size;
+
+        // Write slot payload: slot_seq (8), timestamp_ns (8), payload_len (4), payload_bytes
+        self.file.seek(SeekFrom::Start(slot_offset as u64)).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to seek slot in '{:?}': {}", self.file_path, e))
+        })?;
+        self.file.write_all(&next_seq.to_le_bytes()).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to write slot seq in '{:?}': {}", self.file_path, e))
+        })?;
+        self.file.write_all(&timestamp_ns.to_le_bytes()).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to write slot timestamp in '{:?}': {}", self.file_path, e))
+        })?;
+        self.file.write_all(&(payload_bytes.len() as u32).to_le_bytes()).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to write slot payload length in '{:?}': {}", self.file_path, e))
+        })?;
+        self.file.write_all(payload_bytes).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to write slot payload in '{:?}': {}", self.file_path, e))
+        })?;
+
+        // Update header write_seq
+        self.file.seek(SeekFrom::Start(28)).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to seek write_seq header in '{:?}': {}", self.file_path, e))
+        })?;
+        self.file.write_all(&next_seq.to_le_bytes()).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to commit write_seq in '{:?}': {}", self.file_path, e))
+        })?;
+        self.file.flush().map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to flush SHM write in '{:?}': {}", self.file_path, e))
+        })?;
+
+        Ok(next_seq)
+    }
+
+    /// Consumer reads the latest telemetry frame from the circular slot buffer.
+    pub fn read_latest(&self) -> Result<(u64, u64, String), EvalError> {
+        let mut file = self.file.try_clone().map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to clone file handle for SHM '{:?}': {}", self.file_path, e))
+        })?;
+
+        file.seek(SeekFrom::Start(28)).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to seek write_seq in '{:?}': {}", self.file_path, e))
+        })?;
+        let mut seq_buf = [0u8; 8];
+        file.read_exact(&mut seq_buf).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to read write_seq in '{:?}': {}", self.file_path, e))
+        })?;
+        let write_seq = u64::from_le_bytes(seq_buf);
+
+        if write_seq == 0 {
+            return Err(EvalError::BlackBoxFailure(format!(
+                "SHM ring buffer '{:?}' has no telemetry frames written yet (write_seq == 0)",
+                self.file_path
+            )));
+        }
+
+        let slot_idx = (write_seq % (self.slot_count as u64)) as usize;
+        let slot_offset = Self::SLOTS_OFFSET + slot_idx * self.slot_size;
+
+        file.seek(SeekFrom::Start(slot_offset as u64)).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to seek slot in '{:?}': {}", self.file_path, e))
+        })?;
+
+        let mut slot_seq_buf = [0u8; 8];
+        file.read_exact(&mut slot_seq_buf).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to read slot_seq in '{:?}': {}", self.file_path, e))
+        })?;
+        let slot_seq = u64::from_le_bytes(slot_seq_buf);
+
+        let mut ts_buf = [0u8; 8];
+        file.read_exact(&mut ts_buf).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to read slot timestamp in '{:?}': {}", self.file_path, e))
+        })?;
+        let timestamp_ns = u64::from_le_bytes(ts_buf);
+
+        let mut len_buf = [0u8; 4];
+        file.read_exact(&mut len_buf).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to read slot len in '{:?}': {}", self.file_path, e))
+        })?;
+        let payload_len = u32::from_le_bytes(len_buf) as usize;
+
+        if payload_len + 20 > self.slot_size {
+            return Err(EvalError::MalformedOutput(format!(
+                "Corrupt slot payload length {} in SHM frame {}",
+                payload_len, slot_seq
+            )));
+        }
+
+        let mut payload_buf = vec![0u8; payload_len];
+        file.read_exact(&mut payload_buf).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to read slot payload in '{:?}': {}", self.file_path, e))
+        })?;
+
+        let payload_str = String::from_utf8(payload_buf).map_err(|e| {
+            EvalError::MalformedOutput(format!("Invalid UTF-8 in SHM telemetry frame {}: {}", slot_seq, e))
+        })?;
+
+        Ok((slot_seq, timestamp_ns, payload_str))
+    }
+
+    /// Writes reverse actuation commands into the SHM actuation zone.
+    pub fn write_actuation(&mut self, json_payload: &str) -> Result<u64, EvalError> {
+        let payload_bytes = json_payload.as_bytes();
+        if payload_bytes.len() > Self::ACTUATION_ZONE_SIZE {
+            return Err(EvalError::DomainError(format!(
+                "Actuation payload length ({} bytes) exceeds SHM actuation zone limit ({} bytes)",
+                payload_bytes.len(),
+                Self::ACTUATION_ZONE_SIZE
+            )));
+        }
+
+        // Read current actuation_seq
+        self.file.seek(SeekFrom::Start(36)).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to seek actuation_seq in '{:?}': {}", self.file_path, e))
+        })?;
+        let mut seq_buf = [0u8; 8];
+        self.file.read_exact(&mut seq_buf).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to read actuation_seq in '{:?}': {}", self.file_path, e))
+        })?;
+        let next_act_seq = u64::from_le_bytes(seq_buf).wrapping_add(1);
+
+        // Write actuation payload into offset 64..512
+        self.file.seek(SeekFrom::Start(Self::HEADER_SIZE as u64)).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to seek actuation zone in '{:?}': {}", self.file_path, e))
+        })?;
+        self.file.write_all(payload_bytes).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to write actuation payload in '{:?}': {}", self.file_path, e))
+        })?;
+
+        // Update actuation_seq and actuation_len
+        self.file.seek(SeekFrom::Start(36)).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to seek actuation_seq header in '{:?}': {}", self.file_path, e))
+        })?;
+        self.file.write_all(&next_act_seq.to_le_bytes()).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to commit actuation_seq in '{:?}': {}", self.file_path, e))
+        })?;
+        self.file.write_all(&(payload_bytes.len() as u32).to_le_bytes()).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to commit actuation_len in '{:?}': {}", self.file_path, e))
+        })?;
+        self.file.flush().map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to flush actuation in '{:?}': {}", self.file_path, e))
+        })?;
+
+        Ok(next_act_seq)
+    }
+
+    /// Reads the latest reverse actuation commands from the SHM actuation zone.
+    pub fn read_latest_actuation(&self) -> Result<(u64, String), EvalError> {
+        let mut file = self.file.try_clone().map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to clone file for SHM '{:?}': {}", self.file_path, e))
+        })?;
+
+        file.seek(SeekFrom::Start(36)).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to seek actuation_seq in '{:?}': {}", self.file_path, e))
+        })?;
+        let mut seq_buf = [0u8; 8];
+        file.read_exact(&mut seq_buf).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to read actuation_seq in '{:?}': {}", self.file_path, e))
+        })?;
+        let act_seq = u64::from_le_bytes(seq_buf);
+
+        let mut len_buf = [0u8; 4];
+        file.read_exact(&mut len_buf).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to read actuation_len in '{:?}': {}", self.file_path, e))
+        })?;
+        let act_len = u32::from_le_bytes(len_buf) as usize;
+
+        if act_seq == 0 || act_len == 0 {
+            return Ok((0, String::new()));
+        }
+
+        if act_len > Self::ACTUATION_ZONE_SIZE {
+            return Err(EvalError::MalformedOutput(format!(
+                "Invalid actuation length {} in SHM '{:?}'",
+                act_len, self.file_path
+            )));
+        }
+
+        file.seek(SeekFrom::Start(Self::HEADER_SIZE as u64)).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to seek actuation zone in '{:?}': {}", self.file_path, e))
+        })?;
+        let mut payload_buf = vec![0u8; act_len];
+        file.read_exact(&mut payload_buf).map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to read actuation payload in '{:?}': {}", self.file_path, e))
+        })?;
+
+        let payload_str = String::from_utf8(payload_buf).map_err(|e| {
+            EvalError::MalformedOutput(format!("Invalid UTF-8 in SHM actuation packet: {}", e))
+        })?;
+
+        Ok((act_seq, payload_str))
+    }
+}
+
+/// Shared-memory ring buffer evaluator driving latency below 100µs.
+pub struct ShmEvaluator {
+    pub path: PathBuf,
+    pub backend_id: String,
+    pub required_keys: Vec<String>,
+    ring: std::sync::Mutex<Option<ShmRingBuffer>>,
+}
+
+impl ShmEvaluator {
+    pub fn new(path_str: &str) -> Self {
+        let path = ShmRingBuffer::resolve_path(path_str);
+        let id_name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(path_str)
+            .to_string();
+        Self {
+            backend_id: format!("shm_{}", id_name),
+            path,
+            required_keys: Vec::new(),
+            ring: std::sync::Mutex::new(None),
+        }
+    }
+
+    pub fn with_required_keys(mut self, keys: &[String]) -> Self {
+        self.required_keys = keys.to_vec();
+        self
+    }
+
+    /// Stream reverse actuation commands back into the SHM actuation zone.
+    pub fn actuate(&self, commands: &HashMap<String, f64>) -> Result<u64, EvalError> {
+        let mut json_str = String::from("{");
+        let mut first = true;
+        let mut sorted_keys: Vec<&String> = commands.keys().collect();
+        sorted_keys.sort();
+        for k in sorted_keys {
+            if !first {
+                json_str.push_str(", ");
+            }
+            use std::fmt::Write as FmtWrite;
+            let _ = write!(json_str, "\"{}\": {}", k, commands[k]);
+            first = false;
+        }
+        json_str.push_str("}");
+
+        let mut guard = self.ring.lock().map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to lock SHM ring buffer mutex: {}", e))
+        })?;
+        if guard.is_none() {
+            *guard = Some(ShmRingBuffer::open(&self.path)?);
+        }
+        guard.as_mut().unwrap().write_actuation(&json_str)
+    }
+}
+
+impl Evaluator for ShmEvaluator {
+    fn evaluate(&self, inputs: &VarMap) -> Result<EvalResult, EvalError> {
+        let mut guard = self.ring.lock().map_err(|e| {
+            EvalError::BlackBoxFailure(format!("Failed to lock SHM ring buffer mutex: {}", e))
+        })?;
+        if guard.is_none() {
+            *guard = Some(ShmRingBuffer::open(&self.path)?);
+        }
+        let ring = guard.as_mut().unwrap();
+
+        let t_start = std::time::Instant::now();
+        let (seq, ts_ns, payload) = ring.read_latest()?;
+        let elapsed_us = t_start.elapsed().as_secs_f64() * 1_000_000.0;
+
+        let trimmed = payload.trim();
+        if trimmed.is_empty() {
+            return Err(EvalError::BlackBoxFailure(format!(
+                "SHM ring buffer '{:?}' contained empty payload in frame {}",
+                self.path, seq
+            )));
+        }
+
+        if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
+            return Err(EvalError::MalformedOutput(format!(
+                "Malformed output: SHM frame {} payload must be a JSON object, found: '{}'",
+                seq, trimmed
+            )));
+        }
+
+        let parsed_numbers = parse_json_object_numbers(trimmed);
+        if parsed_numbers.is_empty() {
+            return Err(EvalError::MalformedOutput(format!(
+                "SHM ring buffer '{:?}' returned no numeric key-value pairs in frame {}",
+                self.path, seq
+            )));
+        }
+
+        // Schema validation: ensure required keys exist
+        for req in &self.required_keys {
+            if !parsed_numbers.contains_key(req) {
+                return Err(EvalError::MalformedOutput(format!(
+                    "Schema validation failed: SHM ring buffer '{:?}' omitted required numeric field '{}'",
+                    self.path, req
+                )));
+            }
+        }
+
+        let timestamp_ms = parse_json_u64(trimmed, "timestamp_ms")
+            .or_else(|| parse_json_u64(trimmed, "timestamp"))
+            .or_else(|| if ts_ns > 0 { Some(ts_ns / 1_000_000) } else { None });
+        let ttl_ms = parse_json_u64(trimmed, "ttl_ms")
+            .or_else(|| parse_json_float(trimmed, "ttl").map(|s| (s * 1000.0) as u64));
+        let warnings = parse_json_string_array(trimmed, "warnings");
+
+        let mut out_values = inputs.values.clone();
+        out_values.extend(parsed_numbers);
+        for meta_key in FRESHNESS_KEYS {
+            out_values.remove(*meta_key);
+        }
+
+        Ok(EvalResult {
+            values: out_values,
+            backend_id: self.backend_id.clone(),
+            solve_time_us: elapsed_us,
+            timestamp_ms,
+            ttl_ms,
+            warnings,
+            payload_sha256: Some(sha256_hex(payload.as_bytes())),
+        })
+    }
+
+    fn name(&self) -> &str {
+        &self.backend_id
+    }
+}
+
+#[cfg(windows)]
+mod os_ffi {
+    use std::ffi::c_void;
+    pub type HMODULE = *mut c_void;
+    pub type FARPROC = *mut c_void;
+
+    unsafe extern "system" {
+        pub fn LoadLibraryW(lpLibFileName: *const u16) -> HMODULE;
+        pub fn GetProcAddress(hModule: HMODULE, lpProcName: *const u8) -> FARPROC;
+        pub fn FreeLibrary(hLibModule: HMODULE) -> i32;
+        pub fn GetLastError() -> u32;
+    }
+}
+
+#[cfg(unix)]
+mod os_ffi {
+    use std::ffi::{c_char, c_void};
+    unsafe extern "C" {
+        pub fn dlopen(filename: *const c_char, flags: i32) -> *mut c_void;
+        pub fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+        pub fn dlclose(handle: *mut c_void) -> i32;
+        pub fn dlerror() -> *mut c_char;
+    }
+    pub const RTLD_NOW: i32 = 2;
+}
+
+/// Cross-platform dynamic library handle (`.dll` on Windows, `.so`/`.dylib` on Unix).
+pub struct DynamicLibrary {
+    #[cfg(windows)]
+    handle: os_ffi::HMODULE,
+    #[cfg(unix)]
+    handle: *mut std::ffi::c_void,
+}
+
+unsafe impl Send for DynamicLibrary {}
+unsafe impl Sync for DynamicLibrary {}
+
+impl DynamicLibrary {
+    pub fn load<P: AsRef<std::path::Path>>(path: P) -> Result<Self, EvalError> {
+        let p = path.as_ref();
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStrExt;
+            let wide: Vec<u16> = p.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+            let handle = unsafe { os_ffi::LoadLibraryW(wide.as_ptr()) };
+            if handle.is_null() {
+                let err_code = unsafe { os_ffi::GetLastError() };
+                return Err(EvalError::BlackBoxFailure(format!(
+                    "Failed to load dynamic library '{:?}': Windows error code {}",
+                    p, err_code
+                )));
+            }
+            Ok(Self { handle })
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let mut bytes = p.as_os_str().as_bytes().to_vec();
+            bytes.push(0);
+            let handle = unsafe { os_ffi::dlopen(bytes.as_ptr() as *const _, os_ffi::RTLD_NOW) };
+            if handle.is_null() {
+                let err_msg = unsafe {
+                    let err_ptr = os_ffi::dlerror();
+                    if err_ptr.is_null() {
+                        "Unknown dlopen error".to_string()
+                    } else {
+                        std::ffi::CStr::from_ptr(err_ptr).to_string_lossy().into_owned()
+                    }
+                };
+                return Err(EvalError::BlackBoxFailure(format!(
+                    "Failed to load dynamic library '{:?}': {}",
+                    p, err_msg
+                )));
+            }
+            Ok(Self { handle })
+        }
+    }
+
+    pub unsafe fn get_symbol<T: Copy>(&self, symbol_name: &str) -> Result<T, EvalError> {
+        #[cfg(windows)]
+        {
+            let mut sym_bytes = symbol_name.as_bytes().to_vec();
+            sym_bytes.push(0);
+            let proc = unsafe { os_ffi::GetProcAddress(self.handle, sym_bytes.as_ptr()) };
+            if proc.is_null() {
+                let err_code = unsafe { os_ffi::GetLastError() };
+                return Err(EvalError::BlackBoxFailure(format!(
+                    "Failed to find symbol '{}' in dynamic library: Windows error code {}",
+                    symbol_name, err_code
+                )));
+            }
+            Ok(unsafe { std::mem::transmute_copy(&proc) })
+        }
+        #[cfg(unix)]
+        {
+            let mut sym_bytes = symbol_name.as_bytes().to_vec();
+            sym_bytes.push(0);
+            let proc = unsafe { os_ffi::dlsym(self.handle, sym_bytes.as_ptr() as *const _) };
+            if proc.is_null() {
+                let err_msg = unsafe {
+                    let err_ptr = os_ffi::dlerror();
+                    if err_ptr.is_null() {
+                        "Symbol not found".to_string()
+                    } else {
+                        std::ffi::CStr::from_ptr(err_ptr).to_string_lossy().into_owned()
+                    }
+                };
+                return Err(EvalError::BlackBoxFailure(format!(
+                    "Failed to find symbol '{}' in dynamic library: {}",
+                    symbol_name, err_msg
+                )));
+            }
+            Ok(unsafe { std::mem::transmute_copy(&proc) })
+        }
+    }
+}
+
+impl Drop for DynamicLibrary {
+    fn drop(&mut self) {
+        #[cfg(windows)]
+        {
+            if !self.handle.is_null() {
+                unsafe { os_ffi::FreeLibrary(self.handle) };
+            }
+        }
+        #[cfg(unix)]
+        {
+            if !self.handle.is_null() {
+                unsafe { os_ffi::dlclose(self.handle) };
+            }
+        }
+    }
+}
+
+/// Standard C ABI function pointer for native in-process evaluators.
+/// Returns 0 on success, non-zero on error.
+pub type AvenNativePluginFn = unsafe extern "C" fn(
+    input_json: *const std::ffi::c_char,
+    output_buf: *mut std::ffi::c_char,
+    output_buf_len: usize,
+) -> i32;
+
+/// In-process Native FFI Evaluator loading dynamic C/Rust libraries (`.so`/`.dll`).
+pub struct NativeFfiEvaluator {
+    pub lib_path: PathBuf,
+    pub symbol: String,
+    pub backend_id: String,
+    pub required_keys: Vec<String>,
+    lib: std::sync::Mutex<Option<Arc<DynamicLibrary>>>,
+}
+
+impl NativeFfiEvaluator {
+    pub fn new(lib_path: &str, symbol: &str) -> Self {
+        let path = PathBuf::from(lib_path);
+        let id_name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(lib_path)
+            .to_string();
+        Self {
+            backend_id: format!("native_{}_{}", id_name, symbol),
+            lib_path: path,
+            symbol: symbol.to_string(),
+            required_keys: Vec::new(),
+            lib: std::sync::Mutex::new(None),
+        }
+    }
+
+    pub fn with_required_keys(mut self, keys: &[String]) -> Self {
+        self.required_keys = keys.to_vec();
+        self
+    }
+}
+
+impl Evaluator for NativeFfiEvaluator {
+    fn evaluate(&self, inputs: &VarMap) -> Result<EvalResult, EvalError> {
+        let lib = {
+            let mut guard = self.lib.lock().map_err(|e| {
+                EvalError::BlackBoxFailure(format!("Failed to lock dynamic library mutex: {}", e))
+            })?;
+            if guard.is_none() {
+                *guard = Some(Arc::new(DynamicLibrary::load(&self.lib_path)?));
+            }
+            Arc::clone(guard.as_ref().unwrap())
+        };
+        let plugin_fn: AvenNativePluginFn = unsafe { lib.get_symbol(&self.symbol)? };
+
+        // Serialize inputs into null-terminated C string
+        let mut json_str = String::from("{");
+        let mut first = true;
+        let mut sorted_keys: Vec<&String> = inputs.values.keys().collect();
+        sorted_keys.sort();
+        for k in sorted_keys {
+            if !first {
+                json_str.push_str(", ");
+            }
+            use std::fmt::Write as FmtWrite;
+            let _ = write!(json_str, "\"{}\": {}", k, inputs.values[k]);
+            first = false;
+        }
+        json_str.push_str("}\0");
+
+        let mut output_buf = vec![0 as std::ffi::c_char; 65536];
+
+        let t_start = std::time::Instant::now();
+        let ret_code = unsafe {
+            plugin_fn(
+                json_str.as_ptr() as *const std::ffi::c_char,
+                output_buf.as_mut_ptr(),
+                output_buf.len(),
+            )
+        };
+        let elapsed_us = t_start.elapsed().as_secs_f64() * 1_000_000.0;
+
+        let out_c_str = unsafe { std::ffi::CStr::from_ptr(output_buf.as_ptr()) };
+        let out_str = out_c_str.to_str().map_err(|e| {
+            EvalError::MalformedOutput(format!(
+                "Native plugin '{}' in '{:?}' returned invalid UTF-8: {}",
+                self.symbol, self.lib_path, e
+            ))
+        })?;
+
+        let trimmed = out_str.trim();
+
+        if ret_code != 0 {
+            return Err(EvalError::BlackBoxFailure(format!(
+                "Native FFI plugin '{}' in '{:?}' returned non-zero code {}: {}",
+                self.symbol, self.lib_path, ret_code, trimmed
+            )));
+        }
+
+        if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
+            return Err(EvalError::MalformedOutput(format!(
+                "Malformed output: Native FFI plugin response must be a JSON object '{{...}}', found: '{}'",
+                trimmed
+            )));
+        }
+
+        let parsed_numbers = parse_json_object_numbers(trimmed);
+        if parsed_numbers.is_empty() {
+            return Err(EvalError::MalformedOutput(format!(
+                "Malformed output: Native FFI plugin '{}' returned no numeric key-value pairs",
+                self.symbol
+            )));
+        }
+
+        for req in &self.required_keys {
+            if !parsed_numbers.contains_key(req) {
+                return Err(EvalError::MalformedOutput(format!(
+                    "Schema validation failed: Native FFI plugin '{}' omitted required numeric field '{}'",
+                    self.symbol, req
+                )));
+            }
+        }
+
+        let timestamp_ms = parse_json_u64(trimmed, "timestamp_ms")
+            .or_else(|| parse_json_u64(trimmed, "timestamp"));
+        let ttl_ms = parse_json_u64(trimmed, "ttl_ms")
+            .or_else(|| parse_json_float(trimmed, "ttl").map(|s| (s * 1000.0) as u64));
+        let warnings = parse_json_string_array(trimmed, "warnings");
+
+        let mut out_values = inputs.values.clone();
+        out_values.extend(parsed_numbers);
+        for meta_key in FRESHNESS_KEYS {
+            out_values.remove(*meta_key);
+        }
+
+        Ok(EvalResult {
+            values: out_values,
+            backend_id: self.backend_id.clone(),
+            solve_time_us: elapsed_us,
+            timestamp_ms,
+            ttl_ms,
+            warnings,
+            payload_sha256: Some(sha256_hex(trimmed.as_bytes())),
         })
     }
 

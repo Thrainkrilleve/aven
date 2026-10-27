@@ -1,0 +1,13 @@
+// 01_first_relation.aven — Newton's Second Law of Motion
+// Demonstrates omnidirectional relational solving:
+// Any unknown can be solved automatically without rewriting the equation.
+
+relation Dynamics {
+    force = mass * acceleration
+}
+
+// Solve for Force given Mass and Acceleration:
+solve Dynamics with {
+    mass = 1200.0
+    acceleration = 3.5
+}

@@ -2,10 +2,10 @@
 
 **Declarative Invariant Programming & Relational Multi-Physics Engine**
 
-[![Build & Test](https://img.shields.io/badge/tests-44%20passed-brightgreen.svg)](#testing--verification)
-[![Zero Dependencies](https://img.shields.io/badge/dependencies-pure%20Rust%20std-blue.svg)](#zero-dependency-architecture)
-[![Throughput](https://img.shields.io/badge/IPC%20Throughput-352.9%20solves%2Fsec-orange.svg)](#high-performance-persistent-ipc-daemon)
-[![Median Latency](https://img.shields.io/badge/Median%20Latency-9.7%20ms-purple.svg)](#high-performance-persistent-ipc-daemon)
+[![Build & Test](https://img.shields.io/badge/tests-130%20passed-brightgreen.svg)](#key-capabilities)
+[![Zero Dependencies](https://img.shields.io/badge/dependencies-pure%20Rust%20std-blue.svg)](#key-capabilities)
+[![Throughput](https://img.shields.io/badge/IPC%20Throughput-1%2C720%20solves%2Fsec-orange.svg)](#live-multi-stream-flight-dynamics-mesh)
+[![Median Latency](https://img.shields.io/badge/Median%20Latency-0.56%20ms-purple.svg)](#live-multi-stream-flight-dynamics-mesh)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](#license)
 
 Aven is a domain-specific relational programming language and deterministic solver engine designed for physical systems, telemetry fusion, automated control, and multi-objective optimization. 
@@ -14,13 +14,28 @@ Unlike traditional imperative languages where functions require hardcoded input/
 
 ---
 
+## Documentation & Learning Path
+
+| Guide | Description | Target Audience |
+|:---|:---|:---|
+| **[Getting Started Guide](docs/GETTING_STARTED.md)** | 15-minute quickstart from installation to first model solve | First-time visitors |
+| **[Aven by Example (Cookbook)](docs/TUTORIAL.md)** | 10 progressive, executable code recipes covering units, C99/WASM codegen, and debugging | Hands-on learners |
+| **[Quick Reference Cheat Sheet](docs/CHEAT_SHEET.md)** | Syntax tables, built-in functions, units, CLI commands, and exit codes | Daily reference |
+| **[Engineering Standards](STANDARDS.md)** | Mathematical stability, IEEE-754 semantics, cryptographic ledger, and safety rules | Systems & compliance engineers |
+| **[Package Specification](docs/PACKAGE_SPEC.md)** | `Aven.toml` schema and `.avenpkg` SHA-256 sealed distribution format | Package authors |
+| **[Contributing Guide](CONTRIBUTING.md)** | Architectural ground rules ("Rust compiles, C runs") and PR guidelines | Contributors |
+| **[RFC Process](RFC_PROCESS.md)** | Language evolution lifecycle and decision framework | Protocol & compiler designers |
+
+---
+
 ## Key Capabilities
 
 - **Omnidirectional Relational Solving:** Declare physical relations naturally without specifying solve directions. Write $F = m \cdot a$ once, and solve for force, mass, or acceleration automatically depending on which inputs are observed.
 - **Pure-Rust Zero-Dependency Core:** The `avenc` compiler, lexer, parser, AST, evaluator, and fact ledger are written strictly in standard library Rust (`std`), requiring zero external crates.
-- **Direction-Pinning & C Code Generation (`avenc emit-c`):** Transpile declarative Aven blocks into standalone, branchless ANSI C code with no runtime solver overhead, suitable for bare-metal embedded targets and hard real-time control loops.
+- **Shared Memory Rings & Native In-Process FFI (`using shm(...)`, `using native(...)`):** Zero-socket memory-mapped ring buffers driving telemetry ingestion latency down to **$10.1\,\mu\text{s}$** ($< 100\,\mu\text{s}$ target), native C/Rust dynamic library loading (`.so` / `.dll`) executing in **$5.5\,\mu\text{s}$**, and closed-loop bidirectional actuation streamed directly back to physical control daemons.
+- **Direction-Pinning & C Code Generation (`avenc emit-c`, `--aeric-shim`):** Transpile declarative Aven blocks into standalone, branchless ANSI C code with no runtime solver overhead, suitable for bare-metal embedded targets and hard real-time control loops. Supports automated AERIC edge deployment bundles (`--aeric-shim --out-dir <dir>`) with deterministic SHA-256 model-identity hashing and non-aborting domain finiteness guards.
 - **First-Class External Adapters & Persistent IPC Daemons:** Connect relations to real-world sensors, telemetry streams, and black-box simulators via standard I/O subshells (`using external(...)`) or high-throughput persistent TCP/IPC daemons (`using ipc(...)`) executing in $< 3\,\text{ms}$.
-- **Immutable Fact Ledgers with Cryptographic Provenance:** Every solved fact is stamped into an append-only ledger carrying SHA-256 provenance hashes, cycle timestamps, and explicit time-to-live (`ttl_ms`) freshness tracking (`DECISION BLOCKED` / `HOLD` triggers automatically on stale data).
+- **Tamper-Evident Fact Ledgers:** Every settled fact extends a SHA-256 hash chain (optionally HMAC-signed with `AVEN_LEDGER_KEY`); facts from adapters record the SHA-256 of the adapter's raw output. `avenc run --ledger out.jsonl` writes the audit log and `avenc verify-ledger out.jsonl` detects any edit, deletion, reordering or truncation. Time-to-live (`ttl_ms`) freshness tracking blocks decisions on stale data (`DECISION BLOCKED`, exit code 3).
 - **Multi-Objective Pareto Optimization:** Explore multi-dimensional tradeoff frontiers across competing constraints (e.g., latency vs. compute capacity vs. cost).
 
 ---
@@ -62,7 +77,7 @@ Unlike traditional imperative languages where functions require hardcoded input/
 ┌──────────────────────────────────────────────────────────────┐
 │             Cryptographic Fact Ledger & Provenance           │
 │  - Immutable append-only audit trail                         │
-│  - SHA-256 payload integrity hashing                         │
+│  - SHA-256 hash chain, HMAC signing, payload hashes          │
 │  - Freshness (TTL) enforcement & stale state protection      │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -77,15 +92,18 @@ A relation describes mathematical invariants that must hold true. Any unknown ca
 ```aven
 // flight_mesh.aven — Atmospheric lapse & flight dynamics
 relation FlightAtmosphericDynamics {
-    // 1. ISA Tropospheric Barometric Lapse
+    // 1. ISA atmosphere: troposphere lapse capped at the 11 km tropopause, isothermal above
     surface_temp_k = surface_temp_c + 273.15
     lapse_rate = 0.0065
-    ambient_temp_k = surface_temp_k - (lapse_rate * baro_altitude_m)
+    tropopause_m = 11000.0
+    troposphere_m = (baro_altitude_m + tropopause_m - abs(baro_altitude_m - tropopause_m)) / 2.0
+    above_tropopause_m = baro_altitude_m - troposphere_m
+    ambient_temp_k = surface_temp_k - (lapse_rate * troposphere_m)
     ambient_temp_c = ambient_temp_k - 273.15
 
     // 2. Barometric Pressure & Air Density
-    pressure_ratio = 1.0 - ((lapse_rate * baro_altitude_m) / surface_temp_k)
-    ambient_pressure_pa = (surface_altim_hpa * 100.0) * (pressure_ratio ^ 5.2561)
+    pressure_ratio = 1.0 - ((lapse_rate * troposphere_m) / surface_temp_k)
+    ambient_pressure_pa = (surface_altim_hpa * 100.0) * (pressure_ratio ^ 5.2561) * exp(-(9.80665 / 287.058) * above_tropopause_m / ambient_temp_k)
     air_density_kg_m3 = ambient_pressure_pa / (287.058 * ambient_temp_k)
 
     // 3. High-Speed Aerodynamics & Compressibility
@@ -146,10 +164,13 @@ Fusing real-time commercial transponder data from **OpenSky Network** (4,700+ ac
 | **Subprocess Mode (`using external(...)`)** | `125.1 ms` | $7.4\,\text{solves/sec}$ | Baseline |
 | **Lazy-Import Subprocess** | `71.5 ms` | $54.1\,\text{solves/sec}$ | $1.7\times$ faster |
 | **Persistent IPC Daemon (`using ipc(...)`)** | **`9.7 ms`** | **`352.9 solves/sec`** | **$12.9\times$ faster / $47\times$ throughput** |
+| **`avenc bench`, live IPC daemon (one client)** | **`0.56 ms`** (p95 `0.71 ms`) | **`1,720 solves/sec`** | Badge figures |
+
+The first three rows come from the `stream_ringer.py` multi-worker harness, which includes its own process and worker overhead. The badge figures are the complete `avenc` solve (TCP round trip to the daemon plus the relational solve of `flight_mesh_ipc.aven`, 24 facts), measured with `avenc bench evaluations/flight_mesh/flight_mesh_ipc.aven --iterations 2000` against the live daemon: medians 0.561–0.566 ms and 1,700–1,734 solves/sec over three runs (2026-10-25, 8-core Windows workstation).
 
 - **In-Memory Physics Resolution:** $144.3\,\mu\text{s}$ compute time inside daemon.
 - **Round-Trip Loopback Settle:** $2.95\,\text{ms}$ total connection and solve duration.
-- **Enforced Safety Bounds:** Caught high-altitude commercial cruise violations ($> 43,000\,\text{ft}$) where linear tropospheric lapse cooled ambient air below safety envelope ($-80^\circ\text{C}$).
+- **Standard Atmosphere Verified:** Temperature, pressure and Mach number match an independent ISA computation for all 150 live aircraft checked, including 30 cruising above the 11 km tropopause (up to $43{,}000\,\text{ft}$); see `verify/live_atmosphere.py`. (An earlier model extended the tropospheric lapse rate above the tropopause and reported spurious $-80^\circ\text{C}$ bound violations at cruise altitude; that model error is fixed.)
 
 ### 8-Hour Overnight Weather Operations Monitor
 Continuous live validation across 5 major US airport hubs (Denver KDEN, Dallas KDFW, New York KJFK, Chicago KORD, Seattle KSEA):
@@ -218,9 +239,10 @@ f:\aven/
 │   ├── parser.rs                           # Recursive descent parser
 │   ├── evaluator.rs                        # Solver engine, SHA-256 hasher & IPC evaluator
 │   ├── codegen_c.rs                        # ANSI C code emitter
-│   ├── ledger.rs                           # Cryptographic fact ledger
+│   ├── optimize.rs                         # Simplex, nonlinear and interval branch-and-bound optimizer
+│   ├── ledger.rs                           # Hash-chained, signable fact ledger
 │   └── main.rs                             # CLI entrypoint & Pareto orchestrator
-├── tests/                                  # Integration test suite (44 unit tests)
+├── tests/                                  # Integration and documentation-claim tests (79)
 │   └── test_suite.rs                       # Comprehensive verification suite
 ├── examples/                               # Canonical domain specifications
 │   ├── aerodynamics.aven                   # Compressible flight dynamics
@@ -254,10 +276,23 @@ Aven includes a comprehensive test suite verifying forward evaluation, backward 
 cargo test
 ```
 ```text
-running 44 tests
-............................................
-test result: ok. 44 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.57s
+test result: ok. 30 passed; 0 failed   (tests/claims.rs: every documented claim)
+test result: ok. 49 passed; 0 failed   (tests/test_suite.rs)
 ```
+
+---
+
+### Verifying the claims
+
+`verify/` checks Aven against independent references (install `scipy` and `highspy` in a Python environment first):
+
+| Harness | What it proves |
+| :--- | :--- |
+| `verify/oracle.py all` | Answers match HiGHS and SciPy on random integer, linear, infeasible/unbounded, nonconvex-integer and smooth models; optimization results are reported `proven` only when certified |
+| `verify/c_diff.py` | `avenc emit-c` output compiles warning-free, is branchless, and matches `avenc run` exactly |
+| `verify/fuzz.py` | Malformed and adversarial input never crashes, panics or hangs |
+| `verify/ledger_tamper.py` | Every tampering technique on an audit log is detected |
+| `verify/live_atmosphere.py` | The flight model matches the standard atmosphere on live aircraft |
 
 ---
 

@@ -1,0 +1,25 @@
+// 03_optimization_and_bounds.aven — Mixed-Integer Optimization & Bounds
+// Demonstrates discrete integer relaxation, inequality constraints, and objectives.
+
+relation ServerProvisioning {
+    int nodes
+    total_cores = nodes * cores_per_node
+    total_ram_gb = nodes * ram_per_node_gb
+    total_cost_monthly = nodes * node_monthly_cost
+    
+    // Invariant constraints:
+    total_cores >= required_cores
+    total_ram_gb >= required_ram_gb
+}
+
+// Solve for minimal server node count satisfying compute requirements:
+solve ServerProvisioning with {
+    cores_per_node = 16.0
+    ram_per_node_gb = 64.0
+    node_monthly_cost = 145.0
+    
+    required_cores = 100.0
+    required_ram_gb = 350.0
+    
+    minimize(nodes)
+}
