@@ -358,13 +358,13 @@ or set AVEN_LEDGER_KEY), head 1e61a9c5de48af4c628242f5088dba27a5051ed1a3270057c5
           <p><code>avenc why</code> prints how a value was derived, down to the bindings it came from:</p>
           <div class="code"><pre>avenc why examples/server_capacity.aven allocated_workers</pre></div>
           <p><code>avenc debug</code> replays a run. With <code>--what-if</code> it branches the timeline and shows the effect of a change on every output:</p>
-          <div class="code"><pre>avenc debug thermostat.aven --what-if "current_temp_c=35.0"</pre></div>
-          <div class="code output"><pre>Counterfactual What-If Result (mutating 'current_temp_c' = 35 at t0):
+          <div class="code"><pre>avenc debug examples/thermostat.aven --what-if "current_temp_c=35.0"</pre></div>
+          <div class="code output"><pre>Counterfactual What-If Result (mutating 'current_temp_c' = 35.0000 at t0):
   Output Variable                 Nominal         Branch          Delta
   --------------------------------------------------------------------
-  compressor_amps                 -3.7500        -7.0000        -3.2500
-  cooling_power_w               -900.0000     -1680.0000      -780.0000
-  temp_delta_c                    -7.5000       -14.0000        -6.5000</pre></div>
+  compressor_amps                  3.7500         6.5000        +2.7500
+  cooling_power_w                900.0000      1560.0000      +660.0000
+  temp_delta_c                     7.5000        13.0000        +5.5000</pre></div>
           <p>In the interactive debugger: <code>step</code>, <code>prev</code>, <code>goto &lt;n&gt;</code>, <code>why &lt;var&gt;</code>, <code>what-if &lt;var&gt;=&lt;val&gt;</code>, <code>diff</code>, <code>vars</code>, <code>help</code>, <code>quit</code>.</p>
         </section>
 
