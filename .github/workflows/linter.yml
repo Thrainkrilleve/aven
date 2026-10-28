@@ -59,6 +59,25 @@ jobs:
           for file in examples/*.aven benchmarks/rhel_llm/*.aven; do
             if [ -f "$file" ]; then
               echo "Validating Aven model: $file"
-              ./target/release/avenc run "$file" || exit 1
+              case "$file" in
+                */storage_cluster.aven)
+                  # Intentional under-determination demo (see its header): avenc
+                  # must DETECT it (non-zero exit) and name the free variables,
+                  # not settle it. Treat a clean settle as the failure here.
+                  if ./target/release/avenc run "$file" > /tmp/sc_validate.out 2>&1; then
+                    echo "ERROR: $file was expected to be under-determined but settled"
+                    exit 1
+                  fi
+                  grep -q "UNDER-DETERMINED SYSTEM" /tmp/sc_validate.out || {
+                    echo "ERROR: $file did not emit the under-determination diagnostic"
+                    cat /tmp/sc_validate.out
+                    exit 1
+                  }
+                  echo "  (expected under-determined; diagnostic emitted — OK)"
+                  ;;
+                *)
+                  ./target/release/avenc run "$file" || exit 1
+                  ;;
+              esac
             fi
           done
