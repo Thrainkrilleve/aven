@@ -1,6 +1,6 @@
 # Aven Language & Model Guide for AI Models and Systems Engineers
 
-**Version:** 0.6.0  
+**Version:** 0.9.0  
 **Target Audience:** LLMs, Autonomous Coding Agents, Prompt Engineers, and Systems Architects.
 
 ---
