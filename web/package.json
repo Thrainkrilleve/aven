@@ -2,12 +2,11 @@
   "name": "avenc-web",
   "type": "module",
   "version": "1.0.0",
-  "description": "Scientific facing website, WebAssembly playground, and D1 package registry for Aven",
+  "description": "Website and in-browser solver demo for Aven",
   "main": "src/index.ts",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "build:models": "cargo build --release --manifest-path ../Cargo.toml && node scripts/build-models.mjs",
     "typecheck": "tsc --noEmit",
     "db:migrate:local": "wrangler d1 migrations apply avenc_db --local",
     "db:migrate:prod": "wrangler d1 migrations apply avenc_db --remote"

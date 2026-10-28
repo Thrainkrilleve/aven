@@ -24,6 +24,10 @@ every page in web/public/:
     SHA-256 hash chain.
   * A key figure on the homepage names a committed log in data-log and a number in
     data-figure. The visible value is that number, and the log contains it.
+  * README.md, web/public/, and examples/*.aven do not mention avenc.dev/weather
+    or web/src/weather/. That page and its worker were removed.
+  * The RELATION template in web/public/solver-demo.js has the same assignments,
+    in the same order, as the relation block in examples/server_capacity.aven.
 
 Exits non-zero when anything does not match.
 """
@@ -151,6 +155,79 @@ def merkle_problems():
     return problems
 
 
+RETIRED_WEATHER_NEEDLES = ("avenc.dev/weather", "web/src/weather/")
+TEXT_SUFFIXES = {".md", ".html", ".js", ".css", ".svg", ".txt", ".sh", ".ps1", ".json", ".aven"}
+
+
+def normalized_assignments(body):
+    """Assignment lines in source order, with comments and spacing removed."""
+    found = []
+    for raw in body.splitlines():
+        code = raw.split("//", 1)[0].strip()
+        match = re.fullmatch(r"([A-Za-z_]\w*)\s*=\s*(.+)", code)
+        if not match:
+            continue
+        rhs = re.sub(r"\s+", "", match.group(2))
+        found.append(f"{match.group(1)}={rhs}")
+    return found
+
+
+def relation_assignments(source):
+    """Assignments inside the first `relation` block, or None when there is no block."""
+    match = re.search(r"relation\s+\w+\s*\{(.*?)\n\}", source, re.S)
+    if not match:
+        return None
+    return normalized_assignments(match.group(1))
+
+
+def retired_weather_site_problems():
+    """The live radar page and its worker are gone. These paths must not be claimed."""
+    paths = [ROOT / "README.md"]
+    public = ROOT / "web" / "public"
+    if public.is_dir():
+        paths.extend(
+            path
+            for path in sorted(public.rglob("*"))
+            if path.is_file() and path.suffix.lower() in TEXT_SUFFIXES
+        )
+    paths.extend(sorted((ROOT / "examples").glob("*.aven")))
+    problems = []
+    seen = set()
+    for path in paths:
+        if path in seen or not path.is_file():
+            continue
+        seen.add(path)
+        text = path.read_text(encoding="utf-8")
+        for needle in RETIRED_WEATHER_NEEDLES:
+            if needle in text:
+                problems.append(f"{path.relative_to(ROOT)} mentions {needle}")
+    return problems
+
+
+def demo_relation_problems():
+    """The browser demo's copied relation must match examples/server_capacity.aven."""
+    aven_path = ROOT / "examples" / "server_capacity.aven"
+    js_path = ROOT / "web" / "public" / "solver-demo.js"
+    if not aven_path.is_file() or not js_path.is_file():
+        return ["solver demo relation gate is missing examples/server_capacity.aven or web/public/solver-demo.js"]
+    js = js_path.read_text(encoding="utf-8")
+    template = re.search(r"const RELATION = `([\s\S]*?)`;", js)
+    if template is None:
+        return ["web/public/solver-demo.js has no RELATION template"]
+    model = relation_assignments(aven_path.read_text(encoding="utf-8"))
+    demo = relation_assignments(template.group(1))
+    if model is None:
+        return ["examples/server_capacity.aven has no relation block"]
+    if demo is None:
+        return ["web/public/solver-demo.js RELATION template has no relation block"]
+    if model != demo:
+        return [
+            "web/public/solver-demo.js RELATION assignments differ from "
+            f"examples/server_capacity.aven: {demo} vs {model}"
+        ]
+    return []
+
+
 def homepage_figure_problems():
     """Every homepage timing figure is a number copied from a committed log."""
     page = ROOT / "web" / "public" / "index.html"
@@ -196,6 +273,8 @@ def main():
     problems = toolchain_problems()
     problems.extend(merkle_problems())
     problems.extend(homepage_figure_problems())
+    problems.extend(retired_weather_site_problems())
+    problems.extend(demo_relation_problems())
     compiled, fragments, outputs = 0, 0, 0
 
     for path in doc_files():
