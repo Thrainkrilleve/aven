@@ -32,6 +32,8 @@ every page in web/public/:
     https://avenc.dev/<file> for every other HTML page in web/public/ except
     404.html. web/public/robots.txt references that sitemap and declares
     Content-Signal ai-train=no, search=yes, and ai-input=no.
+  * SECURITY.md names the root Cargo.toml version as the supported release
+    and points vulnerability reports at the GitHub advisory form.
 
 Exits non-zero when anything does not match.
 """
@@ -313,6 +315,40 @@ def site_map_problems():
     return problems
 
 
+ADVISORY_URL = "https://github.com/Thrainkrilleve/aven/security/advisories/new"
+
+
+def package_version():
+    """The [package] version in the root Cargo.toml."""
+    text = (ROOT / "Cargo.toml").read_text(encoding="utf-8")
+    package = re.search(r"(?ms)^\[package\](.*?)(?:^\[|\Z)", text)
+    body = package.group(1) if package else ""
+    match = re.search(r'(?m)^version = "([^"]+)"', body)
+    return match.group(1) if match else None
+
+
+def security_policy_problems():
+    """SECURITY.md must name the compiler version Cargo.toml actually ships."""
+    problems = []
+    version = package_version()
+    policy_path = ROOT / "SECURITY.md"
+    policy = policy_path.read_text(encoding="utf-8") if policy_path.is_file() else ""
+    if version is None:
+        return ["Cargo.toml [package] has no version"]
+    supported = rf"^\| {re.escape(version)} +\| :white_check_mark: +\|$"
+    unsupported = rf"^\| < {re.escape(version)} +\| :x: +\|$"
+    sentence = f"That version is {version}."
+    if sentence not in policy:
+        problems.append(f"SECURITY.md is missing the sentence {sentence!r}")
+    if not re.search(supported, policy, re.M):
+        problems.append(f"SECURITY.md is missing the supported row for Cargo.toml version {version}")
+    if not re.search(unsupported, policy, re.M):
+        problems.append(f"SECURITY.md is missing the unsupported row for versions before {version}")
+    if ADVISORY_URL not in policy:
+        problems.append(f"SECURITY.md is missing {ADVISORY_URL}")
+    return problems
+
+
 def main():
     if not AVENC.exists():
         sys.exit(f"{AVENC} not found; run `cargo build --release` first")
@@ -324,6 +360,7 @@ def main():
     problems.extend(retired_weather_site_problems())
     problems.extend(demo_relation_problems())
     problems.extend(site_map_problems())
+    problems.extend(security_policy_problems())
     compiled, fragments, outputs = 0, 0, 0
 
     for path in doc_files():
