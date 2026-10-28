@@ -35,6 +35,8 @@ web/
     ├── styles.css
     ├── wasm/solver.wasm    # Built by solver-wasm/build.sh
     ├── install.sh, install.ps1
+    ├── robots.txt
+    ├── sitemap.xml
     ├── favicon.svg
     └── _headers
 ```
@@ -88,6 +90,8 @@ The custom domain `avenc.dev` is set by `routes` in `wrangler.jsonc`.
 
 | Endpoint | Method | Description |
 |:---|:---:|:---|
+| `/robots.txt` | `GET` | Crawl rules (`text/plain`). Allows `/`, disallows `/api/`, and declares Content-Signal preferences. |
+| `/sitemap.xml` | `GET` | Public page URLs. `scripts/check_docs.py` fails if these drift from the HTML pages. |
 | `/install.sh`, `/install.ps1` | `GET` | Static installers (build from source with `cargo install`). |
 | `/p/:id` | `GET` | Old share links. Redirects to `/#demo`. The id is not loaded. |
 | `/api/v1/stats` | `GET` | Row counts from D1. |

@@ -28,6 +28,10 @@ every page in web/public/:
     or web/src/weather/. That page and its worker were removed.
   * The RELATION template in web/public/solver-demo.js has the same assignments,
     in the same order, as the relation block in examples/server_capacity.aven.
+  * web/public/sitemap.xml lists https://avenc.dev/ for index.html and
+    https://avenc.dev/<file> for every other HTML page in web/public/ except
+    404.html. web/public/robots.txt references that sitemap and declares
+    Content-Signal ai-train=no, search=yes, and ai-input=no.
 
 Exits non-zero when anything does not match.
 """
@@ -39,6 +43,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -265,6 +270,49 @@ def homepage_figure_problems():
     return problems
 
 
+SITEMAP_NS = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+SITEMAP_SKIP = {"404.html"}
+CONTENT_SIGNAL = "Content-Signal: ai-train=no, search=yes, ai-input=no"
+SITEMAP_LINE = "Sitemap: https://avenc.dev/sitemap.xml"
+
+
+def public_page_locs():
+    """Canonical URLs for HTML pages a crawler should fetch. 404.html is the error page."""
+    public = ROOT / "web" / "public"
+    names = sorted(path.name for path in public.glob("*.html") if path.name not in SITEMAP_SKIP)
+    locs = []
+    if "index.html" in names:
+        locs.append("https://avenc.dev/")
+    locs.extend(f"https://avenc.dev/{name}" for name in names if name != "index.html")
+    return locs
+
+
+def site_map_problems():
+    """The sitemap and robots.txt must name the same public pages the site serves."""
+    problems = []
+    sitemap_path = ROOT / "web" / "public" / "sitemap.xml"
+    robots_path = ROOT / "web" / "public" / "robots.txt"
+    expected = public_page_locs()
+    try:
+        root = ET.parse(sitemap_path).getroot()
+    except (ET.ParseError, OSError) as exc:
+        return [f"web/public/sitemap.xml is not valid XML: {exc}"]
+    locs = [
+        (element.text or "").strip()
+        for element in root.findall("sm:url/sm:loc", SITEMAP_NS)
+    ]
+    if locs != expected:
+        problems.append(
+            f"web/public/sitemap.xml locs {locs} differ from public pages {expected}"
+        )
+    robots = robots_path.read_text(encoding="utf-8") if robots_path.is_file() else ""
+    if CONTENT_SIGNAL not in robots:
+        problems.append(f"web/public/robots.txt is missing {CONTENT_SIGNAL!r}")
+    if SITEMAP_LINE not in robots:
+        problems.append(f"web/public/robots.txt is missing {SITEMAP_LINE!r}")
+    return problems
+
+
 def main():
     if not AVENC.exists():
         sys.exit(f"{AVENC} not found; run `cargo build --release` first")
@@ -275,6 +323,7 @@ def main():
     problems.extend(homepage_figure_problems())
     problems.extend(retired_weather_site_problems())
     problems.extend(demo_relation_problems())
+    problems.extend(site_map_problems())
     compiled, fragments, outputs = 0, 0, 0
 
     for path in doc_files():
