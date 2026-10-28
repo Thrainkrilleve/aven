@@ -39,6 +39,23 @@ const OUTPUTS = [
 // Outputs that invert cleanly for a backward solve (linear in the freed input).
 const REVERSE_TARGETS = ["payload_gbps", "wire_rate_gbps", "total_ram_needed"];
 
+// Starting point for the free-form editor. Shows both directions in one model:
+// mass is solved backward from force, then momentum is filled forward.
+const EDITOR_EXAMPLE = `// Edit this model and press Run (Ctrl/Cmd+Enter).
+// Equations are invariants, not assignments: leave a variable out of the
+// solve block and Aven solves for it — forward or backward.
+relation Motion {
+    force    = mass * acceleration
+    momentum = mass * velocity
+}
+
+solve Motion with {
+    force        = 4200
+    acceleration = 5
+    velocity     = 12
+}
+`;
+
 class Solver {
   constructor(instance) {
     this.ex = instance.exports;
@@ -94,6 +111,17 @@ function buildSource(bindings) {
   return `${RELATION}\n\nsolve WorkerScaling with {\n${lines.join("\n")}\n}\n`;
 }
 
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+// Turn the solver's Debug-formatted error into a readable one line.
+function formatErr(res) {
+  const m = /message: "(.*?)", line: (\d+), col: (\d+)/.exec(res.error || "");
+  if (m) return `${res.stage} error (line ${m[2]}, col ${m[3]}): ${m[1]}`;
+  return `${res.stage || "solver"} error: ${res.error || "unknown"}`;
+}
+
 export async function mountDemo(root) {
   const statusEl = root.querySelector("#demo-status");
   let solver;
@@ -119,6 +147,12 @@ export async function mountDemo(root) {
   const freedSel = root.querySelector("#demo-freed");
   const targetSel = root.querySelector("#demo-target");
   const targetInput = root.querySelector("#demo-target-value");
+  const editorPane = root.querySelector("#demo-editor-pane");
+  const editorEl = root.querySelector("#demo-editor");
+  const runBtn = root.querySelector("#demo-run");
+  const editorOutEl = root.querySelector("#demo-editor-out");
+  const srcTitle = root.querySelector("#demo-src-title");
+  const leftTitle = root.querySelector("#demo-left-title");
 
   // Populate the reverse-mode selectors.
   for (const i of INPUTS) {
@@ -161,15 +195,68 @@ export async function mountDemo(root) {
   function setMode(next) {
     mode = next;
     modeBtns.forEach((b) => b.setAttribute("aria-selected", String(b.dataset.mode === next)));
-    reverseEl.hidden = next !== "reverse";
+    const isEditor = next === "editor";
+    const isReverse = next === "reverse";
+    reverseEl.hidden = !isReverse;
+    slidersEl.hidden = isEditor;
+    editorPane.hidden = !isEditor;
+    outputsEl.hidden = isEditor; // fixed sizing-model grid
+    editorOutEl.hidden = !isEditor; // generic settled-values grid
+    srcTitle.hidden = isEditor;
+    srcEl.hidden = isEditor;
+    leftTitle.textContent = isEditor ? "Your model" : "Inputs";
+    const resetBtn = root.querySelector("#demo-reset");
+    if (resetBtn) resetBtn.hidden = isEditor;
     // In reverse mode the freed input's slider is disabled (the solver sets it).
     for (const row of slidersEl.querySelectorAll(".slider-row")) {
-      const isFreed = next === "reverse" && row.dataset.name === freed;
+      const isFreed = isReverse && row.dataset.name === freed;
       row.classList.toggle("is-freed", isFreed);
       row.querySelector("input").disabled = isFreed;
     }
-    recompute();
+    if (isEditor) runEditor();
+    else recompute();
   }
+
+  function runEditor() {
+    const source = editorEl.value;
+    const t0 = performance.now();
+    let res;
+    try {
+      res = solver.solve(source);
+    } catch (e) {
+      statusEl.textContent = `solver error: ${e.message}`;
+      statusEl.className = "status-bad";
+      return;
+    }
+    const us = (performance.now() - t0) * 1000;
+    if (!res.ok) {
+      statusEl.textContent = formatErr(res);
+      statusEl.className = "status-bad";
+      editorOutEl.innerHTML = "";
+      timingEl.textContent = "";
+      return;
+    }
+    const keys = Object.keys(res.values).sort();
+    editorOutEl.innerHTML = keys
+      .map(
+        (k) =>
+          `<div class="output"><div class="output-name">${escapeHtml(k)}</div>` +
+          `<div class="output-val">${fmt(res.values[k])}</div></div>`
+      )
+      .join("");
+    statusEl.textContent = `Solved — ${keys.length} value${keys.length === 1 ? "" : "s"}`;
+    statusEl.className = "status-ok";
+    timingEl.textContent = `${us < 1 ? us.toFixed(2) : Math.round(us)} µs in WebAssembly`;
+  }
+
+  editorEl.value = EDITOR_EXAMPLE;
+  runBtn.addEventListener("click", runEditor);
+  editorEl.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      e.preventDefault();
+      runEditor();
+    }
+  });
 
   modeBtns.forEach((b) => b.addEventListener("click", () => setMode(b.dataset.mode)));
   freedSel.addEventListener("change", () => {
