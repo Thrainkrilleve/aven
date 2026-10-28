@@ -8,6 +8,9 @@
   ],
   "workers_dev": true,
   "preview_urls": true,
+  "placement": {
+    "mode": "smart"
+  },
   "routes": [
     {
       "pattern": "avenc.dev",
