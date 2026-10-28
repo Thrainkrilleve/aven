@@ -79,6 +79,16 @@ function num(name, v) {
   return Number.isFinite(v) ? v : 0;
 }
 
+// Paint the track's filled portion up to the thumb. The CSS track reads the
+// --fill custom property (default 50%); without this the fill never tracks.
+function setFill(range) {
+  const min = parseFloat(range.min);
+  const max = parseFloat(range.max);
+  const v = parseFloat(range.value);
+  const pct = max > min ? ((v - min) / (max - min)) * 100 : 0;
+  range.style.setProperty("--fill", `${Math.max(0, Math.min(100, pct))}%`);
+}
+
 function buildSource(bindings) {
   const lines = Object.entries(bindings).map(([k, v]) => `    ${k} = ${v}`);
   return `${RELATION}\n\nsolve WorkerScaling with {\n${lines.join("\n")}\n}\n`;
@@ -138,9 +148,11 @@ export async function mountDemo(root) {
       `<input type="range" min="${i.min}" max="${i.max}" step="${i.step}" value="${i.def}">`;
     const range = row.querySelector("input");
     const out = row.querySelector("output");
+    setFill(range);
     range.addEventListener("input", () => {
       state[i.name] = parseFloat(range.value);
       out.textContent = fmt(state[i.name]);
+      setFill(range);
       recompute();
     });
     slidersEl.appendChild(row);
@@ -179,7 +191,9 @@ export async function mountDemo(root) {
       for (const i of INPUTS) {
         state[i.name] = i.def;
         const row = slidersEl.querySelector(`.slider-row[data-name="${i.name}"]`);
-        row.querySelector("input").value = i.def;
+        const range = row.querySelector("input");
+        range.value = i.def;
+        setFill(range);
         row.querySelector("output").textContent = fmt(i.def);
       }
       recompute();
@@ -227,7 +241,9 @@ export async function mountDemo(root) {
       // Reflect the solved value onto its (disabled) slider.
       const row = slidersEl.querySelector(`.slider-row[data-name="${freed}"]`);
       if (row && isFinite(solved)) {
-        row.querySelector("input").value = solved;
+        const range = row.querySelector("input");
+        range.value = solved;
+        setFill(range);
         row.querySelector("output").textContent = fmt(solved);
       }
     } else {
