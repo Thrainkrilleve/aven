@@ -27,12 +27,8 @@
       "migrations_dir": "./migrations"
     }
   ],
-  // The live weather nowcast (/weather) runs every 5 minutes
-  "triggers": {
-    "crons": ["*/5 * * * *"]
-  },
   "vars": {
-    "AVEN_VERSION": "0.6.0",
+    "AVEN_VERSION": "0.9.0",
     "REGISTRY_URL": "https://avenc.dev",
     "ENVIRONMENT": "production"
   },

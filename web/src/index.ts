@@ -1,15 +1,6 @@
 import { Env, PackageRecord, SharedModelRecord } from "./types";
-import { runCycle } from "./weather/cycle";
-import { handleWeatherApi } from "./weather/api";
 
 export default {
-  // Cron trigger (wrangler.jsonc): one run of the live weather nowcast behind /weather
-  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(
-      runCycle(env).then((r) => console.log(`weather cycle: ${r.runs} site(s), ${r.verified} verified, ${r.requests} requests`))
-    );
-  },
-
   // Files in public/ are served directly by the static-assets layer, so this worker only
   // runs for paths with no matching file: the API, share redirects, and the 404 page.
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -19,7 +10,7 @@ export default {
     // Shortlink redirects for shared models (/p/:id -> /?model=:id)
     if (pathname.startsWith("/p/") && pathname.length > 3) {
       const modelId = pathname.slice(3).trim();
-      return Response.redirect(`${url.origin}/?model=${encodeURIComponent(modelId)}#playground`, 302);
+      return Response.redirect(`${url.origin}/?model=${encodeURIComponent(modelId)}#demo`, 302);
     }
 
     if (pathname.startsWith("/api/v1/")) {
@@ -47,15 +38,6 @@ async function handleApi(request: Request, env: Env, pathname: string): Promise<
 
   if (method === "OPTIONS") {
     return new Response(null, { headers: jsonHeaders });
-  }
-
-  if (pathname.startsWith("/api/v1/weather/") && method === "GET") {
-    try {
-      const res = await handleWeatherApi(env, new URL(request.url), jsonHeaders);
-      if (res) return res;
-    } catch (err: any) {
-      return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: jsonHeaders });
-    }
   }
 
   // GET /api/v1/stats
