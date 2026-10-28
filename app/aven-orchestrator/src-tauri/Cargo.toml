@@ -9,13 +9,24 @@ edition = "2021"
 rust-version = "1.60"
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { git = "https://github.com/tauri-apps/tauri", rev = "899ca2105ffd06293013b6d2bff4416987d99010" }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { git = "https://github.com/tauri-apps/tauri", rev = "899ca2105ffd06293013b6d2bff4416987d99010" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 avenc = { path = "../../.." }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+
+# Tauri 2.12.5 resolves glib 0.18.5 through gtk 0.18 (GHSA-wrw7-89jp-8q8g).
+# These revisions are the gtk 0.19 ports, which resolve glib 0.22.
+# Cargo.lock must not contain a glib package older than 0.20.0.
+[patch.crates-io]
+webkit2gtk = { git = "https://github.com/tauri-apps/webkit2gtk-rs", rev = "f5c3825c3f21c44ce346a5aa42e8c33a762f9f72" }
+webkit2gtk-sys = { git = "https://github.com/tauri-apps/webkit2gtk-rs", rev = "f5c3825c3f21c44ce346a5aa42e8c33a762f9f72" }
+tao = { git = "https://github.com/tauri-apps/tao", rev = "08660027c723e09a45b10badf60a73a661c94a95" }
+wry = { git = "https://github.com/tauri-apps/wry", rev = "327242ae73301c5e34dcc158e31ae453e8afe837" }
+muda = { git = "https://github.com/tauri-apps/muda", rev = "6cfbefc29ecb6e511b31f57cf2aa804b44160834" }
+libappindicator = { git = "https://github.com/tauri-apps/libappindicator-rs", rev = "f2617d92288e2f0a2f998d3cd46c003e3a5c6d93" }
