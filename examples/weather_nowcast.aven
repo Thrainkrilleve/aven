@@ -1,13 +1,12 @@
 // examples/weather_nowcast.aven — Live weather cell and radar nowcast, as a forward block
 //
 // The physics of evaluations/possible/weather-predict.aven written in evaluation order so it
-// compiles to C and WebAssembly. avenc.dev/weather runs the WebAssembly build of this file
-// every few minutes on live U.S. government data. verify/weather_reference.py checks that
-// it agrees with the relational model, MetPy and NumPy.
+// compiles to C and WebAssembly. verify/weather_reference.py checks that this forward
+// block agrees with the relational model, MetPy and NumPy.
 //
-// The solve block below is one live reading, so the file runs on its own: the scheduled
-// job's run for HGX storm cell S5 near Freeport, TX at 17:30 UTC on 2026-10-27 (radar
-// image 17:23:48 UTC; METAR KBQX and the KBQX-KBYY-KGVW triangle; winds aloft from PSX).
+// The solve block below is one live reading, so the file runs on its own: HGX storm cell
+// S5 near Freeport, TX at 17:30 UTC on 2026-10-27 (radar image 17:23:48 UTC; METAR KBQX
+// and the KBQX-KBYY-KGVW triangle; winds aloft from PSX).
 //   avenc run examples/weather_nowcast.aven
 
 forward WeatherNowcast {

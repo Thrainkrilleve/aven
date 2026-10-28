@@ -180,9 +180,6 @@ The `stream_ringer.py` rows include the harness's own process and worker overhea
 
 Both `*_audit_ledger.jsonl` files are the harnesses' per-cycle logs, not `avenc` hash-chained ledgers, so `avenc verify-ledger` does not apply to them.
 
-### Live Radar Nowcast ([avenc.dev/weather](https://avenc.dev/weather))
-Every five minutes the website's scheduled job picks the strongest storm cells tracked by the NEXRAD radar network, gathers data for each from NOAA (nowCOAST radar mosaic, METAR, winds aloft), the NWS (observations, alerts, hourly forecast) and USGS (rain gauges), and runs [`examples/weather_nowcast.aven`](examples/weather_nowcast.aven) compiled to WebAssembly. Its forecasts of radar reflectivity 15, 30 and 60 minutes ahead (along the steering wind, along the radar-measured storm motion, and persistence as the baseline) are scored against the archived radar image nearest each valid time, and the page shows every input, request, cross-check and score. Any stored run can be re-run in the browser from the same module. `verify/weather_reference.py` checks the model against its relational form, MetPy and NumPy (150 random states, 0 failures). The job and page are in `web/src/weather/` and `web/public/weather.*`; `web/scripts/weather-local.mjs` runs them locally.
-
 ---
 
 ## CLI Toolchain Reference (`avenc`)

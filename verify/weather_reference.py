@@ -125,7 +125,7 @@ def main():
             failures.append(f"case {case}: {err}")
             continue
 
-        # The forward block (what avenc.dev/weather runs as WebAssembly) on the same state
+        # The forward block (examples/weather_nowcast.aven) on the same state.
         fb = dict(b)
         fb.update({
             "metar_altimeter_hpa": rng.uniform(980, 1040), "station_elev_m": rng.uniform(0, 2500),

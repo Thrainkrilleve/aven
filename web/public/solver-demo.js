@@ -37,7 +37,7 @@ const OUTPUTS = [
 ];
 
 // Outputs that invert cleanly for a backward solve (linear in the freed input).
-const REVERSE_TARGETS = ["payload_gbps", "wire_rate_gbps", "total_ram_needed"];
+const REVERSE_TARGETS = ["payload_gbps", "wire_rate_gbps"];
 
 // Starting point for the free-form editor. Shows both directions in one model:
 // mass is solved backward from force, then momentum is filled forward.

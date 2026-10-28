@@ -7,10 +7,9 @@ export default {
     const url = new URL(request.url);
     const pathname = url.pathname;
 
-    // Shortlink redirects for shared models (/p/:id -> /?model=:id)
+    // Old share links (/p/:id) land on the live demo. The id is not loaded.
     if (pathname.startsWith("/p/") && pathname.length > 3) {
-      const modelId = pathname.slice(3).trim();
-      return Response.redirect(`${url.origin}/?model=${encodeURIComponent(modelId)}#demo`, 302);
+      return Response.redirect(`${url.origin}/#demo`, 302);
     }
 
     if (pathname.startsWith("/api/v1/")) {

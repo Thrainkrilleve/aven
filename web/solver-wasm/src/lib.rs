@@ -8,9 +8,10 @@
 //   solve(ptr, len)       -> out_ptr    // out buffer = [u32 len LE][json bytes]
 //   dealloc(ptr, len)                   // free a buffer handed back to JS
 //
-// The solve path is exactly what `avenc run` does for a relation: lex, parse,
-// load every Relation block's equations/integer vars, apply the solve block's
-// constraints/objectives/bindings, and run the Newton/optimizing solver.
+// `solve` lexes, parses, loads every Relation block's equations and integer
+// vars, applies the solve block's constraints, objectives and bindings, and
+// calls `SolverEngine`. `avenc run` also checks units and writes the
+// hash-chained ledger; this module does neither.
 
 use avenc::ast::BlockKind;
 use avenc::lexer::Lexer;
