@@ -23,7 +23,7 @@ Core loop (the first thing anyone sees):
 - **Solve panel** — forward from your inputs, or leave any variable blank and it solves backward for it.
 - **`why` tree** — the derivation of any value, back to the inputs.
 - **Save / open** real model files.
-- **Import / export** — read a spreadsheet's values in; export a model, a results **report (PDF/HTML)**, or back to a spreadsheet. *This is make-or-break, not a nice-to-have: spreadsheets win on sharing, so Aven files have to travel too.*
+- **Import / export** — read a spreadsheet's values in (CSV first, then `.xlsx` cell ranges; formulas and live links are out of scope for now); export a model, a results **report (HTML first, PDF next)**, or back to a spreadsheet. *This is make-or-break, not a nice-to-have: spreadsheets win on sharing, so Aven files have to travel too.*
 - **Graphs** and (later) **live data** — the things a VS Code linter fundamentally can't do.
 
 Alongside it:
@@ -37,9 +37,9 @@ Everything from the current orchestrator screen that isn't in the core loop goes
 ## 4. Why us (lead with the first two)
 
 1. **Units that refuse a bad conversion** — the everyday win. The mistake spreadsheets make silently.
-2. **Solve in any direction** — spec the output, recover the input. No spreadsheet does this.
+2. **Solve in any direction** — spec the output, recover the input. No spreadsheet does this by default, for any variable, from one model (Excel's Goal Seek and Solver reach one target at a time, each set up by hand).
 3. **Show your work** — a shareable report backed by a tamper-evident ledger. Framed as receipts, not cryptography; the hash chain only matters when someone audits, and most days nobody does.
-4. **One static binary, zero dependencies, air-gappable** — drop it in a locked-down shop and get an answer, no stack to install.
+4. **Air-gappable, no stack to install** — the `avenc` CLI and the emitted C are a single static binary with zero dependencies. The IDE is a Tauri app, so on Windows it needs the WebView2 runtime; we bundle that in the installer, because locked-down shops sometimes strip it. The air-gap claim is about *no network and no toolchain*, not literally one file for the GUI.
 
 ## 5. Who first (beachhead)
 
@@ -67,11 +67,15 @@ Students, makers, and hobbyists are the **adoption funnel and evangelists**, not
 
 Built on the hardened Tauri shell, which is a thin GUI over the one `avenc` (no second solver). Minimal loop first, then depth:
 
-1. **Loop:** editor + inline `avenc check` errors + solve panel (forward & backward) + save/open + **report export** + one excellent template + one guided walkthrough.
-2. **Share:** spreadsheet import/export, PDF report polish.
+1. **Loop:** editor + inline `avenc check` errors + solve panel (forward & backward) + save/open + **HTML report export** + one excellent template + one guided walkthrough.
+2. **Share:** spreadsheet import (CSV, then `.xlsx` ranges) / export, and PDF report export.
 3. **See:** graphs of sweeps and sensitivities.
-4. **Pull:** one live-data example (the validated reference), as a template — not a dependency of the core loop.
+4. **Pull:** one live-data example (the validated reference) as an *optional* template. The core loop never touches the network — Aven is fully usable offline.
 5. **Learn:** the full guided series and the template library.
+
+**Done tests for the loop (step 1):**
+- The 30-second demo lands: type a relation, leave a variable blank → it solves for it; break a unit → it refuses and points at where.
+- A new user can go *open a template → change it to their own numbers → solve backward → export a report* in **under five minutes, without the docs**.
 
 ## 9. Honest risks
 
@@ -82,4 +86,4 @@ Built on the hardened Tauri shell, which is a thin GUI over the one `avenc` (no 
 
 ## 10. What success looks like
 
-An engineer opens Aven, starts from a template, changes it to their own system, watches it catch a unit slip, leaves a variable blank and gets the answer, and exports a report they hand to a client or a reviewer — and never opens the spreadsheet they would have used.
+An engineer opens Aven, starts from a template, changes it to their own system, watches it catch a unit slip, leaves a variable blank and gets the answer, and exports a report they hand to a client or a reviewer — and never opens the spreadsheet they would have used. The report embeds the model and its ledger hash, so the recipient can **re-run it and verify the numbers** — that is what makes it *defensible* rather than just a PDF.
