@@ -28,14 +28,25 @@ Unlike traditional imperative languages where functions require hardcoded input/
 
 ## Key Capabilities
 
+Aven is one small, auditable compiler (`avenc`) with a set of runtimes and integrations around it. The **core** is the language and solver you would reach for on their own; the **adjacent** pieces connect that core to live data, edge hardware, and other tools.
+
+### Core — the `avenc` compiler
+
 - **Omnidirectional Relational Solving:** Declare physical relations naturally without specifying solve directions. Write $F = m \cdot a$ once, and solve for force, mass, or acceleration automatically depending on which inputs are observed.
 - **Pure-Rust Zero-Dependency Core:** The `avenc` compiler, lexer, parser, AST, evaluator, and fact ledger are written strictly in standard library Rust (`std`), requiring zero external crates.
 - **Checked and converted units:** `avenc check` infers the dimension of every variable and rejects equations that mix incompatible ones. Values are converted to coherent base units before solving, so `velocity = 250 km/h` is solved as 69.44 m/s and shown back in km/h. Ambiguous spellings such as `Mb` (megabit or megabyte?) are refused rather than guessed.
-- **Shared Memory Rings & Native In-Process FFI (`using shm(...)`, `using native(...)`):** Memory-mapped ring buffers and in-process loading of C/Rust dynamic libraries (`.so` / `.dll`), with no subprocess or socket per solve. `tests/phase4_shm_ffi.rs` times one call of each: shared-memory reads take 5–10 µs and native library calls 40–50 µs on a 4-vCPU Linux container (timings vary by machine). **Caveat:** a loaded library runs in-process, outside Aven's deterministic solver and ledger guarantees — its code is not sandboxed and its contents are not yet hashed into the ledger, so `using native(...)` is for trusted libraries only. (Recording the library's SHA-256 in the ledger is planned.)
-- **Direction-Pinning & C Code Generation (`avenc emit-c`, `--aeric-shim`):** Transpile `forward` blocks into standalone, branchless C99 with no runtime solver: straight-line code suited to embedded targets and fixed-rate control loops. `--aeric-shim --out-dir <dir>` emits an AERIC edge deployment bundle with a SHA-256 model-identity hash and non-aborting domain finiteness guards.
-- **External Adapters & Persistent IPC Daemons:** Connect relations to sensors, telemetry streams and black-box simulators via subprocess adapters (`using external(...)`) or persistent TCP daemons (`using ipc(...)`). Adapters exchange values in each variable's declared unit.
+- **Direction-Pinning & Code Generation (`avenc emit-c`, `avenc emit-wasm`):** Transpile `forward` blocks into standalone, branchless C99 or WebAssembly 1.0 with no runtime solver: straight-line code suited to embedded targets and fixed-rate control loops. Generated C is checked to match `avenc run` exactly.
 - **Tamper-Evident Fact Ledgers:** Every settled fact extends a SHA-256 hash chain (optionally HMAC-signed with `AVEN_LEDGER_KEY`); facts from adapters record the SHA-256 of the adapter's raw output. `avenc run --ledger out.jsonl` writes the audit log and `avenc verify-ledger out.jsonl` detects any edit, deletion, reordering or truncation. Time-to-live (`ttl_ms`) freshness tracking blocks decisions on stale data (`DECISION BLOCKED`, exit code 3).
 - **Optimization:** `minimize` / `maximize` over real and integer variables with simplex branch-and-bound; a result is labelled *proven optimal* only when its bound certifies it. `avenc pareto` sweeps one variable across a range and marks the knee point of the resulting trade-off curve.
+
+### Adjacent — runtimes, adapters & integrations
+
+These extend the core to real systems. They are useful, but the core compiler stands on its own without them.
+
+- **AERIC edge runtime (`--aeric-shim`):** `avenc emit-c --aeric-shim --out-dir <dir>` emits a deployment bundle with a SHA-256 model-identity hash and non-aborting domain finiteness guards; `aeric/` is the companion dependency-free C99 runtime that calls the emitted model on a tick behind an enforced HOLD fail-safe.
+- **External Adapters & Persistent IPC Daemons:** Connect relations to sensors, telemetry streams and black-box simulators via subprocess adapters (`using external(...)`) or persistent TCP daemons (`using ipc(...)`). Adapters exchange values in each variable's declared unit.
+- **Shared Memory Rings & Native In-Process FFI (`using shm(...)`, `using native(...)`):** Memory-mapped ring buffers and in-process loading of C/Rust dynamic libraries (`.so` / `.dll`), with no subprocess or socket per solve. `tests/phase4_shm_ffi.rs` times one call of each: shared-memory reads take 5–10 µs and native library calls 40–50 µs on a 4-vCPU Linux container (timings vary by machine). **Caveat:** a loaded library runs in-process, outside Aven's deterministic solver and ledger guarantees — its code is not sandboxed and its contents are not yet hashed into the ledger, so `using native(...)` is for trusted libraries only. (Recording the library's SHA-256 in the ledger is planned.)
+- **Formal evidence, packaging & shells:** `avenc emit-smt` / `safety-case` export a model to SMT-LIB2 and run Z3/CVC5 for formal-methods evidence (not certification); `Aven.toml` / `.avenpkg` describe a SHA-256-sealed package format (resolution not yet implemented). A Tauri desktop shell (`app/`) and a Kubernetes controller (`k8s/`) drive the same in-process compiler.
 
 ---
 
