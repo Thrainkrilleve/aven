@@ -9,6 +9,7 @@
     clippy::result_large_err
 )]
 
+pub mod api;
 pub mod ast;
 pub mod codegen_c;
 pub mod codegen_wasm;

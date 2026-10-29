@@ -817,6 +817,18 @@ pub enum TypeError {
     },
 }
 
+impl TypeError {
+    /// The (line, col) where the error was detected.
+    pub fn position(&self) -> (usize, usize) {
+        match self {
+            TypeError::DimensionalMismatch { line, col, .. }
+            | TypeError::InvalidFunctionArgument { line, col, .. }
+            | TypeError::UnknownUnit { line, col, .. }
+            | TypeError::AmbiguousUnit { line, col, .. } => (*line, *col),
+        }
+    }
+}
+
 impl fmt::Display for TypeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
