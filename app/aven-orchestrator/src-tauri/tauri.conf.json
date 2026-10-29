@@ -23,14 +23,14 @@
       {
         "fullscreen": false,
         "resizable": true,
-        "title": "Aven Orchestrator",
+        "title": "Aven",
         "width": 1400,
         "height": 900,
         "useHttpsScheme": true
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost; object-src 'none'; base-uri 'none'"
     }
   }
 }

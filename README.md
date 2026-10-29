@@ -23,6 +23,8 @@ Unlike traditional imperative languages where functions require hardcoded input/
 | **[Package Specification](docs/PACKAGE_SPEC.md)** | `Aven.toml` schema and `.avenpkg` SHA-256 sealed distribution format | Package authors |
 | **[Contributing Guide](CONTRIBUTING.md)** | Architectural ground rules ("Rust compiles, C runs") and PR guidelines | Contributors |
 | **[RFC Process](RFC_PROCESS.md)** | Language evolution lifecycle and decision framework | Protocol & compiler designers |
+| **[Product thesis](PRODUCT_THESIS.md)** | The desktop app: write a model, check it, solve it, keep the file | Anyone deciding what Aven is for |
+| **[IDE plan](IDE_MVP_PLAN.md)** | How that app gets built, milestone by milestone | Contributors on the desktop shell |
 
 ---
 
@@ -257,7 +259,7 @@ aven/
 ├── benchmarks/                             # Performance benchmarks & RHEL harnesses
 ├── web/                                    # avenc.dev site and live solver demo (WASM)
 ├── aeric/                                  # AERIC C runtime for edge deployment
-├── app/                                    # Desktop orchestrator UI (Tauri v2)
+├── app/                                    # Desktop IDE shell (Tauri v2)
 ├── k8s/                                    # Kubernetes controller and manifests
 ├── editors/vscode/                         # VS Code syntax highlighting
 └── scripts/                                # CI and documentation checks

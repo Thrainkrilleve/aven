@@ -4,9 +4,20 @@
   "description": "Aven Relational Orchestrator",
   "main": "index.js",
   "scripts": {
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build:ui": "esbuild ui/editor.mjs --bundle --format=esm --outfile=dist/editor.js",
+    "test:ui": "node ui/check-highlight.mjs"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.12.4"
+    "@codemirror/commands": "^6.8.0",
+    "@codemirror/language": "^6.11.0",
+    "@codemirror/lint": "^6.8.0",
+    "@codemirror/state": "^6.5.0",
+    "@codemirror/view": "^6.36.0",
+    "@lezer/highlight": "^1.2.0",
+    "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/cli": "^2.12.4",
+    "codemirror": "^6.0.0",
+    "esbuild": "^0.25.0"
   }
 }

@@ -318,7 +318,9 @@ fn test_backend(backend_id: String) -> BackendTestResult {
                 backend_id,
                 success: true,
                 latency_ms: latency,
-                status_message: "National Weather Service API reachable. Live physical observations online.".to_string(),
+                status_message:
+                    "National Weather Service API reachable. Live physical observations online."
+                        .to_string(),
                 details: Some(serde_json::json!({
                     "endpoint": "https://api.weather.gov",
                     "default_station": "KORD",
@@ -1112,6 +1114,68 @@ fn solve_k8s_hpa(
 }
 
 // ---------------------------------------------------------------------------
+// IDE shell — one command, the compiler's check
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct IdeDiagnostic {
+    pub severity: String,
+    pub message: String,
+    pub start_line: usize,
+    pub start_col: usize,
+    pub end_line: usize,
+    pub end_col: usize,
+}
+
+fn ide_diagnostics(source: &str) -> Vec<IdeDiagnostic> {
+    avenc::api::check(source)
+        .into_iter()
+        .map(|d| IdeDiagnostic {
+            severity: match d.severity {
+                avenc::api::Severity::Error => "error".to_string(),
+                avenc::api::Severity::Warning => "warning".to_string(),
+            },
+            message: d.message,
+            start_line: d.start.line,
+            start_col: d.start.col,
+            end_line: d.end.line,
+            end_col: d.end.col,
+        })
+        .collect()
+}
+
+#[tauri::command]
+fn ide_check(source: String) -> Vec<IdeDiagnostic> {
+    ide_diagnostics(&source)
+}
+
+#[cfg(test)]
+mod ide_tests {
+    use super::ide_diagnostics;
+
+    #[test]
+    fn ide_check_accepts_a_clean_model() {
+        let src = "relation R {\n y = 2 * x\n}\nsolve R with {\n x = 3\n}\n";
+        assert!(ide_diagnostics(src).is_empty());
+    }
+
+    #[test]
+    fn ide_check_reports_a_unit_mismatch_from_avenc_api() {
+        let src = "signal v : km/h\nsignal t : s\nrelation R {\n bad = v + t\n}\nsolve R with {\n v = 10 km/h\n t = 2 s\n}\n";
+        let diags = ide_diagnostics(src);
+        assert!(!diags.is_empty(), "expected a diagnostic");
+        assert_eq!(diags[0].severity, "error");
+        assert!(diags[0].start_line >= 1);
+        assert!(diags[0].end_col > diags[0].start_col);
+        assert!(
+            diags[0].message.contains("dimensional") || diags[0].message.contains("incompatible"),
+            "{}",
+            diags[0].message
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Application Entry Point
 // ---------------------------------------------------------------------------
 
@@ -1127,18 +1191,9 @@ fn main() {
             call_flame,
             get_live_telemetry,
             explain_why,
-            solve_k8s_hpa
+            solve_k8s_hpa,
+            ide_check
         ])
-        .setup(|_app| {
-            #[cfg(debug_assertions)]
-            {
-                use tauri::Manager;
-                if let Some(window) = _app.get_webview_window("main") {
-                    window.open_devtools();
-                }
-            }
-            Ok(())
-        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
