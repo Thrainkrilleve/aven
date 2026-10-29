@@ -30,11 +30,13 @@ This is the "promote run-logic to the lib" item flagged earlier; doing it here p
 
 **Two decisions to lock in M0 (cheap now, expensive later):**
 - **File format.** A `.aven` file holds **source only** — the `solve` block already carries the inputs and solve settings, so there's nothing else to store. UI state (which variable is "solve for", panel layout) lives *outside* the file. Save (M1) and the re-runnable report (M2) both center on that one source text, so they can't drift apart.
-- **Deterministic hashing.** `verify-report` only works if the hash is identical on every machine. Two rules that keep it honest:
-  - The report embeds and verifies the **exact source that was solved** — including whatever the "solve for this" toggle generated — **not the file on disk**. Toggling a variable changes that source, and that's expected; embed it **verbatim** and have `verify-report` re-run *that* text.
-  - The chain is over the settled facts (bit-exact `value_bits`), so verification doesn't hinge on source whitespace at all. Any on-disk normalization (LF endings, UTF-8 without BOM, trailing-whitespace trim) is **editor hygiene only**, and the trim is **scoped to line-ends outside quoted literals** (adapter paths, IPC endpoints) — Aven has no whitespace-sensitive literals today, and scoping the trim keeps it that way.
+- **Deterministic hashing.** `verify-report` has to be identical on every machine *and* actually bind the shown model to the numbers. The rules:
+  - **Bind the source into the chain.** Hash the **exact solved source** (raw UTF-8 bytes, *no* normalization) and record it as the **first fact** in the ledger. Without this, the chain covers only the settled facts — so someone could edit the embedded model (change a formula and tweak an input so it re-solves to the same numbers) and verification would still pass on a model that never produced the report. The source fact closes that hole.
+  - **`verify-report` checks three things:** (1) the embedded source's byte-hash matches the chain's first fact; (2) re-running that exact source reproduces the same `value_bits`; (3) the chain is intact.
+  - The report embeds the **exact source that was solved** — including whatever the "solve for this" toggle generated — **not the file on disk**; toggling a variable changes that source, and that's expected.
+  - Because the source fact is over **raw bytes**, verification is independent of on-disk normalization (LF, UTF-8 without BOM, trailing-whitespace trim). That normalization stays pure **editor hygiene**, with any trim scoped to line-ends outside quoted literals (adapter paths, IPC endpoints).
 
-  Pin both before M1 ships the HTML export, or old reports fail to verify later.
+  Pin this before M1 ships the HTML export, or old reports fail to verify later.
 
 ## 2. Milestones
 
@@ -59,7 +61,7 @@ This is the "promote run-logic to the lib" item flagged earlier; doing it here p
 ### M2 — Share
 - **Spreadsheet import:** CSV first, then `.xlsx` cell ranges (formulas/live links out of scope). Export values back to CSV/`.xlsx`.
 - **PDF report export** (HTML report is already in M1).
-- **`avenc verify-report`** CLI command: re-run an exported report and confirm the numbers + ledger hash — the mechanism that makes a report *defensible*, usable by anyone with just the CLI.
+- **`avenc verify-report`** CLI command: run the three checks above (source byte-hash matches the chain's first fact, re-solve reproduces the `value_bits`, chain intact) — the mechanism that makes a report *defensible*, usable by anyone with just the CLI.
 
 ### M3 — See
 - **Graphs:** sweep a variable (reuse `solve_pareto`) and plot the trade-off / sensitivity curve, with the knee marked. Offline charting lib, vendored.
