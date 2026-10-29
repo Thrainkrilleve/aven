@@ -32,6 +32,8 @@ every page in web/public/:
     https://avenc.dev/<file> for every other HTML page in web/public/ except
     404.html. web/public/robots.txt references that sitemap and declares
     Content-Signal ai-train=no, search=yes, and ai-input=no.
+  * app/aven-orchestrator/src-tauri/Cargo.lock resolves the glib crate at
+    0.20.0 or newer.
 
 Exits non-zero when anything does not match.
 """
@@ -313,6 +315,32 @@ def site_map_problems():
     return problems
 
 
+def glib_version_tuple(version):
+    parts = []
+    for piece in version.split("."):
+        match = re.match(r"(\d+)", piece)
+        if not match:
+            break
+        parts.append(int(match.group(1)))
+    return tuple(parts)
+
+
+def orchestrator_glib_problems():
+    """The orchestrator lockfile must not resolve the unsound glib 0.18 line."""
+    lock_path = ROOT / "app" / "aven-orchestrator" / "src-tauri" / "Cargo.lock"
+    text = lock_path.read_text(encoding="utf-8") if lock_path.is_file() else ""
+    versions = re.findall(r'(?ms)^name = "glib"\nversion = "([^"]+)"', text)
+    if not versions:
+        return ["app/aven-orchestrator/src-tauri/Cargo.lock has no glib package"]
+    problems = []
+    for version in versions:
+        if glib_version_tuple(version) < (0, 20, 0):
+            problems.append(
+                f"app/aven-orchestrator/src-tauri/Cargo.lock resolves glib {version}, which is older than 0.20.0"
+            )
+    return problems
+
+
 def main():
     if not AVENC.exists():
         sys.exit(f"{AVENC} not found; run `cargo build --release` first")
@@ -324,6 +352,7 @@ def main():
     problems.extend(retired_weather_site_problems())
     problems.extend(demo_relation_problems())
     problems.extend(site_map_problems())
+    problems.extend(orchestrator_glib_problems())
     compiled, fragments, outputs = 0, 0, 0
 
     for path in doc_files():
