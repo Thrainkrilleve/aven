@@ -39,7 +39,7 @@ Everything from the current orchestrator screen that isn't in the core loop goes
 1. **Units that refuse a bad conversion** — the everyday win. The mistake spreadsheets make silently.
 2. **Solve in any direction** — spec the output, recover the input. No spreadsheet does this by default, for any variable, from one model (Excel's Goal Seek and Solver reach one target at a time, each set up by hand).
 3. **Show your work** — a shareable report backed by a tamper-evident ledger. Framed as receipts, not cryptography; the hash chain only matters when someone audits, and most days nobody does.
-4. **Air-gappable, no stack to install** — the `avenc` CLI and the emitted C are a single static binary with zero dependencies. The IDE is a Tauri app, so on Windows it needs the WebView2 runtime; we bundle that in the installer, because locked-down shops sometimes strip it. The air-gap claim is about *no network and no toolchain*, not literally one file for the GUI.
+4. **Air-gappable, no stack to install** — no network, no toolchain, nothing to install beyond the app. The `avenc` CLI and the emitted C are a single zero-dependency static binary. *(Windows/WebView2 packaging caveat is in Risks.)*
 
 ## 5. Who first (beachhead)
 
@@ -81,9 +81,9 @@ Built on the hardened Tauri shell, which is a thin GUI over the one `avenc` (no 
 
 - **Excel's gravity is sharing, not just habit.** If Aven files don't export/import and travel easily, the guarantees won't matter. Import/export is in the MVP for this reason.
 - **The IDE is a real multi-month build.** The cheap validation (ship the WASM core as a Python/Jupyter binding) is the lower-cost path we are *choosing not to take first* — a deliberate bet that the integrated app, with learning and graphs, is the stronger product even though it costs more up front.
-- **Install depends on the public repo.** `cargo install --git` and the site's install commands only work once the GitHub repo is public.
+- **Distribution & install.** The IDE is a Tauri app; on Windows it needs the WebView2 runtime, which we bundle in the installer because locked-down shops sometimes strip it. The installer needs a home — GitHub Releases and/or the avenc.dev site — and that, plus the CLI's `cargo install --git` and the site's install commands, only works once the GitHub repo is public. Decide the installer channel before the first external user.
 - **Lead with the right features.** Units and backward-solve are the daily hook; the ledger is "show your work." Pitching cryptography first loses the room.
 
 ## 10. What success looks like
 
-An engineer opens Aven, starts from a template, changes it to their own system, watches it catch a unit slip, leaves a variable blank and gets the answer, and exports a report they hand to a client or a reviewer — and never opens the spreadsheet they would have used. The report embeds the model and its ledger hash, so the recipient can **re-run it and verify the numbers** — that is what makes it *defensible* rather than just a PDF.
+An engineer opens Aven, starts from a template, changes it to their own system, watches it catch a unit slip, leaves a variable blank and gets the answer, and exports a report they hand to a client or a reviewer — and never opens the spreadsheet they would have used. The report embeds the model and its ledger hash, so the recipient can **re-run it and verify the numbers** — via a free reader mode in the app, or an `avenc verify-report` command for anyone who only has the CLI. That re-runnability is what makes it *defensible* rather than just a PDF.
