@@ -400,7 +400,87 @@ mod tests {
     #[test]
     fn solve_refuses_text_that_is_not_a_model() {
         let err = solve("not a model").expect_err("prose must not solve");
-        assert!(err.message.contains("expected"), "{}", err.message);
+        assert_eq!(
+            err.message,
+            "a calculation is one expression; found 'a' after it"
+        );
+    }
+
+    fn calculation(src: &str) -> f64 {
+        let solved = solve(src).unwrap_or_else(|e| panic!("{src} refused: {}", e.message));
+        *solved
+            .values
+            .get("answer")
+            .unwrap_or_else(|| panic!("{src} settled {:?}, no answer", solved.values))
+    }
+
+    #[test]
+    fn solve_evaluates_basic_arithmetic() {
+        assert_eq!(calculation("1+2"), 3.0);
+        assert_eq!(calculation("32 ^ 3"), 32.0_f64.powi(3));
+        assert_eq!(calculation("32^3"), 32768.0);
+        assert_eq!(calculation("1 + 2 * 3"), 7.0);
+        assert_eq!(calculation("(1 + 2) * 3"), 9.0);
+        assert_eq!(calculation("2 ^ 3 ^ 2"), 512.0);
+        assert_eq!(calculation("sqrt(9)"), 3.0);
+        assert_eq!(calculation("1/2"), 0.5);
+        assert_eq!(calculation("-8 / 2"), -4.0);
+        assert!((calculation("2 * pi") - std::f64::consts::TAU).abs() < 1e-12);
+        assert!(check("1+2").is_empty());
+        let reported = report("1+2").expect("a calculation has a report");
+        assert_eq!(reported.values["answer"], 3.0);
+    }
+
+    #[test]
+    fn solve_refuses_a_calculation_that_is_not_one_closed_expression() {
+        let unknown = solve("x + 1").expect_err("a free name is not a number");
+        assert_eq!(
+            unknown.message,
+            "x is still unknown. A calculation uses only numbers. Name unknowns in a relation and a solve block."
+        );
+        assert_eq!(check("x + 1")[0].message, unknown.message);
+
+        let two = solve("y + x").expect_err("two free names");
+        assert_eq!(
+            two.message,
+            "x and y are still unknown. A calculation uses only numbers. Name unknowns in a relation and a solve block."
+        );
+        let three = solve("z + y + x").expect_err("three free names");
+        assert!(
+            three.message.starts_with("x, y, and z are still unknown."),
+            "{}",
+            three.message
+        );
+
+        let second = solve("1 + 2\n3 + 4").expect_err("two expressions");
+        assert_eq!(
+            second.message,
+            "a calculation is one expression; found '3' after it"
+        );
+
+        let unit_word = solve("1 m + 2").expect_err("a unit word is not part of the expression");
+        assert_eq!(
+            unit_word.message,
+            "a calculation is one expression; found 'm' after it"
+        );
+
+        let div = solve("1/0").expect_err("division by zero");
+        assert!(div.message.contains("division by zero"), "{}", div.message);
+        assert!(check("1/0").is_empty(), "the expression is well formed");
+
+        let neg_sqrt = solve("sqrt(-1)").expect_err("sqrt of a negative");
+        assert!(
+            neg_sqrt.message.contains("sqrt of negative"),
+            "{}",
+            neg_sqrt.message
+        );
+
+        let unknown_fn = solve("bogus(1)").expect_err("unknown function");
+        assert!(
+            unknown_fn.message.contains("unknown function"),
+            "{}",
+            unknown_fn.message
+        );
     }
 
     #[test]

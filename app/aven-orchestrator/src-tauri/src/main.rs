@@ -217,6 +217,23 @@ mod ide_tests {
     }
 
     #[test]
+    fn solve_model_evaluates_basic_arithmetic() {
+        for (src, expect) in [("1+2", 3.0), ("32 ^ 3", 32768.0)] {
+            match solve_model(src.to_string()) {
+                Ok(solved) => {
+                    let answer = solved
+                        .values
+                        .iter()
+                        .find(|(name, _)| name == "answer")
+                        .map(|(_, value)| *value);
+                    assert_eq!(answer, Some(expect), "{src} -> {:?}", solved.values);
+                }
+                Err(err) => panic!("{src} refused: {}", err.message),
+            }
+        }
+    }
+
+    #[test]
     fn solve_model_refuses_adding_a_speed_to_a_time() {
         let src = "signal v : km/h\nsignal t : s\nrelation R {\n bad = v + t\n}\nsolve R with {\n v = 10 km/h\n t = 2 s\n}\n";
         let err = match solve_model(src.to_string()) {

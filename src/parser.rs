@@ -21,6 +21,15 @@ impl std::fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
+fn join_and(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => one.clone(),
+        [a, b] => format!("{a} and {b}"),
+        [head @ .., last] => format!("{}, and {last}", head.join(", ")),
+    }
+}
+
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
@@ -92,11 +101,30 @@ impl Parser {
         }
     }
 
+    fn at_declaration(&self) -> bool {
+        matches!(
+            self.peek().kind,
+            TokenKind::KwRelation
+                | TokenKind::KwForward
+                | TokenKind::KwSolve
+                | TokenKind::KwUnit
+                | TokenKind::KwSignal
+        )
+    }
+
     pub fn parse_module(&mut self, name: &str) -> Result<AvenModule, ParseError> {
         let mut module = AvenModule {
             name: name.to_string(),
             ..Default::default()
         };
+
+        // A file that starts with arithmetic is one calculation. It becomes a
+        // relation the existing solver forward-evaluates; there is no second
+        // evaluator. A file that starts with a declaration stays a model.
+        if !self.at_declaration() && self.peek().kind != TokenKind::Eof {
+            module.blocks.push(self.parse_calculation()?);
+            return Ok(module);
+        }
 
         while self.peek().kind != TokenKind::Eof {
             match self.peek().kind {
@@ -135,6 +163,52 @@ impl Parser {
         }
 
         Ok(module)
+    }
+
+    /// One closed expression, named `answer`, so `1 + 2` and `32 ^ 3` settle
+    /// through the same solver as a relation.
+    fn parse_calculation(&mut self) -> Result<BlockDecl, ParseError> {
+        let start = self.peek().clone();
+        let expr = self.parse_expr()?;
+        if self.peek().kind != TokenKind::Eof {
+            let tok = self.peek();
+            return Err(ParseError {
+                message: format!(
+                    "a calculation is one expression; found '{}' after it",
+                    tok.text
+                ),
+                line: tok.line,
+                col: tok.col,
+            });
+        }
+        let unknowns: Vec<String> = expr.vars().into_iter().collect();
+        if !unknowns.is_empty() {
+            let listed = join_and(&unknowns);
+            let verb = if unknowns.len() == 1 { "is" } else { "are" };
+            return Err(ParseError {
+                message: format!(
+                    "{listed} {verb} still unknown. A calculation uses only numbers. Name unknowns in a relation and a solve block."
+                ),
+                line: start.line,
+                col: start.col,
+            });
+        }
+        Ok(BlockDecl {
+            kind: BlockKind::Relation,
+            name: "Calc".to_string(),
+            backend: BackendDecl::Native,
+            equations: vec![Equation {
+                lhs: "answer".to_string(),
+                op: ConstraintOp::Equal,
+                rhs: expr.clone(),
+                original_text: format!("answer = {}", expr.to_string_prec(0)),
+                line: start.line,
+                col: start.col,
+            }],
+            integer_vars: vec![],
+            line: start.line,
+            col: start.col,
+        })
     }
 
     fn parse_block(&mut self, kind: BlockKind) -> Result<BlockDecl, ParseError> {
