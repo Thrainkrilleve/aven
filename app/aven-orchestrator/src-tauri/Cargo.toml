@@ -17,6 +17,12 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 avenc = { path = "../../.." }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.19"
+
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+rfd = "0.15"
+
 [features]
 custom-protocol = ["tauri/custom-protocol"]
 

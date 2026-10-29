@@ -27,6 +27,7 @@
     #editor { flex: 1; width: 100%; resize: none; border: 0; outline: 0; background: #0a0f17; color: var(--text); font-family: var(--mono); font-size: .86rem; line-height: 1.6; padding: 1rem; tab-size: 4; }
     .out { flex: 1; overflow: auto; padding: 1rem; }
     .toolbar { display: flex; gap: .5rem; padding: .5rem 1rem; border-bottom: 1px solid var(--border); align-items: center; flex-wrap: wrap; }
+    .toolbar .spacer { flex: 1; }
     .status { font-family: var(--mono); font-size: .82rem; margin-bottom: .75rem; }
     .status.ok { color: var(--ok); } .status.bad { color: var(--bad); }
     table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: .82rem; }
@@ -37,6 +38,8 @@
     .hash { font-family: var(--mono); font-size: .72rem; color: var(--muted); word-break: break-all; margin-top: .9rem; }
     .why-row { display: flex; gap: .4rem; margin-top: .9rem; }
     .why-row input { font: inherit; font-size: .82rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: .3rem .5rem; width: 10rem; font-family: var(--mono); }
+    .file-name { font-family: var(--mono); font-size: .75rem; color: var(--muted); }
+    .dirty { font-size: .75rem; color: var(--accent); }
   </style>
 </head>
 <body>
@@ -51,6 +54,12 @@
   <main>
     <section class="pane">
       <div class="toolbar">
+        <button id="btn-new">New</button>
+        <button id="btn-open">Open</button>
+        <button id="btn-save">Save</button>
+        <span class="file-name" id="file-name">Untitled</span>
+        <span class="dirty" id="dirty" hidden>unsaved</span>
+        <span class="spacer"></span>
         <button class="primary" id="btn-solve">Solve ▶</button>
         <button id="btn-check">Check units</button>
         <button id="btn-report">Report</button>
@@ -72,6 +81,22 @@
     const out = document.getElementById("out");
     const statusEl = document.getElementById("status");
     const tplSel = document.getElementById("templates");
+    const fileNameEl = document.getElementById("file-name");
+    const dirtyEl = document.getElementById("dirty");
+    let savedText = "";
+
+    function refreshDirty() {
+      dirtyEl.hidden = editor.value === savedText;
+    }
+    function markSaved(text, name) {
+      savedText = text;
+      fileNameEl.textContent = name || "Untitled";
+      refreshDirty();
+    }
+    function discardIfDirty() {
+      if (editor.value === savedText) return true;
+      return window.confirm("Discard unsaved changes?");
+    }
 
     function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
     function fmt(v) { return Number.isFinite(v) ? (Math.abs(v) >= 1000 || v === Math.trunc(v) ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : v.toLocaleString(undefined, { maximumFractionDigits: 4 })) : "—"; }
@@ -195,17 +220,58 @@
       }
     }
     editor.addEventListener("input", () => {
+      refreshDirty();
       if (!invoke) return;
       clearTimeout(refreshTimer);
       refreshTimer = setTimeout(refresh, 400);
     });
 
+    async function newFile() {
+      if (!discardIfDirty()) return;
+      clearTimeout(refreshTimer);
+      try {
+        await invoke("new_model");
+      } catch (d) { showFailure(begin("New model").id, d); return; }
+      editor.value = "";
+      markSaved("", "Untitled");
+      const run = begin("New model");
+      setStatus("New model", "ok");
+      if (!current(run.id)) return;
+    }
+    async function openFile() {
+      if (!discardIfDirty()) return;
+      clearTimeout(refreshTimer);
+      try {
+        const opened = await invoke("open_model");
+        if (!opened) return;
+        editor.value = opened.source;
+        markSaved(opened.source, opened.name);
+        await solve();
+      } catch (d) { showFailure(begin("Opening…").id, d); }
+    }
+    async function saveFile() {
+      try {
+        const name = await invoke("save_model", { source: editor.value });
+        if (!name) return;
+        markSaved(editor.value, name);
+      } catch (d) { showFailure(begin("Saving…").id, d); }
+    }
+
+    document.getElementById("btn-new").addEventListener("click", newFile);
+    document.getElementById("btn-open").addEventListener("click", openFile);
+    document.getElementById("btn-save").addEventListener("click", saveFile);
+
     async function boot() {
       if (!invoke) { setStatus("Tauri API unavailable", "bad"); return; }
       const templates = await invoke("list_templates");
       tplSel.innerHTML = templates.map((t, i) => `<option value="${i}">${esc(t.name)}</option>`).join("");
-      tplSel.addEventListener("change", () => { editor.value = templates[tplSel.value].source; solve(); });
+      tplSel.addEventListener("change", () => {
+        editor.value = templates[tplSel.value].source;
+        refreshDirty();
+        solve();
+      });
       editor.value = templates[0].source;
+      markSaved(templates[0].source, "Untitled");
       solve();
     }
     boot();

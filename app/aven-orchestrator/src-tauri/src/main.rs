@@ -10,6 +10,8 @@
 
 use avenc::api;
 use serde::Serialize;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 #[derive(Serialize)]
 struct PosDto {
@@ -115,6 +117,161 @@ fn report_model(source: String) -> Result<ReportDto, DiagnosticDto> {
     }
 }
 
+/// The model file this window last opened or saved. The webview never
+/// chooses a path; only the native dialog does.
+struct CurrentFile(Mutex<Option<PathBuf>>);
+
+#[derive(Serialize)]
+struct OpenedModel {
+    name: String,
+    source: String,
+}
+
+fn display_name(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "Untitled".to_string())
+}
+
+fn ensure_aven_extension(path: PathBuf) -> PathBuf {
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some(ext) if ext.eq_ignore_ascii_case("aven") => path,
+        _ => {
+            let mut named = path.into_os_string();
+            named.push(".aven");
+            PathBuf::from(named)
+        }
+    }
+}
+
+fn read_model(path: &Path) -> Result<String, String> {
+    std::fs::read_to_string(path).map_err(|err| format!("Could not read {}: {err}", path.display()))
+}
+
+fn write_model(path: &Path, source: &str) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|err| format!("Could not create {}: {err}", parent.display()))?;
+        }
+    }
+    std::fs::write(path, source).map_err(|err| format!("Could not write {}: {err}", path.display()))
+}
+
+fn ask_path(
+    app: &tauri::AppHandle,
+    save: bool,
+    suggested: Option<String>,
+) -> Result<Option<PathBuf>, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.run_on_main_thread(move || {
+        let _ = tx.send(pick_dialog(save, suggested));
+    })
+    .map_err(|err| format!("Could not open the file dialog: {err}"))?;
+    rx.recv()
+        .map_err(|err| format!("The file dialog closed without a choice: {err}"))?
+}
+
+#[cfg(target_os = "linux")]
+fn pick_dialog(save: bool, suggested: Option<String>) -> Result<Option<PathBuf>, String> {
+    use gtk::prelude::*;
+    let dialog = gtk::FileChooserNative::new(
+        Some(if save { "Save model" } else { "Open model" }),
+        None::<&gtk::Window>,
+        if save {
+            gtk::FileChooserAction::Save
+        } else {
+            gtk::FileChooserAction::Open
+        },
+        Some(if save { "Save" } else { "Open" }),
+        Some("Cancel"),
+    );
+    let filter = gtk::FileFilter::new();
+    filter.set_name(Some("Aven model"));
+    filter.add_pattern("*.aven");
+    dialog.add_filter(filter);
+    if save {
+        dialog.set_current_name(suggested.as_deref().unwrap_or("model.aven"));
+        dialog.set_do_overwrite_confirmation(true);
+    }
+    dialog.set_modal(true);
+    let accepted = dialog.run() == gtk::ResponseType::Accept;
+    let path = if accepted { dialog.filename() } else { None };
+    dialog.hide();
+    Ok(path)
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+fn pick_dialog(save: bool, suggested: Option<String>) -> Result<Option<PathBuf>, String> {
+    let mut dialog = rfd::FileDialog::new().add_filter("Aven model", &["aven"]);
+    if save {
+        dialog = dialog.set_file_name(suggested.unwrap_or_else(|| "model.aven".to_string()));
+        Ok(dialog.save_file())
+    } else {
+        Ok(dialog.pick_file())
+    }
+}
+
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
+fn pick_dialog(save: bool, suggested: Option<String>) -> Result<Option<PathBuf>, String> {
+    let _ = (save, suggested);
+    Err("Opening a model needs a desktop file dialog.".to_string())
+}
+
+/// Open a `.aven` file. The source comes back unchanged. Cancel returns nothing.
+#[tauri::command]
+fn open_model(
+    app: tauri::AppHandle,
+    state: tauri::State<CurrentFile>,
+) -> Result<Option<OpenedModel>, String> {
+    let Some(path) = ask_path(&app, false, None)? else {
+        return Ok(None);
+    };
+    let source = read_model(&path)?;
+    let name = display_name(&path);
+    *state
+        .0
+        .lock()
+        .map_err(|_| "The editor lost track of the open file.".to_string())? = Some(path);
+    Ok(Some(OpenedModel { name, source }))
+}
+
+/// Write the editor source to the open file, or ask for a path the first time.
+/// Cancel returns nothing. The file is the source text and nothing else.
+#[tauri::command]
+fn save_model(
+    app: tauri::AppHandle,
+    state: tauri::State<CurrentFile>,
+    source: String,
+) -> Result<Option<String>, String> {
+    let mut slot = state
+        .0
+        .lock()
+        .map_err(|_| "The editor lost track of the open file.".to_string())?;
+    let path = if let Some(path) = slot.clone() {
+        path
+    } else {
+        let Some(picked) = ask_path(&app, true, Some("model.aven".to_string()))? else {
+            return Ok(None);
+        };
+        ensure_aven_extension(picked)
+    };
+    write_model(&path, &source)?;
+    let name = display_name(&path);
+    *slot = Some(path);
+    Ok(Some(name))
+}
+
+/// Forget the open path so the next save asks for a file.
+#[tauri::command]
+fn new_model(state: tauri::State<CurrentFile>) -> Result<(), String> {
+    *state
+        .0
+        .lock()
+        .map_err(|_| "The editor lost track of the open file.".to_string())? = None;
+    Ok(())
+}
+
 /// Checked starter models, so no one begins from a blank editor.
 #[tauri::command]
 fn list_templates() -> Vec<Template> {
@@ -194,7 +351,10 @@ solve FlightDynamics with {
 
 #[cfg(test)]
 mod ide_tests {
-    use super::{check_model, solve_model, FLIGHT, NEWTON, SERVER_CAPACITY};
+    use super::{
+        check_model, display_name, ensure_aven_extension, read_model, solve_model, write_model,
+        FLIGHT, NEWTON, SERVER_CAPACITY,
+    };
 
     #[test]
     fn shipped_templates_check_clean_and_solve() {
@@ -262,16 +422,40 @@ mod ide_tests {
         assert_eq!(err.message, "Can't add m·s^-1 to s (line 4).");
         assert_eq!(check_model(src.to_string())[0].message, err.message);
     }
+
+    #[test]
+    fn model_file_round_trip_is_the_exact_source() {
+        let dir = std::env::temp_dir().join(format!("aven-save-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("model.aven");
+        let source = "x = 1 + 10\ny = x * 2\n";
+        write_model(&path, source).unwrap();
+        assert_eq!(read_model(&path).unwrap(), source);
+        assert_eq!(display_name(&path), "model.aven");
+        assert_eq!(
+            ensure_aven_extension(dir.join("notes")),
+            dir.join("notes.aven")
+        );
+        let kept = dir.join("Already.AVEN");
+        assert_eq!(ensure_aven_extension(kept.clone()), kept);
+        let missing = read_model(&dir.join("missing.aven"));
+        assert!(missing.is_err(), "{missing:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }
 
 fn main() {
     tauri::Builder::default()
+        .manage(CurrentFile(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             check_model,
             solve_model,
             why_model,
             report_model,
-            list_templates
+            list_templates,
+            open_model,
+            save_model,
+            new_model
         ])
         .setup(|_app| {
             #[cfg(debug_assertions)]
