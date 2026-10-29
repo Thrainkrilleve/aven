@@ -51,6 +51,10 @@ impl From<&api::Diagnostic> for DiagnosticDto {
 #[derive(Serialize)]
 struct SolvedDto {
     values: Vec<(String, f64)>,
+    shown: Vec<(String, f64)>,
+    units: Vec<(String, String)>,
+    solving: Vec<String>,
+    bound: Vec<String>,
     trace: Vec<String>,
 }
 
@@ -85,6 +89,10 @@ fn solve_model(source: String) -> Result<SolvedDto, DiagnosticDto> {
     match api::solve(&source) {
         Ok(s) => Ok(SolvedDto {
             values: s.values.into_iter().collect(),
+            shown: s.shown.into_iter().collect(),
+            units: s.units.into_iter().collect(),
+            solving: s.solving,
+            bound: s.bound,
             trace: s.trace,
         }),
         Err(d) => Err(DiagnosticDto::from(&d)),
@@ -133,14 +141,54 @@ fn display_name(path: &Path) -> String {
         .unwrap_or_else(|| "Untitled".to_string())
 }
 
-fn ensure_aven_extension(path: PathBuf) -> PathBuf {
-    match path.extension().and_then(|ext| ext.to_str()) {
-        Some(ext) if ext.eq_ignore_ascii_case("aven") => path,
+fn ensure_extension(path: PathBuf, ext: &str) -> PathBuf {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some(current) if current.eq_ignore_ascii_case(ext) => path,
         _ => {
             let mut named = path.into_os_string();
-            named.push(".aven");
+            named.push(".");
+            named.push(ext);
             PathBuf::from(named)
         }
+    }
+}
+
+fn ensure_aven_extension(path: PathBuf) -> PathBuf {
+    ensure_extension(path, "aven")
+}
+
+fn ensure_html_extension(path: PathBuf) -> PathBuf {
+    ensure_extension(path, "html")
+}
+
+struct Chooser {
+    save: bool,
+    title: &'static str,
+    accept: &'static str,
+    filter_name: &'static str,
+    extensions: &'static [&'static str],
+    suggested: Option<String>,
+}
+
+fn model_chooser(save: bool, suggested: Option<String>) -> Chooser {
+    Chooser {
+        save,
+        title: if save { "Save model" } else { "Open model" },
+        accept: if save { "Save" } else { "Open" },
+        filter_name: "Aven model",
+        extensions: &["aven"],
+        suggested,
+    }
+}
+
+fn report_chooser() -> Chooser {
+    Chooser {
+        save: true,
+        title: "Export report",
+        accept: "Export",
+        filter_name: "HTML report",
+        extensions: &["html"],
+        suggested: Some("report.html".to_string()),
     }
 }
 
@@ -158,14 +206,10 @@ fn write_model(path: &Path, source: &str) -> Result<(), String> {
     std::fs::write(path, source).map_err(|err| format!("Could not write {}: {err}", path.display()))
 }
 
-fn ask_path(
-    app: &tauri::AppHandle,
-    save: bool,
-    suggested: Option<String>,
-) -> Result<Option<PathBuf>, String> {
+fn ask_path(app: &tauri::AppHandle, chooser: Chooser) -> Result<Option<PathBuf>, String> {
     let (tx, rx) = std::sync::mpsc::channel();
     app.run_on_main_thread(move || {
-        let _ = tx.send(pick_dialog(save, suggested));
+        let _ = tx.send(pick_dialog(chooser));
     })
     .map_err(|err| format!("Could not open the file dialog: {err}"))?;
     rx.recv()
@@ -173,25 +217,27 @@ fn ask_path(
 }
 
 #[cfg(target_os = "linux")]
-fn pick_dialog(save: bool, suggested: Option<String>) -> Result<Option<PathBuf>, String> {
+fn pick_dialog(chooser: Chooser) -> Result<Option<PathBuf>, String> {
     use gtk::prelude::*;
     let dialog = gtk::FileChooserNative::new(
-        Some(if save { "Save model" } else { "Open model" }),
+        Some(chooser.title),
         None::<&gtk::Window>,
-        if save {
+        if chooser.save {
             gtk::FileChooserAction::Save
         } else {
             gtk::FileChooserAction::Open
         },
-        Some(if save { "Save" } else { "Open" }),
+        Some(chooser.accept),
         Some("Cancel"),
     );
     let filter = gtk::FileFilter::new();
-    filter.set_name(Some("Aven model"));
-    filter.add_pattern("*.aven");
+    filter.set_name(Some(chooser.filter_name));
+    for ext in chooser.extensions {
+        filter.add_pattern(&format!("*.{ext}"));
+    }
     dialog.add_filter(filter);
-    if save {
-        dialog.set_current_name(suggested.as_deref().unwrap_or("model.aven"));
+    if chooser.save {
+        dialog.set_current_name(chooser.suggested.as_deref().unwrap_or("model.aven"));
         dialog.set_do_overwrite_confirmation(true);
     }
     dialog.set_modal(true);
@@ -202,10 +248,14 @@ fn pick_dialog(save: bool, suggested: Option<String>) -> Result<Option<PathBuf>,
 }
 
 #[cfg(any(windows, target_os = "macos"))]
-fn pick_dialog(save: bool, suggested: Option<String>) -> Result<Option<PathBuf>, String> {
-    let mut dialog = rfd::FileDialog::new().add_filter("Aven model", &["aven"]);
-    if save {
-        dialog = dialog.set_file_name(suggested.unwrap_or_else(|| "model.aven".to_string()));
+fn pick_dialog(chooser: Chooser) -> Result<Option<PathBuf>, String> {
+    let mut dialog = rfd::FileDialog::new().add_filter(chooser.filter_name, chooser.extensions);
+    if chooser.save {
+        dialog = dialog.set_file_name(
+            chooser
+                .suggested
+                .unwrap_or_else(|| "model.aven".to_string()),
+        );
         Ok(dialog.save_file())
     } else {
         Ok(dialog.pick_file())
@@ -213,8 +263,8 @@ fn pick_dialog(save: bool, suggested: Option<String>) -> Result<Option<PathBuf>,
 }
 
 #[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
-fn pick_dialog(save: bool, suggested: Option<String>) -> Result<Option<PathBuf>, String> {
-    let _ = (save, suggested);
+fn pick_dialog(chooser: Chooser) -> Result<Option<PathBuf>, String> {
+    let _ = chooser;
     Err("Opening a model needs a desktop file dialog.".to_string())
 }
 
@@ -224,7 +274,7 @@ fn open_model(
     app: tauri::AppHandle,
     state: tauri::State<CurrentFile>,
 ) -> Result<Option<OpenedModel>, String> {
-    let Some(path) = ask_path(&app, false, None)? else {
+    let Some(path) = ask_path(&app, model_chooser(false, None))? else {
         return Ok(None);
     };
     let source = read_model(&path)?;
@@ -251,7 +301,8 @@ fn save_model(
     let path = if let Some(path) = slot.clone() {
         path
     } else {
-        let Some(picked) = ask_path(&app, true, Some("model.aven".to_string()))? else {
+        let Some(picked) = ask_path(&app, model_chooser(true, Some("model.aven".to_string())))?
+        else {
             return Ok(None);
         };
         ensure_aven_extension(picked)
@@ -260,6 +311,36 @@ fn save_model(
     let name = display_name(&path);
     *slot = Some(path);
     Ok(Some(name))
+}
+
+#[derive(Serialize)]
+struct ExportedReport {
+    name: String,
+    source_sha256: String,
+    ledger_head: String,
+}
+
+/// Write a self-contained HTML report. This does not change the open model path.
+#[tauri::command]
+fn export_report(app: tauri::AppHandle, source: String) -> Result<Option<ExportedReport>, String> {
+    let report = api::report(&source).map_err(|d| d.message)?;
+    let html = api::render_report_html(&report);
+    let Some(picked) = ask_path(&app, report_chooser())? else {
+        return Ok(None);
+    };
+    let path = ensure_html_extension(picked);
+    write_model(&path, &html)?;
+    Ok(Some(ExportedReport {
+        name: display_name(&path),
+        source_sha256: report.source_sha256,
+        ledger_head: report.ledger_head,
+    }))
+}
+
+/// Blank `target` in the solve block and pin the variable that was blank.
+#[tauri::command]
+fn solve_for_variable(source: String, target: String) -> Result<String, DiagnosticDto> {
+    api::solve_for(&source, &target).map_err(|d| DiagnosticDto::from(&d))
 }
 
 /// Forget the open path so the next save asks for a file.
@@ -352,8 +433,8 @@ solve FlightDynamics with {
 #[cfg(test)]
 mod ide_tests {
     use super::{
-        check_model, display_name, ensure_aven_extension, read_model, solve_model, write_model,
-        FLIGHT, NEWTON, SERVER_CAPACITY,
+        check_model, display_name, ensure_aven_extension, ensure_html_extension, read_model,
+        solve_for_variable, solve_model, write_model, FLIGHT, NEWTON, SERVER_CAPACITY,
     };
 
     #[test]
@@ -440,7 +521,40 @@ mod ide_tests {
         assert_eq!(ensure_aven_extension(kept.clone()), kept);
         let missing = read_model(&dir.join("missing.aven"));
         assert!(missing.is_err(), "{missing:?}");
+        assert_eq!(
+            ensure_html_extension(dir.join("report")),
+            dir.join("report.html")
+        );
+        let html = avenc::api::report_html(NEWTON).expect("newton report");
+        let report_path = dir.join("report.html");
+        write_model(&report_path, &html).unwrap();
+        let saved = read_model(&report_path).unwrap();
+        assert!(saved.contains("force = mass * acceleration"));
+        assert!(saved.contains("&quot;kind&quot;: &quot;source&quot;"));
+        assert!(!saved.contains("<script>"));
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn solve_for_variable_rewrites_newton() {
+        let rewritten = match solve_for_variable(NEWTON.to_string(), "force".to_string()) {
+            Ok(source) => source,
+            Err(err) => panic!("{}", err.message),
+        };
+        assert!(rewritten.contains("mass = 840"), "{rewritten}");
+        assert!(!rewritten.contains("force        = 4200"), "{rewritten}");
+        match solve_model(rewritten) {
+            Ok(solved) => {
+                let force = solved
+                    .values
+                    .iter()
+                    .find(|(name, _)| name == "force")
+                    .map(|(_, value)| *value);
+                assert!((force.unwrap() - 4200.0).abs() < 1e-6);
+                assert_eq!(solved.solving, vec!["force".to_string()]);
+            }
+            Err(err) => panic!("{}", err.message),
+        }
     }
 }
 
@@ -455,7 +569,9 @@ fn main() {
             list_templates,
             open_model,
             save_model,
-            new_model
+            new_model,
+            export_report,
+            solve_for_variable
         ])
         .setup(|_app| {
             #[cfg(debug_assertions)]
