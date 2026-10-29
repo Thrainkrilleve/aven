@@ -24,7 +24,11 @@
     main { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); min-height: 0; }
     .pane { background: var(--bg); display: flex; flex-direction: column; min-height: 0; }
     .pane h2 { margin: 0; padding: .5rem 1rem; font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--border); }
-    #editor { flex: 1; width: 100%; resize: none; border: 0; outline: 0; background: #0a0f17; color: var(--text); font-family: var(--mono); font-size: .86rem; line-height: 1.6; padding: 1rem; tab-size: 4; }
+    .editor-wrap { position: relative; flex: 1; min-height: 0; }
+    #editor, #highlight { position: absolute; inset: 0; margin: 0; border: 0; outline: 0; padding: 1rem; font-family: var(--mono); font-size: .86rem; line-height: 1.6; tab-size: 4; white-space: pre; overflow: auto; }
+    #highlight { color: transparent; background: #0a0f17; pointer-events: none; }
+    #editor { color: var(--text); background: transparent; resize: none; caret-color: var(--text); }
+    #highlight mark { color: transparent; background: rgba(248, 113, 113, .38); border-radius: 2px; }
     .out { flex: 1; overflow: auto; padding: 1rem; }
     .toolbar { display: flex; gap: .5rem; padding: .5rem 1rem; border-bottom: 1px solid var(--border); align-items: center; flex-wrap: wrap; }
     .toolbar .spacer { flex: 1; }
@@ -36,10 +40,18 @@
     .trace, .tree { font-family: var(--mono); font-size: .78rem; color: var(--muted); white-space: pre-wrap; margin-top: .9rem; }
     .diag { font-family: var(--mono); font-size: .82rem; color: var(--bad); white-space: pre-wrap; }
     .hash { font-family: var(--mono); font-size: .72rem; color: var(--muted); word-break: break-all; margin-top: .9rem; }
-    .why-row { display: flex; gap: .4rem; margin-top: .9rem; }
-    .why-row input { font: inherit; font-size: .82rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: .3rem .5rem; width: 10rem; font-family: var(--mono); }
     .file-name { font-family: var(--mono); font-size: .75rem; color: var(--muted); }
     .dirty { font-size: .75rem; color: var(--accent); }
+    button.link { background: none; border: 0; color: var(--text); padding: 0; font-family: var(--mono); font-size: .82rem; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+    button.tiny { font-size: .72rem; padding: .15rem .45rem; }
+    input.slot { width: 7.5rem; font: inherit; font-family: var(--mono); font-size: .82rem; text-align: right; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: .15rem .4rem; }
+    .unit { color: var(--muted); }
+    .solving { color: var(--accent); font-size: .72rem; }
+    td.act { text-align: right; white-space: nowrap; }
+    .walk { padding: .65rem 1rem .75rem; border-bottom: 1px solid var(--border); background: #101826; }
+    .walk-kicker { font-size: .68rem; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+    .walk p { margin: .3rem 0 .55rem; font-size: .85rem; line-height: 1.45; }
+    .walk-actions { display: flex; gap: .4rem; }
   </style>
 </head>
 <body>
@@ -64,11 +76,22 @@
         <button id="btn-check">Check units</button>
         <button id="btn-report">Report</button>
       </div>
-      <textarea id="editor" spellcheck="false" aria-label="Aven model source"></textarea>
+      <div class="editor-wrap">
+        <pre id="highlight" aria-hidden="true"></pre>
+        <textarea id="editor" spellcheck="false" aria-label="Aven model source"></textarea>
+      </div>
     </section>
 
     <section class="pane">
       <h2>Results</h2>
+      <div class="walk" id="walk">
+        <div class="walk-kicker">Walkthrough</div>
+        <p id="walk-text"></p>
+        <div class="walk-actions">
+          <button id="walk-next">Next</button>
+          <button id="walk-hide">Hide</button>
+        </div>
+      </div>
       <div class="out" id="out">
         <div class="status" id="status">Loading…</div>
       </div>
@@ -102,11 +125,70 @@
     function fmt(v) { return Number.isFinite(v) ? (Math.abs(v) >= 1000 || v === Math.trunc(v) ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : v.toLocaleString(undefined, { maximumFractionDigits: 4 })) : "—"; }
     function setStatus(text, cls) { statusEl.textContent = text; statusEl.className = "status " + (cls || ""); }
 
-    function valuesTable(values) {
-      return "<table>" + values.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="val">${fmt(v)}</td></tr>`).join("") + "</table>";
+    function valuesTable(r) {
+      const shown = Object.fromEntries(r.shown || []);
+      const units = Object.fromEntries(r.units || []);
+      const solving = new Set(r.solving || []);
+      const bound = new Set(r.bound || []);
+      const canRetarget = bound.size > 0;
+      const rows = (r.values || []).map(([k, v]) => {
+        const n = Object.prototype.hasOwnProperty.call(shown, k) ? shown[k] : v;
+        const unit = units[k] ? ` <span class="unit">${esc(units[k])}</span>` : "";
+        const name = `<button class="link" data-why="${esc(k)}">${esc(k)}</button>`;
+        const editable = bound.has(k);
+        const value = editable
+          ? `<input class="slot" data-bind="${esc(k)}" value="${esc(String(n))}" aria-label="${esc(k)} value" />`
+          : fmt(n);
+        let action = "";
+        if (canRetarget && solving.has(k)) action = `<span class="solving">solving</span>`;
+        else if (editable) action = `<button class="tiny" data-solve="${esc(k)}">Solve for this</button>`;
+        return `<tr><td>${name}</td><td class="val">${value}${unit}</td><td class="act">${action}</td></tr>`;
+      }).join("");
+      return `<table>${rows}</table><div class="tree" id="why-tree"></div>`;
+    }
+
+    function renderHighlight(source, diag) {
+      lastDiag = diag && diag.start && diag.start.line ? diag : null;
+      const pre = document.getElementById("highlight");
+      if (!diag || !diag.start || !diag.start.line) {
+        pre.textContent = source;
+        pre.scrollTop = editor.scrollTop;
+        pre.scrollLeft = editor.scrollLeft;
+        return;
+      }
+      const lines = source.split("\n");
+      const startLine = diag.start.line;
+      const startCol = Math.max(1, diag.start.col || 1);
+      const endLine = diag.end && diag.end.line ? diag.end.line : startLine;
+      const endCol = diag.end && diag.end.col ? diag.end.col : ((lines[startLine - 1] || "").length + 1);
+      let html = "";
+      lines.forEach((line, i) => {
+        const n = i + 1;
+        if (n < startLine || n > endLine) {
+          html += esc(line);
+        } else if (n === startLine && n === endLine) {
+          const a = Math.min(startCol - 1, line.length);
+          const b = Math.min(Math.max(endCol - 1, a), line.length);
+          const marked = line.slice(a, b);
+          html += esc(line.slice(0, a)) + "<mark>" + esc(marked || " ") + "</mark>" + esc(line.slice(b));
+        } else if (n === startLine) {
+          const a = Math.min(startCol - 1, line.length);
+          html += esc(line.slice(0, a)) + "<mark>" + esc(line.slice(a) || " ") + "</mark>";
+        } else if (n === endLine) {
+          const b = Math.min(Math.max(endCol - 1, 0), line.length);
+          html += "<mark>" + esc(line.slice(0, b) || " ") + "</mark>" + esc(line.slice(b));
+        } else {
+          html += "<mark>" + esc(line || " ") + "</mark>";
+        }
+        if (i < lines.length - 1) html += "\n";
+      });
+      pre.innerHTML = html;
+      pre.scrollTop = editor.scrollTop;
+      pre.scrollLeft = editor.scrollLeft;
     }
 
     let requestId = 0;
+    let lastDiag = null;
     function begin(label) {
       const id = ++requestId;
       const source = editor.value;
@@ -124,6 +206,73 @@
     function showFailure(id, d) {
       if (!current(id)) return;
       setStatus(failureText(d), "bad");
+      if (d && d.start && d.start.line) renderHighlight(editor.value, d);
+    }
+
+    function showSolved(r) {
+      setStatus("Solved", "ok");
+      renderHighlight(editor.value, null);
+      out.insertAdjacentHTML("beforeend", valuesTable(r));
+      if (r.trace && r.trace.length) out.insertAdjacentHTML("beforeend", `<div class="trace">${esc(r.trace.join("\n"))}</div>`);
+      wireResults();
+    }
+
+    async function showWhy(name) {
+      const tree = document.getElementById("why-tree");
+      if (!tree || !name) return;
+      try {
+        const text = await invoke("why_model", { source: editor.value, variable: name, depth: null });
+        tree.textContent = text;
+      } catch (d) {
+        tree.textContent = failureText(d);
+      }
+    }
+
+    async function retarget(name) {
+      try {
+        const next = await invoke("solve_for_variable", { source: editor.value, target: name });
+        editor.value = next;
+        refreshDirty();
+        renderHighlight(next, null);
+        await refresh();
+      } catch (d) {
+        const run = begin("Solving…");
+        showFailure(run.id, d);
+      }
+    }
+
+    function wireResults() {
+      out.querySelectorAll("[data-why]").forEach((btn) => {
+        btn.addEventListener("click", () => showWhy(btn.getAttribute("data-why")));
+      });
+      out.querySelectorAll("[data-solve]").forEach((btn) => {
+        btn.addEventListener("click", () => retarget(btn.getAttribute("data-solve")));
+      });
+      out.querySelectorAll("[data-bind]").forEach((input) => {
+        input.addEventListener("change", () => setBinding(input.getAttribute("data-bind"), input.value.trim()));
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") input.blur();
+        });
+      });
+    }
+
+    function setBinding(name, raw) {
+      if (!name || raw === "") return;
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const pattern = new RegExp("^(\\s*" + escaped + "\\s*=\\s*)(-?(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][+-]?\\d+)?)");
+      const lines = editor.value.split("\n");
+      let hit = false;
+      const next = lines.map((line) => {
+        if (hit || !pattern.test(line)) return line;
+        hit = true;
+        return line.replace(pattern, "$1" + raw);
+      });
+      if (!hit) return;
+      editor.value = next.join("\n");
+      refreshDirty();
+      renderHighlight(editor.value, null);
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(refresh, 200);
     }
 
     async function solve() {
@@ -131,11 +280,7 @@
       try {
         const r = await invoke("solve_model", { source: run.source });
         if (!current(run.id)) return;
-        setStatus("Solved", "ok");
-        out.insertAdjacentHTML("beforeend", valuesTable(r.values));
-        if (r.trace && r.trace.length) out.insertAdjacentHTML("beforeend", `<div class="trace">${esc(r.trace.join("\n"))}</div>`);
-        out.insertAdjacentHTML("beforeend", whyRowHtml());
-        wireWhy();
+        showSolved(r);
       } catch (d) {
         showFailure(run.id, d);
       }
@@ -147,8 +292,9 @@
         const diags = await invoke("check_model", { source: run.source });
         if (!current(run.id)) return;
         if (!Array.isArray(diags)) { showFailure(run.id, "Check did not return a diagnostic list"); return; }
-        if (!diags.length) { setStatus("No unit or structure errors", "ok"); return; }
+        if (!diags.length) { setStatus("No unit or structure errors", "ok"); renderHighlight(run.source, null); return; }
         setStatus(diags[0].message, "bad");
+        renderHighlight(run.source, diags[0]);
         if (diags.length > 1) {
           out.insertAdjacentHTML("beforeend", diags.map(d => `<div class="diag">${esc(d.message)}</div>`).join(""));
         }
@@ -158,34 +304,19 @@
     }
 
     async function report() {
-      const run = begin("Building report…");
+      const run = begin("Exporting report…");
       try {
-        const r = await invoke("report_model", { source: run.source });
+        const saved = await invoke("export_report", { source: run.source });
         if (!current(run.id)) return;
-        setStatus("Report", "ok");
-        out.insertAdjacentHTML("beforeend", valuesTable(r.values));
-        out.insertAdjacentHTML("beforeend", `<div class="hash">source sha256: ${esc(r.source_sha256)}<br>ledger head: ${esc(r.ledger_head)}</div>`);
+        if (!saved) { setStatus("Report not saved", ""); return; }
+        const r = await invoke("solve_model", { source: run.source });
+        if (!current(run.id)) return;
+        showSolved(r);
+        setStatus("Report saved as " + saved.name, "ok");
+        out.insertAdjacentHTML("beforeend", `<div class="hash">source sha256: ${esc(saved.source_sha256)}<br>ledger head: ${esc(saved.ledger_head)}</div>`);
       } catch (d) {
         showFailure(run.id, d);
       }
-    }
-
-    function whyRowHtml() {
-      return `<div class="why-row"><input id="why-var" placeholder="variable" /><button id="btn-why">Why?</button></div><div class="tree" id="why-tree"></div>`;
-    }
-    function wireWhy() {
-      const btn = document.getElementById("btn-why");
-      if (!btn) return;
-      btn.addEventListener("click", async () => {
-        const v = document.getElementById("why-var").value.trim();
-        if (!v) return;
-        try {
-          const tree = await invoke("why_model", { source: editor.value, variable: v, depth: null });
-          document.getElementById("why-tree").textContent = tree;
-        } catch (d) {
-          document.getElementById("why-tree").textContent = d.message || "no derivation";
-        }
-      });
     }
 
     document.getElementById("btn-solve").addEventListener("click", solve);
@@ -203,6 +334,7 @@
         if (!Array.isArray(diags)) { showFailure(run.id, "Check did not return a diagnostic list"); return; }
         if (diags.length) {
           setStatus(diags[0].message, "bad");
+          renderHighlight(run.source, diags[0]);
           if (diags.length > 1) {
             out.insertAdjacentHTML("beforeend", diags.map(d => `<div class="diag">${esc(d.message)}</div>`).join(""));
           }
@@ -210,17 +342,16 @@
         }
         const r = await invoke("solve_model", { source: run.source });
         if (!current(run.id)) return;
-        setStatus("Solved", "ok");
-        out.insertAdjacentHTML("beforeend", valuesTable(r.values));
-        if (r.trace && r.trace.length) out.insertAdjacentHTML("beforeend", `<div class="trace">${esc(r.trace.join("\n"))}</div>`);
-        out.insertAdjacentHTML("beforeend", whyRowHtml());
-        wireWhy();
+        showSolved(r);
       } catch (d) {
         showFailure(run.id, d);
       }
     }
+    editor.addEventListener("scroll", () => renderHighlight(editor.value, lastDiag));
     editor.addEventListener("input", () => {
       refreshDirty();
+      lastDiag = null;
+      renderHighlight(editor.value, null);
       if (!invoke) return;
       clearTimeout(refreshTimer);
       refreshTimer = setTimeout(refresh, 400);
@@ -272,8 +403,35 @@
       });
       editor.value = templates[0].source;
       markSaved(templates[0].source, "Untitled");
+      renderHighlight(editor.value, null);
       solve();
     }
+
+    const WALK = [
+      "Newton is loaded. Force is 4,200 and acceleration is 5. Mass was left blank, so it solves backward.",
+      "Change the force field from 4200 to 8400. Mass updates on its own.",
+      "In the results, choose Solve for this on force. Force becomes the blank, and mass is pinned.",
+      "Export the report. The HTML file holds this source and the ledger hash of those exact bytes. A unit that does not match stays a sentence and marks the line."
+    ];
+    let walkStep = 0;
+    function renderWalk() {
+      const box = document.getElementById("walk");
+      if (box.hidden) return;
+      document.getElementById("walk-text").textContent = WALK[walkStep];
+      document.getElementById("walk-next").textContent = walkStep === WALK.length - 1 ? "Done" : "Next";
+    }
+    document.getElementById("walk-next").addEventListener("click", () => {
+      if (walkStep >= WALK.length - 1) {
+        document.getElementById("walk").hidden = true;
+        return;
+      }
+      walkStep += 1;
+      renderWalk();
+    });
+    document.getElementById("walk-hide").addEventListener("click", () => {
+      document.getElementById("walk").hidden = true;
+    });
+    renderWalk();
     boot();
   </script>
 </body>
