@@ -30,9 +30,10 @@ pub enum Severity {
 
 /// One diagnostic with a start–end range, so an editor can underline the span.
 ///
-/// `end` is best-effort today (equal to `start` until the lexer carries token
-/// spans); the range is in the type from day one so filling it in later is not
-/// an API change.
+/// `end` is the exclusive end of the source line that contains `start` (one
+/// column past the last character). Solver errors that have no source line
+/// stay a point at 0,0. A tighter token span can replace the line span later
+/// without changing this type.
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub severity: Severity,
@@ -61,6 +62,22 @@ pub struct Solved {
     pub trace: Vec<String>,
 }
 
+/// A diagnostic anchored at `line`/`col`, with `end` at the end of that line so
+/// an editor can underline the whole line. Solver errors reported at 0,0 stay
+/// a point: they have no source line.
+fn located(source: &str, message: impl Into<String>, line: usize, col: usize) -> Diagnostic {
+    let mut d = Diagnostic::error(message, line, col);
+    if line >= 1 {
+        if let Some(text) = source.lines().nth(line - 1) {
+            let end_col = text.chars().count() + 1;
+            if end_col > col {
+                d.end = Pos { line, col: end_col };
+            }
+        }
+    }
+    d
+}
+
 /// Check a model for lex, parse, and dimensional (unit) errors. Returns an
 /// empty vec when the model is clean.
 ///
@@ -69,17 +86,17 @@ pub struct Solved {
 pub fn check(source: &str) -> Vec<Diagnostic> {
     let tokens = match Lexer::new(source).tokenize() {
         Ok(t) => t,
-        Err(e) => return vec![Diagnostic::error(e.message.clone(), e.line, e.col)],
+        Err(e) => return vec![located(source, e.message.clone(), e.line, e.col)],
     };
     let module = match Parser::new(tokens).parse_module("model") {
         Ok(m) => m,
-        Err(e) => return vec![Diagnostic::error(e.message.clone(), e.line, e.col)],
+        Err(e) => return vec![located(source, e.message.clone(), e.line, e.col)],
     };
     match DimensionalChecker::new().check_module(&module) {
         Ok(_) => Vec::new(),
         Err(e) => {
             let (line, col) = e.position();
-            vec![Diagnostic::error(strip_locator(&e.to_string()), line, col)]
+            vec![located(source, strip_locator(&e.to_string()), line, col)]
         }
     }
 }
@@ -87,13 +104,21 @@ pub fn check(source: &str) -> Vec<Diagnostic> {
 /// Solve a model in whatever direction its `solve` block leaves open — forward
 /// where it can, backward (Newton) where it must. Mirrors `avenc run`'s pure
 /// path; external / IPC / shared-memory backends are not invoked here.
+///
+/// Solve-block numbers are converted to base units first, the same conversion
+/// `why` and `report` already apply, so a binding written `90 km/h` is solved
+/// as metres per second.
 pub fn solve(source: &str) -> Result<Solved, Diagnostic> {
     let tokens = Lexer::new(source)
         .tokenize()
-        .map_err(|e| Diagnostic::error(e.message.clone(), e.line, e.col))?;
-    let module = Parser::new(tokens)
+        .map_err(|e| located(source, e.message.clone(), e.line, e.col))?;
+    let mut module = Parser::new(tokens)
         .parse_module("model")
-        .map_err(|e| Diagnostic::error(e.message.clone(), e.line, e.col))?;
+        .map_err(|e| located(source, e.message.clone(), e.line, e.col))?;
+    normalize_bindings(&mut module).map_err(|e| {
+        let (line, col) = e.position();
+        located(source, strip_locator(&e.to_string()), line, col)
+    })?;
 
     let mut solver = SolverEngine::new();
     for blk in &module.blocks {
@@ -129,7 +154,7 @@ pub fn solve(source: &str) -> Result<Solved, Diagnostic> {
         }),
         // Solver errors (under-determined, infeasible, …) have no single source
         // position; report at 0,0 with the engine's own message.
-        Err(e) => Err(Diagnostic::error(format!("{e}"), 0, 0)),
+        Err(e) => Err(located(source, format!("{e}"), 0, 0)),
     }
 }
 
@@ -296,6 +321,21 @@ mod tests {
         let diags = check(src);
         assert!(!diags.is_empty(), "expected a dimensional error");
         assert!(diags[0].start.line >= 1);
+        assert_eq!(diags[0].end.line, diags[0].start.line);
+        assert!(
+            diags[0].end.col > diags[0].start.col,
+            "span should cover the rest of the line, got {:?}",
+            (diags[0].start, diags[0].end)
+        );
+    }
+
+    #[test]
+    fn solve_converts_declared_units_before_solving() {
+        // 90 km/h = 25 m/s, 2.5 h = 9000 s, distance = 225_000 m.
+        let src = "signal speed : km/h\nsignal time : h\nrelation Travel {\n distance = speed * time\n}\nsolve Travel with {\n speed = 90 km/h\n time = 2.5 h\n}\n";
+        let solved = solve(src).expect("should solve");
+        let distance = solved.values.get("distance").copied().expect("distance");
+        assert!((distance - 225_000.0).abs() < 1e-6, "distance = {distance}");
     }
 
     #[test]
