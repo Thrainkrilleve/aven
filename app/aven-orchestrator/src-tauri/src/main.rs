@@ -192,6 +192,42 @@ solve FlightDynamics with {
 }
 "#;
 
+#[cfg(test)]
+mod ide_tests {
+    use super::{check_model, solve_model, FLIGHT, NEWTON, SERVER_CAPACITY};
+
+    #[test]
+    fn shipped_templates_check_clean_and_solve() {
+        for src in [NEWTON, SERVER_CAPACITY, FLIGHT] {
+            let diags = check_model(src.to_string());
+            assert!(
+                diags.is_empty(),
+                "{src}\n{}",
+                diags
+                    .iter()
+                    .map(|d| d.message.clone())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
+            match solve_model(src.to_string()) {
+                Ok(_) => {}
+                Err(err) => panic!("template failed to solve: {}\n{src}", err.message),
+            }
+        }
+    }
+
+    #[test]
+    fn solve_model_refuses_adding_a_speed_to_a_time() {
+        let src = "signal v : km/h\nsignal t : s\nrelation R {\n bad = v + t\n}\nsolve R with {\n v = 10 km/h\n t = 2 s\n}\n";
+        let err = match solve_model(src.to_string()) {
+            Err(err) => err,
+            Ok(_) => panic!("the IDE must not call this valid"),
+        };
+        assert_eq!(err.message, "Can't add m·s^-1 to s (line 4).");
+        assert_eq!(check_model(src.to_string())[0].message, err.message);
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![

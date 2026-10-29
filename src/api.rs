@@ -10,7 +10,7 @@ use crate::ledger::{DEFAULT_MAX_DEPTH, Fact, Ledger};
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::solver::SolverEngine;
-use crate::units::{DimensionalChecker, normalize_bindings};
+use crate::units::{DimensionalChecker, TypeError, normalize_bindings};
 use std::collections::{BTreeMap, HashMap};
 
 /// A source position: 1-based line, 1-based column.
@@ -96,8 +96,26 @@ pub fn check(source: &str) -> Vec<Diagnostic> {
         Ok(_) => Vec::new(),
         Err(e) => {
             let (line, col) = e.position();
-            vec![located(source, strip_locator(&e.to_string()), line, col)]
+            vec![located(source, plain_type_message(&e), line, col)]
         }
+    }
+}
+
+/// The sentence the IDE shows. Addition and subtraction name the two dimensions
+/// the way a person would; every other checker error keeps its own wording,
+/// without the "Type Error at line" prefix the range already carries.
+fn plain_type_message(err: &TypeError) -> String {
+    match err {
+        TypeError::DimensionalMismatch {
+            left_dim,
+            right_dim,
+            op,
+            line,
+            ..
+        } if op == "+/-" => {
+            format!("Can't add {left_dim} to {right_dim} (line {line}).")
+        }
+        other => strip_locator(&other.to_string()),
     }
 }
 
@@ -109,6 +127,11 @@ pub fn check(source: &str) -> Vec<Diagnostic> {
 /// `why` and `report` already apply, so a binding written `90 km/h` is solved
 /// as metres per second.
 pub fn solve(source: &str) -> Result<Solved, Diagnostic> {
+    // A model that fails check must not come back as a settled number. The
+    // solver adds the raw magnitudes, so km/h + s would otherwise "solve".
+    if let Some(d) = check(source).into_iter().next() {
+        return Err(d);
+    }
     let tokens = Lexer::new(source)
         .tokenize()
         .map_err(|e| located(source, e.message.clone(), e.line, e.col))?;
@@ -222,6 +245,9 @@ pub fn report(source: &str) -> Result<Report, Diagnostic> {
 /// path does, for the pure-relation case (no external/IPC/SHM backends).
 /// Shared by `why` and `report`.
 fn run_with_ledger(source: &str) -> Result<(Ledger, BTreeMap<String, f64>), Diagnostic> {
+    if let Some(d) = check(source).into_iter().next() {
+        return Err(d);
+    }
     let tokens = Lexer::new(source)
         .tokenize()
         .map_err(|e| Diagnostic::error(e.message.clone(), e.line, e.col))?;
@@ -351,6 +377,30 @@ mod tests {
         let solved = solve(src).expect("should solve");
         let mass = solved.values.get("mass").copied().expect("mass settled");
         assert!((mass - 840.0).abs() < 1e-9, "mass = {mass}");
+    }
+
+    #[test]
+    fn solve_refuses_a_unit_mismatch_instead_of_returning_a_number() {
+        let src = "signal v : km/h\nsignal t : s\nrelation R {\n bad = v + t\n}\nsolve R with {\n v = 10 km/h\n t = 2 s\n}\n";
+        let err = solve(src).expect_err("adding km/h to s must not settle a value");
+        assert_eq!(err.message, "Can't add m·s^-1 to s (line 4).");
+        assert_eq!(check(src)[0].message, err.message);
+        assert_eq!(
+            report(src).expect_err("a bad model has no report").message,
+            err.message
+        );
+        assert_eq!(
+            why(src, "bad", None)
+                .expect_err("a bad model has no derivation")
+                .message,
+            err.message
+        );
+    }
+
+    #[test]
+    fn solve_refuses_text_that_is_not_a_model() {
+        let err = solve("not a model").expect_err("prose must not solve");
+        assert!(err.message.contains("expected"), "{}", err.message);
     }
 
     #[test]

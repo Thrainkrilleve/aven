@@ -81,37 +81,67 @@
       return "<table>" + values.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="val">${fmt(v)}</td></tr>`).join("") + "</table>";
     }
 
+    let requestId = 0;
+    function begin(label) {
+      const id = ++requestId;
+      const source = editor.value;
+      out.innerHTML = "";
+      out.appendChild(statusEl);
+      setStatus(label);
+      return { id, source };
+    }
+    function current(id) { return id === requestId; }
+    function failureText(d) {
+      if (typeof d === "string" && d) return d;
+      if (d && typeof d.message === "string" && d.message) return d.message;
+      return "Could not run this model";
+    }
+    function showFailure(id, d) {
+      if (!current(id)) return;
+      setStatus(failureText(d), "bad");
+    }
+
     async function solve() {
-      out.innerHTML = ""; out.appendChild(statusEl); setStatus("Solving…");
+      const run = begin("Solving…");
       try {
-        const r = await invoke("solve_model", { source: editor.value });
+        const r = await invoke("solve_model", { source: run.source });
+        if (!current(run.id)) return;
         setStatus("Solved", "ok");
         out.insertAdjacentHTML("beforeend", valuesTable(r.values));
         if (r.trace && r.trace.length) out.insertAdjacentHTML("beforeend", `<div class="trace">${esc(r.trace.join("\n"))}</div>`);
         out.insertAdjacentHTML("beforeend", whyRowHtml());
         wireWhy();
       } catch (d) {
-        setStatus(d.message ? `${d.severity || "error"}: ${d.message}` : "solve failed", "bad");
+        showFailure(run.id, d);
       }
     }
 
     async function check() {
-      out.innerHTML = ""; out.appendChild(statusEl); setStatus("Checking…");
-      const diags = await invoke("check_model", { source: editor.value });
-      if (!diags.length) { setStatus("No unit or structure errors", "ok"); return; }
-      setStatus(`${diags.length} issue${diags.length === 1 ? "" : "s"}`, "bad");
-      out.insertAdjacentHTML("beforeend", diags.map(d => `<div class="diag">line ${d.start.line}, col ${d.start.col}: ${esc(d.message)}</div>`).join(""));
+      const run = begin("Checking…");
+      try {
+        const diags = await invoke("check_model", { source: run.source });
+        if (!current(run.id)) return;
+        if (!Array.isArray(diags)) { showFailure(run.id, "Check did not return a diagnostic list"); return; }
+        if (!diags.length) { setStatus("No unit or structure errors", "ok"); return; }
+        setStatus(diags[0].message, "bad");
+        if (diags.length > 1) {
+          out.insertAdjacentHTML("beforeend", diags.map(d => `<div class="diag">${esc(d.message)}</div>`).join(""));
+        }
+      } catch (d) {
+        showFailure(run.id, d);
+      }
     }
 
     async function report() {
-      out.innerHTML = ""; out.appendChild(statusEl); setStatus("Building report…");
+      const run = begin("Building report…");
       try {
-        const r = await invoke("report_model", { source: editor.value });
+        const r = await invoke("report_model", { source: run.source });
+        if (!current(run.id)) return;
         setStatus("Report", "ok");
         out.insertAdjacentHTML("beforeend", valuesTable(r.values));
         out.insertAdjacentHTML("beforeend", `<div class="hash">source sha256: ${esc(r.source_sha256)}<br>ledger head: ${esc(r.ledger_head)}</div>`);
       } catch (d) {
-        setStatus(d.message ? `${d.severity || "error"}: ${d.message}` : "report failed", "bad");
+        showFailure(run.id, d);
       }
     }
 
