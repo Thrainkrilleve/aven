@@ -100,7 +100,8 @@ fn shipped_aerodynamics_example_converts_km_per_hour() {
     let env = settled(&run);
     assert_value(&env, "velocity", 250.0, "km/h");
     assert_value(&env, "dynamic_pressure", 2953.8002, "Pa");
-    assert_value(&env, "lift", 2953.8002 * 32.0 * 0.55, "");
+    // lift_coeff is declared `scalar` (dimensionless), so lift is inferred in newtons.
+    assert_value(&env, "lift", 2953.8002 * 32.0 * 0.55, "N");
 }
 
 #[test]

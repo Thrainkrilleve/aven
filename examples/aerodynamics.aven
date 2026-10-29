@@ -4,6 +4,7 @@ unit velocity_unit : knots, mach
 signal velocity : km/h
 signal wing_area : m^2
 signal air_density : kg/m^3
+signal lift_coeff : scalar
 
 relation Aerodynamics {
     dynamic_pressure = 0.5 * air_density * velocity^2

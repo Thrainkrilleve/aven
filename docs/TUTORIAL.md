@@ -109,6 +109,7 @@ unit velocity_unit : knots, mach
 signal velocity : km/h
 signal wing_area : m^2
 signal air_density : kg/m^3
+signal lift_coeff : scalar
 
 relation Aerodynamics {
     dynamic_pressure = 0.5 * air_density * velocity^2
@@ -134,15 +135,15 @@ Solver Trace:
 Settled Environment:
   air_density      = 1.2250 kg/m^3
   dynamic_pressure = 2953.8002 Pa
-  lift             = 51986.8827
-  lift_coeff       = 0.5500
+  lift             = 51986.8827 N
+  lift_coeff       = 0.5500 scalar
   velocity         = 250.0000 km/h
   wing_area        = 32.0000 m^2
 
 Fact Ledger: 6 facts settled.
 ```
 
-250 km/h was solved as 69.44 m/s, so the dynamic pressure is in pascals. `lift` carries no label because `lift_coeff` has no unit, which leaves the dimension of `lift` unknown.
+250 km/h was solved as 69.44 m/s, so the dynamic pressure is in pascals. `lift_coeff` is declared `scalar` (dimensionless), so `lift` is inferred as newtons; leaving the coefficient without a unit would leave `lift`'s dimension unknown.
 
 If an equation mixes incompatible dimensions, `avenc check` (and `run`) stop before anything executes:
 ```aven-error

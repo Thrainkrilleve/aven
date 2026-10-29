@@ -1,0 +1,31 @@
+// flight_mesh.aven — ISA atmosphere & flight dynamics, solved in any direction.
+//
+// Inputs declare their units, so Aven checks dimensions across the model and
+// converts on the way in (surface_temp is given in degC, solved in kelvin) and
+// on the way out (dynamic_pressure in pascals, lift in newtons). This solve
+// gives a target lift and leaves airspeed unknown, so Aven settles it backward.
+
+signal altitude     : m
+signal surface_temp : degC
+signal airspeed     : m/s
+signal air_density  : kg/m^3
+signal wing_area    : m^2
+signal lift_coeff   : scalar
+
+relation FlightDynamics {
+    // ISA troposphere: temperature falls at the lapse rate with altitude.
+    ambient_temp     = surface_temp - lapse_rate * altitude
+    // Dynamic pressure and the lift it produces over the wing.
+    dynamic_pressure = 0.5 * air_density * airspeed^2
+    lift             = dynamic_pressure * wing_area * lift_coeff
+}
+
+solve FlightDynamics with {
+    surface_temp = 15 degC
+    altitude     = 3000 m
+    air_density  = 0.909 kg/m^3
+    lapse_rate   = 0.0065
+    wing_area    = 32 m^2
+    lift_coeff   = 0.55
+    lift         = 90000 N
+}

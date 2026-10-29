@@ -42,43 +42,32 @@ Unlike traditional imperative languages where functions require hardcoded input/
 ## System Architecture
 
 ```
-                       ┌────────────────────────────────────────────────────────┐
-                       │                     Aven Source                        │
-                       │                (*.aven specification)                  │
-                       └───────────────────────────┬────────────────────────────┘
-                                                   │
-                                                   ▼
-                       ┌────────────────────────────────────────────────────────┐
-                       │                     avenc Compiler                     │
-                       │  ┌───────────────┐  ┌──────────────┐  ┌─────────────┐  │
-                       │  │ Pure Std Lexer│─►│ AST & Parser │─►│  VarMap &   │  │
-                       │  │ & Tokenizer   │  │  Validation  │  │ Constraints │  │
-                       │  └───────────────┘  └──────────────┘  └──────┬──────┘  │
-                       └──────────────────────────────────────────────┼─────────┘
-                                                                      │
-                                   ┌──────────────────────────────────┴──────────────────────────────────┐
-                                   ▼                                                                     ▼
-┌──────────────────────────────────────────────────────────────┐       ┌──────────────────────────────────────────────────────────────┐
-│                  Relational Solver Engine                    │       │                 Direction-Pinned C Transpiler                │
-│  - Symbolic differentiation & Newton backward solving       │       │  - Topological sort of dependency graph                      │
-│  - Guarded Newton-Raphson relaxation                         │       │  - Zero-solver, deterministic forward evaluation              │
-│  - Inequality bounds enforcement (min / max / domain)        │       │  - Emits clean, dependency-free C99 code                     │
-└──────────────────────────────┬───────────────────────────────┘       └──────────────────────────────┬───────────────────────────────┘
-                               │                                                                      │
-                               ▼                                                                      ▼
-┌──────────────────────────────────────────────────────────────┐       ┌──────────────────────────────────────────────────────────────┐
-│                  Telemetry & Invariant Fusion                │       │                  Embedded / Bare-Metal Binary                │
-│  - Subprocess Adapters: using external("python", "sim.py")   │       │  - Microcontrollers, RTOS kernels, PLC runtimes             │
-│  - Persistent IPC Daemons: using ipc("127.0.0.1:9090")       │       │  - Microsecond deterministic execution                       │
-└──────────────────────────────┬───────────────────────────────┘       └──────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
-┌──────────────────────────────────────────────────────────────┐
-│             Cryptographic Fact Ledger & Provenance           │
-│  - Immutable append-only audit trail                         │
-│  - SHA-256 hash chain, HMAC signing, payload hashes          │
-│  - Freshness (TTL) enforcement & stale state protection      │
-└──────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│ Aven Source  (*.aven specification)                            │
+└────────────────────────────────┬───────────────────────────────┘
+                                 ▼
+┌────────────────────────────────────────────────────────────────┐
+│ avenc Compiler   (pure std, zero dependencies)                 │
+│ Lexer → AST & Parser → VarMap & Constraints                    │
+└────────────────────────────────┬───────────────────────────────┘
+                ┌────────────────┴──────────────────┐
+                ▼                                   ▼
+┌──────────────────────────────┐    ┌──────────────────────────────┐
+│ Relational Solver Engine     │    │ Direction-Pinned             │
+│ Newton + symbolic diff,      │    │ C / WASM Transpiler          │
+│ bounds, optimization         │    │ branchless, solver-free      │
+└───────────────┬──────────────┘    └───────────────┬──────────────┘
+                ▼                                   ▼
+┌──────────────────────────────┐    ┌──────────────────────────────┐
+│ Telemetry & IPC Fusion       │    │ Embedded / Bare-Metal        │
+│ external / ipc / shm /       │    │ MCUs, RTOS, PLC              │
+│ native adapters              │    │ runtimes                     │
+└───────────────┬──────────────┘    └──────────────────────────────┘
+                ▼
+┌────────────────────────────────────────────────────────────────┐
+│ Cryptographic Fact Ledger & Provenance                         │
+│ SHA-256 hash chain, HMAC signing, TTL freshness                │
+└────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -89,42 +78,46 @@ Unlike traditional imperative languages where functions require hardcoded input/
 A relation describes mathematical invariants that must hold true. Any unknown can be solved given sufficient inputs:
 
 ```aven
-// flight_mesh.aven — Atmospheric lapse & flight dynamics
-relation FlightAtmosphericDynamics {
-    // 1. ISA atmosphere: troposphere lapse capped at the 11 km tropopause, isothermal above
-    surface_temp_k = surface_temp_c + 273.15
-    lapse_rate = 0.0065
-    tropopause_m = 11000.0
-    troposphere_m = (baro_altitude_m + tropopause_m - abs(baro_altitude_m - tropopause_m)) / 2.0
-    above_tropopause_m = baro_altitude_m - troposphere_m
-    ambient_temp_k = surface_temp_k - (lapse_rate * troposphere_m)
-    ambient_temp_c = ambient_temp_k - 273.15
+// examples/flight_mesh.aven — ISA atmosphere & flight dynamics
+// Inputs declare their units, so Aven checks dimensions and converts on the
+// way in (surface_temp in degC, solved in kelvin) and out (lift in newtons).
+signal altitude     : m
+signal surface_temp : degC
+signal airspeed     : m/s
+signal air_density  : kg/m^3
+signal wing_area    : m^2
+signal lift_coeff   : scalar
 
-    // 2. Barometric Pressure & Air Density
-    pressure_ratio = 1.0 - ((lapse_rate * troposphere_m) / surface_temp_k)
-    ambient_pressure_pa = (surface_altim_hpa * 100.0) * (pressure_ratio ^ 5.2561) * exp(-(9.80665 / 287.058) * above_tropopause_m / ambient_temp_k)
-    air_density_kg_m3 = ambient_pressure_pa / (287.058 * ambient_temp_k)
-
-    // 3. High-Speed Aerodynamics & Compressibility
-    safe_temp_k = ambient_temp_k + 0.0001
-    speed_of_sound_ms = sqrt(1.4 * 287.058 * safe_temp_k)
-    mach_number = velocity_ms / (speed_of_sound_ms + 0.0001)
-    dynamic_pressure_pa = 0.5 * air_density_kg_m3 * (velocity_ms ^ 2)
-
-    // 4. Specific Excess Climb Power & Terrain Clearance
-    specific_excess_power_w_kg = 9.80665 * vertical_rate_ms
-    terrain_clearance_m = baro_altitude_m - gauge_elevation_m
+relation FlightDynamics {
+    ambient_temp     = surface_temp - lapse_rate * altitude
+    dynamic_pressure = 0.5 * air_density * airspeed^2
+    lift             = dynamic_pressure * wing_area * lift_coeff
 }
 
-solve FlightAtmosphericDynamics with {
-    velocity_ms >= 0.0
-    velocity_ms <= 400.0
-    mach_number >= 0.0
-    mach_number <= 1.2
-    ambient_temp_c >= -80.0
-    ambient_temp_c <= 60.0
-    terrain_clearance_m >= -100.0
+// Give a target lift and leave airspeed unknown — Aven solves it backward.
+solve FlightDynamics with {
+    surface_temp = 15 degC
+    altitude     = 3000 m
+    air_density  = 0.909 kg/m^3
+    lapse_rate   = 0.0065
+    wing_area    = 32 m^2
+    lift_coeff   = 0.55
+    lift         = 90000 N
 }
+```
+
+```text
+Solver Trace:
+  [ambient_temp = surface_temp - lapse_rate * altitude] ambient_temp <- forward eval
+  [lift = dynamic_pressure * wing_area * lift_coeff] dynamic_pressure <- backward Newton
+  [dynamic_pressure = 0.5 * air_density * airspeed ^ 2] airspeed <- backward Newton
+
+Settled Environment:
+  airspeed         = 106.0713 m/s
+  ambient_temp     = 268.6500 K
+  dynamic_pressure = 5113.6364 Pa
+  lift             = 90000.0000 N
+  ...
 ```
 
 ### 2. High-Performance Persistent IPC Daemon
@@ -132,10 +125,10 @@ For real-time control and high-frequency streams, declare relations backed by pe
 
 ```aven
 // Connect directly to a persistent telemetry daemon via local TCP socket
-relation FlightAtmosphericDynamics using ipc("127.0.0.1:9090") {
-    // The daemon supplies facts over TCP; these equations are solved over them
-    speed_of_sound_ms = sqrt(1.4 * 287.058 * ambient_temp_k)
-    mach_number = velocity_ms / speed_of_sound_ms
+relation FlightDynamics using ipc("127.0.0.1:9090") {
+    // The daemon supplies the observed facts over TCP; these equations solve over them
+    dynamic_pressure = 0.5 * air_density * airspeed^2
+    lift             = dynamic_pressure * wing_area * lift_coeff
 }
 ```
 
@@ -204,14 +197,14 @@ Solver Trace:
 Settled Environment:
   air_density      = 1.2250 kg/m^3
   dynamic_pressure = 2953.8002 Pa
-  lift             = 51986.8827
-  lift_coeff       = 0.5500
+  lift             = 51986.8827 N
+  lift_coeff       = 0.5500 scalar
   velocity         = 250.0000 km/h
   wing_area        = 32.0000 m^2
 
 Fact Ledger: 6 facts settled.
 ```
-Values print in their declared unit, or in the base unit of their inferred dimension. `lift` has no label because `lift_coeff` was given no unit, so the dimension of `lift` is unknown. `--json` prints base-unit values with a `units` map.
+Values print in their declared unit, or in the base unit of their inferred dimension. `lift_coeff` is declared `scalar` (dimensionless), so `lift` is inferred as newtons; a coefficient left without a unit would leave `lift`'s dimension unknown and unlabelled. `--json` prints base-unit values with a `units` map.
 
 ### Check Model Invariants & Constraints
 ```bash

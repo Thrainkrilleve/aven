@@ -379,6 +379,11 @@ impl Default for UnitRegistry {
         // Amount of substance (base: mole)
         reg.register("mol", Dim::AMOUNT, 1.0);
 
+        // Dimensionless (ratios, coefficients): declares a quantity as a pure
+        // scalar so products carry the dimension of the other factors.
+        reg.register("scalar", Dim::SCALAR, 1.0);
+        reg.register("ratio", Dim::SCALAR, 1.0);
+
         // Angle (base: radian)
         reg.register("rad", Dim::ANGLE, 1.0);
         reg.register("deg", Dim::ANGLE, std::f64::consts::PI / 180.0);
