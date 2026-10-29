@@ -1,6 +1,6 @@
 # Aven
 
-**Declarative Invariant Programming & Relational Multi-Physics Engine**
+**Relational programming for physical systems**
 
 [![CI](https://github.com/Thrainkrilleve/aven/actions/workflows/ci.yml/badge.svg)](https://github.com/Thrainkrilleve/aven/actions/workflows/ci.yml)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-pure%20Rust%20std-blue.svg)](#key-capabilities)
@@ -31,7 +31,7 @@ Unlike traditional imperative languages where functions require hardcoded input/
 - **Omnidirectional Relational Solving:** Declare physical relations naturally without specifying solve directions. Write $F = m \cdot a$ once, and solve for force, mass, or acceleration automatically depending on which inputs are observed.
 - **Pure-Rust Zero-Dependency Core:** The `avenc` compiler, lexer, parser, AST, evaluator, and fact ledger are written strictly in standard library Rust (`std`), requiring zero external crates.
 - **Checked and converted units:** `avenc check` infers the dimension of every variable and rejects equations that mix incompatible ones. Values are converted to coherent base units before solving, so `velocity = 250 km/h` is solved as 69.44 m/s and shown back in km/h. Ambiguous spellings such as `Mb` (megabit or megabyte?) are refused rather than guessed.
-- **Shared Memory Rings & Native In-Process FFI (`using shm(...)`, `using native(...)`):** Memory-mapped ring buffers and in-process loading of C/Rust dynamic libraries (`.so` / `.dll`), with no subprocess or socket per solve. `tests/phase4_shm_ffi.rs` times one call of each: shared-memory reads take 5–10 µs and native library calls 40–50 µs on a 4-vCPU Linux container (timings vary by machine).
+- **Shared Memory Rings & Native In-Process FFI (`using shm(...)`, `using native(...)`):** Memory-mapped ring buffers and in-process loading of C/Rust dynamic libraries (`.so` / `.dll`), with no subprocess or socket per solve. `tests/phase4_shm_ffi.rs` times one call of each: shared-memory reads take 5–10 µs and native library calls 40–50 µs on a 4-vCPU Linux container (timings vary by machine). **Caveat:** a loaded library runs in-process, outside Aven's deterministic solver and ledger guarantees — its code is not sandboxed and its contents are not yet hashed into the ledger, so `using native(...)` is for trusted libraries only. (Recording the library's SHA-256 in the ledger is planned.)
 - **Direction-Pinning & C Code Generation (`avenc emit-c`, `--aeric-shim`):** Transpile `forward` blocks into standalone, branchless C99 with no runtime solver: straight-line code suited to embedded targets and fixed-rate control loops. `--aeric-shim --out-dir <dir>` emits an AERIC edge deployment bundle with a SHA-256 model-identity hash and non-aborting domain finiteness guards.
 - **External Adapters & Persistent IPC Daemons:** Connect relations to sensors, telemetry streams and black-box simulators via subprocess adapters (`using external(...)`) or persistent TCP daemons (`using ipc(...)`). Adapters exchange values in each variable's declared unit.
 - **Tamper-Evident Fact Ledgers:** Every settled fact extends a SHA-256 hash chain (optionally HMAC-signed with `AVEN_LEDGER_KEY`); facts from adapters record the SHA-256 of the adapter's raw output. `avenc run --ledger out.jsonl` writes the audit log and `avenc verify-ledger out.jsonl` detects any edit, deletion, reordering or truncation. Time-to-live (`ttl_ms`) freshness tracking blocks decisions on stale data (`DECISION BLOCKED`, exit code 3).
@@ -161,30 +161,32 @@ Fusing transponder data from the **OpenSky Network**, surface weather from the *
 
 | Benchmark Pipeline | Median Settle Latency | Throughput | Notes |
 | :--- | :--- | :--- | :--- |
-| **Subprocess Mode (`using external(...)`)** | `125.1 ms` | 7.4 solves/sec | `stream_ringer.py`, multi-worker |
-| **Lazy-Import Subprocess** | `71.5 ms` | 54.1 solves/sec | `stream_ringer.py`, multi-worker |
-| **Persistent IPC Daemon (`using ipc(...)`)** | `9.7 ms` | 352.9 solves/sec | `stream_ringer.py`, multi-worker |
 | **`avenc bench`, live IPC daemon (one client)** | 1414.9 µs median (p95 2120.8 µs) | 664.3 solves/sec | `evaluations/flight_mesh/runs/2026-10-27-linux/avenc_bench.txt`, 4-vCPU Linux container, 2026-10-27 |
 | **Subprocess, `stream_ringer.py`, 50 live flights** | `70.8 ms` | 51.4 solves/sec | Same container and date |
 | **IPC daemon, `stream_ringer.py`, 50 live flights** | `6.2 ms` | 570.9 solves/sec | Same container and date |
 
 The `stream_ringer.py` rows include the harness's own process and worker overhead. The `avenc bench` row is the complete solve (TCP round trip to the daemon plus the relational solve of `flight_mesh_ipc.aven`), measured with `avenc bench evaluations/flight_mesh/flight_mesh_ipc.aven --iterations 2000` against `evaluations/flight_mesh/flight_mesh_daemon.py`. The numbers are the ones in `evaluations/flight_mesh/runs/2026-10-27-linux/avenc_bench.txt`. A Windows workstation run from 2026-10-25 has no log in this repository, so it is not stated here.
 
-- **Standard Atmosphere Verified:** Temperature, pressure and Mach number match an independent ISA computation for all 150 live aircraft checked, including 30 cruising above the 11 km tropopause (up to 43,000 ft); see `verify/live_atmosphere.py`. Re-run on 2026-10-27: 150 aircraft, 32 above the tropopause (up to 45,000 ft), 0 mismatches (`evaluations/flight_mesh/runs/2026-10-27-linux/live_atmosphere.txt`). (An earlier model extended the tropospheric lapse rate above the tropopause and reported spurious −80 °C bound violations at cruise altitude; that model error is fixed. `evaluations/flight_mesh/flight_mesh_audit_ledger.jsonl` is a run log from before the fix.)
+- **Standard Atmosphere Verified:** Temperature, pressure and Mach number match an independent ISA computation for all 150 live aircraft checked, including 30 cruising above the 11 km tropopause (up to 43,000 ft); see `verify/live_atmosphere.py`. Re-run on 2026-10-27: 150 aircraft, 32 above the tropopause (up to 45,000 ft), 0 mismatches (`evaluations/flight_mesh/runs/2026-10-27-linux/live_atmosphere.txt`). (An earlier model extended the tropospheric lapse rate above the tropopause and reported spurious −80 °C bound violations at cruise altitude; that model error is fixed. `evaluations/flight_mesh/flight_mesh_cycle_log.jsonl` is a run log from before the fix.)
 
 ### 8-Hour Overnight Weather Operations Monitor
-`evaluations/weather/overnight_monitor.py` polled the National Weather Service for 5 airports (KDEN, KDFW, KJFK, KORD, KSEA) on 2026-10-25. Its per-cycle log, `evaluations/weather/weather_audit_ledger.jsonl`, records:
+`evaluations/weather/overnight_monitor.py` polled the National Weather Service for 5 airports (KDEN, KDFW, KJFK, KORD, KSEA) on 2026-10-25. Its per-cycle log, `evaluations/weather/weather_cycle_log.jsonl`, records:
 - **486 evaluation cycles** over 8.0 hours.
 - **410 actionable solves** (84.4%).
 - **76 cycles held** on expired sensor TTLs (`DECISION BLOCKED`).
 
-Both `*_audit_ledger.jsonl` files are the harnesses' per-cycle logs, not `avenc` hash-chained ledgers, so `avenc verify-ledger` does not apply to them.
+Both `*_cycle_log.jsonl` files are the harnesses' per-cycle logs, not `avenc` hash-chained ledgers, so `avenc verify-ledger` does not apply to them. (They were named `*_audit_ledger.jsonl` in earlier runs.)
 
 ---
 
 ## CLI Toolchain Reference (`avenc`)
 
-Build the standalone compiler binary:
+Install the compiler (needs a Rust toolchain; builds from source, no external crates):
+```bash
+cargo install --git https://github.com/Thrainkrilleve/aven.git avenc
+```
+
+Or build the standalone binary from a checkout:
 ```bash
 cargo build --release
 ```

@@ -283,7 +283,7 @@ def main():
     parser.add_argument("--interval", type=int, default=60, help="Polling interval in seconds (default: 60)")
     parser.add_argument("--hours", type=float, default=8.0, help="Total hours to monitor (default: 8.0, 0=infinite)")
     parser.add_argument("--stations", type=str, default="KORD,KDEN,KJFK,KSEA,KDFW", help="Comma-separated NWS stations")
-    parser.add_argument("--ledger", type=str, default="evaluations/weather/weather_audit_ledger.jsonl", help="Audit ledger output path (rel/abs)")
+    parser.add_argument("--ledger", type=str, default="evaluations/weather/weather_cycle_log.jsonl", help="Audit ledger output path (rel/abs)")
     parser.add_argument("--report", type=str, default="evaluations/weather/overnight_summary_report.md", help="Summary report output path (rel/abs)")
     parser.add_argument("--summary-only", action="store_true", help="Compile summary report from existing ledger without executing new cycles")
     args = parser.parse_args()

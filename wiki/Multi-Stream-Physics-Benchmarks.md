@@ -45,7 +45,7 @@ The model ([`flight_mesh_ipc.aven`](https://github.com/Thrainkrilleve/aven/blob/
 
 ## 3. Benchmark Results (50 Live Commercial Flights)
 
-> These results were recorded with an **earlier model** that extended the tropospheric lapse rate above 11 km (see §5); the run log is `evaluations/flight_mesh/flight_mesh_audit_ledger.jsonl`. Timings were measured on a Windows workstation.
+> These results were recorded with an **earlier model** that extended the tropospheric lapse rate above 11 km (see §5); the run log is `evaluations/flight_mesh/flight_mesh_cycle_log.jsonl`. Timings were measured on a Windows workstation.
 
 Executed using `python evaluations/flight_mesh/stream_ringer.py --count 50 --concurrency 4`:
 
