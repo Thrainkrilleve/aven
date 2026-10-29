@@ -68,7 +68,7 @@ Students, makers, and hobbyists are the **adoption funnel and evangelists**, not
 Built on the hardened Tauri shell, which is a thin GUI over the one `avenc` (no second solver). Minimal loop first, then depth:
 
 1. **Loop:** editor + inline `avenc check` errors + solve panel (forward & backward) + save/open + **HTML report export** + one excellent template + one guided walkthrough.
-2. **Share:** spreadsheet import (CSV, then `.xlsx` ranges) / export, and PDF report export.
+2. **Share:** spreadsheet import (CSV, then `.xlsx` ranges) and export, PDF report export, and report verification: a free reader mode in the app plus an `avenc verify-report` command, so anyone who receives a report can re-run the model and check its ledger hash.
 3. **See:** graphs of sweeps and sensitivities.
 4. **Pull:** one live-data example (the validated reference) as an *optional* template. The core loop never touches the network — Aven is fully usable offline.
 5. **Learn:** the full guided series and the template library.
