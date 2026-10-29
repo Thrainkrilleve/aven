@@ -21,12 +21,16 @@ Editor UI (dist/)  ──Tauri commands──►  avenc::api (one surface)  ─�
 ```
 
 **Foundational refactor (M0):** today the richest "run + ledger" path lives in `src/main.rs` (the binary), not the library. Promote a small, stable **`avenc::api`** surface into the crate so the IDE, the CLI, and the wasm build all call one path:
-- `check(source) -> Diagnostics` (unit + degrees-of-freedom, with line/col) — wraps `DimensionalChecker` + the determinacy check.
+- `check(source) -> Diagnostics` — unit + degrees-of-freedom errors, each with a **start–end source range** (not a single point, so CodeMirror can underline the span) and a **plain-language message**. Wraps `DimensionalChecker` + the determinacy check. Return ranges from day one: adding them later touches the parser.
 - `solve(source) -> Solved { values, units, trace, ledger }` — wraps `SolverEngine` (the same path `web/solver-wasm` already proved).
 - `why(source, var) -> Tree`.
 - `report(source) -> ReportModel` (model + inputs + settled values with units + derivation + ledger head) — the data the HTML/PDF report renders from.
 
 This is the "promote run-logic to the lib" item flagged earlier; doing it here pays off three ways at once.
+
+**Two decisions to lock in M0 (cheap now, expensive later):**
+- **File format.** A `.aven` file holds **source only** — the `solve` block already carries the inputs and solve settings, so there's nothing else to store. UI state (which variable is "solve for", panel layout) lives *outside* the file. Save (M1) and the re-runnable report (M2) both center on that one source text, so they can't drift apart.
+- **Deterministic hashing.** `verify-report` only works if the ledger hash is identical on every machine. Fix the canonical form now: source normalized to **LF line endings, trailing whitespace trimmed, UTF-8 without BOM**; floats via the ledger's existing bit-exact `value_bits`. Write it down before M1 ships the HTML export, or old reports fail to verify later.
 
 ## 2. Milestones
 
@@ -37,11 +41,12 @@ This is the "promote run-logic to the lib" item flagged earlier; doing it here p
 - **Exit:** empty editor loads, types, and highlights; `avenc::api` has green tests; app still builds in CI.
 
 ### M1 — The Loop  *(the MVP — thesis §8 step 1)*
-- **Inline check** — on edit (debounced), call `check` → underline unit/DOF errors in the gutter with the message, at the right line/col.
-- **Solve panel** — call `solve`; show settled values **with units**, and the solver trace (forward vs. backward). Leaving a variable out of the `solve` block and getting it back *is* the backward-solve demo; surface it clearly.
+- **Inline check** — on edit (debounced), call `check` as an **async Tauri command, off the main thread**, so a slow solve never freezes the editor. Each request carries a **version number**; results that arrive out of order are dropped, so fast typing never shows stale errors. Underline the error **span** (start–end) with its message.
+- **Plain diagnostics** — budget time to phrase errors the way a person would: *"Can't add m/s to s (line 4)"*, not the checker's internal form. The done-test's "points at where" is an acceptance criterion, not a nicety.
+- **Solve panel** — a field per variable with a **"solve for this" toggle**: toggling one blanks it in the generated `solve` block and `solve` returns it (backward), so a new user does the 30-second demo **without editing code**. (The website demo's forward/reverse control is the working prototype.) Show settled values **with units** and the forward/backward trace.
 - **Why tree** — click a value → `why` derivation tree.
 - **Files** — new / open / save `.aven` via the Tauri dialog + fs; dirty-state indicator.
-- **HTML report export** — render `report()` to a self-contained HTML file: model source, inputs, settled values with units, derivation, and the **ledger hash**, with the source embedded so it is **re-runnable** (`avenc verify-report`, M2).
+- **HTML report export** — render `report()` to a self-contained HTML file: model source, inputs, settled values with units, derivation, and the **ledger hash**, with the source embedded (**HTML-escaped**, so a model file can't inject a script into the report) so it is **re-runnable** (`avenc verify-report`, M2).
 - **One excellent template** + **one guided walkthrough** (build → read results → break it down).
 - **Exit = the thesis done-tests:**
   1. The 30-second demo lands: type a relation, blank a variable → it solves; break a unit → it refuses and points at where.
@@ -62,7 +67,9 @@ This is the "promote run-logic to the lib" item flagged earlier; doing it here p
 ## 3. Cross-cutting
 
 - **Offline-first.** Everything bundled; no CDN, no network in the core loop. This is a selling point, not a constraint to fight.
-- **One solver.** The IDE never reimplements solving — it calls `avenc::api`. The existing version gate (shell version must match the workspace) and the CI `cargo check` of the shell stay green; add a headless smoke test of the Tauri commands if feasible.
+- **One solver.** The IDE never reimplements solving — it calls `avenc::api`. The existing version gate (shell version must match the workspace) and the CI `cargo check` of the shell stay green.
+- **Security.** Treat a model file as untrusted input: scope Tauri `fs` permissions to **user-picked paths only** (dialog-granted, not blanket), set a **strict Content-Security-Policy** on the web view, and **HTML-escape** any model source embedded in exported reports.
+- **Testing.** Test `avenc::api` directly in Rust — most of the safety lives there — and add a test that each Tauri command is wired to it. That gets most of the coverage without a browser harness.
 - **Distribution** (thesis §9): the installer bundles the WebView2 runtime; it ships from **GitHub Releases and/or avenc.dev**. Decide the channel before the first external user; `cargo install --git` and site installs need the repo public.
 
 ## 4. Explicitly out of the MVP
