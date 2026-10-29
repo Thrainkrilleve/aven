@@ -483,6 +483,83 @@ mod tests {
         );
     }
 
+    fn settled(src: &str) -> BTreeMap<String, f64> {
+        solve(src)
+            .unwrap_or_else(|e| panic!("{src} refused: {}", e.message))
+            .values
+    }
+
+    #[test]
+    fn solve_names_an_equation() {
+        let values = settled("x = 1 + 10");
+        assert_eq!(values.get("x").copied(), Some(11.0));
+        assert!(values.get("answer").is_none(), "{values:?}");
+        assert!(check("x = 1 + 10").is_empty());
+        let reported = report("x = 1 + 10").expect("a named equation has a report");
+        assert_eq!(reported.values["x"], 11.0);
+        let tree = why("x = 1 + 10", "x", None).expect("why");
+        assert!(tree.contains("x"), "{tree}");
+    }
+
+    #[test]
+    fn solve_chains_named_equations_in_either_order() {
+        for src in [
+            "x = 1 + 10\ny = x * 2",
+            "y = x * 2\nx = 1 + 10",
+            "z = y + x\ny = x * 2\nx = 1 + 10",
+        ] {
+            let values = settled(src);
+            assert_eq!(values["x"], 11.0, "{src}");
+            assert_eq!(values["y"], 22.0, "{src}");
+        }
+        assert_eq!(settled("z = y + x\ny = x * 2\nx = 1 + 10")["z"], 33.0);
+        assert_eq!(settled("x = -1 + 10")["x"], 9.0);
+    }
+
+    #[test]
+    fn solve_refuses_a_named_equation_that_does_not_close() {
+        let missing = solve("x = y + 1").expect_err("y has no equation");
+        assert_eq!(
+            missing.message,
+            "y is still unknown. Give y an equation, or name unknowns in a relation and a solve block."
+        );
+        assert_eq!(check("x = y + 1")[0].message, missing.message);
+
+        let two = solve("x = a + 1\ny = b + 2").expect_err("two missing names");
+        assert_eq!(
+            two.message,
+            "a and b are still unknown. Give each one an equation, or name unknowns in a relation and a solve block."
+        );
+
+        let itself = solve("x = x + 1").expect_err("x never receives a number");
+        assert_eq!(
+            itself.message,
+            "x is still unknown. Give x an equation, or name unknowns in a relation and a solve block."
+        );
+
+        let twice = solve("x = 1\nx = 2").expect_err("one name, two expressions");
+        assert_eq!(
+            twice.message,
+            "x is named twice. A calculation gives each name one expression."
+        );
+
+        let unit_word = solve("x = 1 m + 10 m").expect_err("unit words are leftover tokens");
+        assert_eq!(
+            unit_word.message,
+            "a calculation is one expression; found 'm' after it"
+        );
+
+        let div = solve("x = 1 / 0").expect_err("division by zero");
+        assert!(div.message.contains("division by zero"), "{}", div.message);
+
+        let cycle = solve("x = y + 1\ny = x + 1").expect_err("a cycle has no number");
+        assert!(
+            cycle.message.contains("under-determined"),
+            "{}",
+            cycle.message
+        );
+    }
+
     #[test]
     fn solve_runs_forward() {
         let src =

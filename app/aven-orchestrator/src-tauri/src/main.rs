@@ -217,6 +217,25 @@ mod ide_tests {
     }
 
     #[test]
+    fn solve_model_settles_named_equations() {
+        let src = "y = x * 2\nx = 1 + 10";
+        match solve_model(src.to_string()) {
+            Ok(solved) => {
+                let value = |name: &str| {
+                    solved
+                        .values
+                        .iter()
+                        .find(|(n, _)| n == name)
+                        .map(|(_, v)| *v)
+                };
+                assert_eq!(value("x"), Some(11.0), "{:?}", solved.values);
+                assert_eq!(value("y"), Some(22.0), "{:?}", solved.values);
+            }
+            Err(err) => panic!("{src} refused: {}", err.message),
+        }
+    }
+
+    #[test]
     fn solve_model_evaluates_basic_arithmetic() {
         for (src, expect) in [("1+2", 3.0), ("32 ^ 3", 32768.0)] {
             match solve_model(src.to_string()) {
