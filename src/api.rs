@@ -493,7 +493,7 @@ mod tests {
     fn solve_names_an_equation() {
         let values = settled("x = 1 + 10");
         assert_eq!(values.get("x").copied(), Some(11.0));
-        assert!(values.get("answer").is_none(), "{values:?}");
+        assert!(!values.contains_key("answer"), "{values:?}");
         assert!(check("x = 1 + 10").is_empty());
         let reported = report("x = 1 + 10").expect("a named equation has a report");
         assert_eq!(reported.values["x"], 11.0);

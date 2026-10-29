@@ -395,11 +395,16 @@ def main():
                             if abs(got - value) > 1e-4 * max(1.0, abs(got)) or got_unit != unit:
                                 problems.append(f"{where}: documents {name} = {value} {unit}, `avenc run` prints {got} {got_unit}")
 
-        for span in CODE_SPANS.finditer(text):
-            for m in COMMAND.finditer(span.group(0)):
-                if m.group(1) not in subcommands:
-                    at = line_of(text, span.start() + m.start())
-                    problems.append(f"{rel}:{at}: `avenc {m.group(1)}` is not an avenc subcommand")
+        # Planning docs describe planned commands (e.g. `avenc verify-report`),
+        # so the "must be a real subcommand" rule applies only to user-facing docs.
+        if rel.name not in ("IDE_MVP_PLAN.md", "PRODUCT_THESIS.md"):
+            for span in CODE_SPANS.finditer(text):
+                for m in COMMAND.finditer(span.group(0)):
+                    if m.group(1) not in subcommands:
+                        at = line_of(text, span.start() + m.start())
+                        problems.append(
+                            f"{rel}:{at}: `avenc {m.group(1)}` is not an avenc subcommand"
+                        )
 
     for p in problems:
         print(p)
