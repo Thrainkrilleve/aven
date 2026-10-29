@@ -12,8 +12,8 @@
       "icons/icon.ico"
     ]
   },
-  "productName": "Aven Orchestrator",
-  "mainBinaryName": "Aven Orchestrator",
+  "productName": "Aven IDE",
+  "mainBinaryName": "Aven IDE",
   "version": "0.1.0",
   "identifier": "com.aven.orchestrator",
   "plugins": {},
@@ -23,7 +23,7 @@
       {
         "fullscreen": false,
         "resizable": true,
-        "title": "Aven Orchestrator",
+        "title": "Aven IDE",
         "width": 1400,
         "height": 900,
         "useHttpsScheme": true
