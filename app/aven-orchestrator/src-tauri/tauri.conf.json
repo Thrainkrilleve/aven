@@ -1,9 +1,9 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/schema.json",
   "build": {
-    "beforeBuildCommand": "",
+    "beforeBuildCommand": "npm run build:editor",
     "frontendDist": "../dist",
-    "beforeDevCommand": ""
+    "beforeDevCommand": "npm run build:editor"
   },
   "bundle": {
     "active": true,

@@ -1,12 +1,21 @@
 {
   "name": "aven-orchestrator",
   "version": "0.1.0",
-  "description": "Aven Relational Orchestrator",
-  "main": "index.js",
+  "description": "Aven IDE",
   "scripts": {
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build:editor": "esbuild src/editor.js --bundle --format=iife --global-name=AvenEditor --outfile=dist/editor.bundle.js"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.12.4"
+    "@tauri-apps/cli": "^2.12.4",
+    "esbuild": "^0.24.2"
+  },
+  "dependencies": {
+    "@codemirror/language": "^6.10.8",
+    "@codemirror/lint": "^6.8.4",
+    "@codemirror/state": "^6.5.2",
+    "@codemirror/view": "^6.36.2",
+    "@lezer/highlight": "^1.2.1",
+    "codemirror": "^6.0.1"
   }
 }

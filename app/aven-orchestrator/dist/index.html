@@ -25,10 +25,9 @@
     .pane { background: var(--bg); display: flex; flex-direction: column; min-height: 0; }
     .pane h2 { margin: 0; padding: .5rem 1rem; font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--border); }
     .editor-wrap { position: relative; flex: 1; min-height: 0; }
-    #editor, #highlight { position: absolute; inset: 0; margin: 0; border: 0; outline: 0; padding: 1rem; font-family: var(--mono); font-size: .86rem; line-height: 1.6; tab-size: 4; white-space: pre; overflow: auto; }
-    #highlight { color: transparent; background: #0a0f17; pointer-events: none; }
-    #editor { color: var(--text); background: transparent; resize: none; caret-color: var(--text); }
-    #highlight mark { color: transparent; background: rgba(248, 113, 113, .38); border-radius: 2px; }
+    #editor-host { position: absolute; inset: 0; overflow: hidden; }
+    #editor-host .cm-editor { height: 100%; }
+    #editor-host .cm-scroller { overflow: auto; }
     .out { flex: 1; overflow: auto; padding: 1rem; }
     .toolbar { display: flex; gap: .5rem; padding: .5rem 1rem; border-bottom: 1px solid var(--border); align-items: center; flex-wrap: wrap; }
     .toolbar .spacer { flex: 1; }
@@ -76,10 +75,7 @@
         <button id="btn-check">Check units</button>
         <button id="btn-report">Report</button>
       </div>
-      <div class="editor-wrap">
-        <pre id="highlight" aria-hidden="true"></pre>
-        <textarea id="editor" spellcheck="false" aria-label="Aven model source"></textarea>
-      </div>
+      <div class="editor-wrap"><div id="editor-host" aria-label="Aven model source"></div></div>
     </section>
 
     <section class="pane">
@@ -98,9 +94,11 @@
     </section>
   </main>
 
+  <script src="/editor.bundle.js"></script>
   <script>
     const invoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
-    const editor = document.getElementById("editor");
+    let editor;
+    const editorHost = document.getElementById("editor-host");
     const out = document.getElementById("out");
     const statusEl = document.getElementById("status");
     const tplSel = document.getElementById("templates");
@@ -147,45 +145,10 @@
       return `<table>${rows}</table><div class="tree" id="why-tree"></div>`;
     }
 
-    function renderHighlight(source, diag) {
-      lastDiag = diag && diag.start && diag.start.line ? diag : null;
-      const pre = document.getElementById("highlight");
-      if (!diag || !diag.start || !diag.start.line) {
-        pre.textContent = source;
-        pre.scrollTop = editor.scrollTop;
-        pre.scrollLeft = editor.scrollLeft;
-        return;
-      }
-      const lines = source.split("\n");
-      const startLine = diag.start.line;
-      const startCol = Math.max(1, diag.start.col || 1);
-      const endLine = diag.end && diag.end.line ? diag.end.line : startLine;
-      const endCol = diag.end && diag.end.col ? diag.end.col : ((lines[startLine - 1] || "").length + 1);
-      let html = "";
-      lines.forEach((line, i) => {
-        const n = i + 1;
-        if (n < startLine || n > endLine) {
-          html += esc(line);
-        } else if (n === startLine && n === endLine) {
-          const a = Math.min(startCol - 1, line.length);
-          const b = Math.min(Math.max(endCol - 1, a), line.length);
-          const marked = line.slice(a, b);
-          html += esc(line.slice(0, a)) + "<mark>" + esc(marked || " ") + "</mark>" + esc(line.slice(b));
-        } else if (n === startLine) {
-          const a = Math.min(startCol - 1, line.length);
-          html += esc(line.slice(0, a)) + "<mark>" + esc(line.slice(a) || " ") + "</mark>";
-        } else if (n === endLine) {
-          const b = Math.min(Math.max(endCol - 1, 0), line.length);
-          html += "<mark>" + esc(line.slice(0, b) || " ") + "</mark>" + esc(line.slice(b));
-        } else {
-          html += "<mark>" + esc(line || " ") + "</mark>";
-        }
-        if (i < lines.length - 1) html += "\n";
-      });
-      pre.innerHTML = html;
-      pre.scrollTop = editor.scrollTop;
-      pre.scrollLeft = editor.scrollLeft;
-    }
+    // Inline diagnostics are now drawn by CodeMirror's linter (gutter marker +
+    // wavy underline), re-run automatically on edit. This stub keeps the old
+    // call sites harmless; the results panel still shows the message text.
+    function renderHighlight() {}
 
     let requestId = 0;
     let lastDiag = null;
@@ -347,15 +310,13 @@
         showFailure(run.id, d);
       }
     }
-    editor.addEventListener("scroll", () => renderHighlight(editor.value, lastDiag));
-    editor.addEventListener("input", () => {
+    // CodeMirror drives edits through this; debounce a check+settle after a pause.
+    function onEditorChange() {
       refreshDirty();
-      lastDiag = null;
-      renderHighlight(editor.value, null);
       if (!invoke) return;
       clearTimeout(refreshTimer);
       refreshTimer = setTimeout(refresh, 400);
-    });
+    }
 
     async function newFile() {
       if (!discardIfDirty()) return;
@@ -393,7 +354,12 @@
     document.getElementById("btn-save").addEventListener("click", saveFile);
 
     async function boot() {
-      if (!invoke) { setStatus("Tauri API unavailable", "bad"); return; }
+      editor = AvenEditor.mount(editorHost, { doc: "", onChange: onEditorChange, getInvoke: () => invoke });
+      if (!invoke) {
+        setStatus("Tauri API unavailable — editor preview only", "bad");
+        editor.value = "relation Newton {\n    force = mass * acceleration\n}\n\nsolve Newton with {\n    force        = 4200\n    acceleration = 5\n}\n";
+        return;
+      }
       const templates = await invoke("list_templates");
       tplSel.innerHTML = templates.map((t, i) => `<option value="${i}">${esc(t.name)}</option>`).join("");
       tplSel.addEventListener("change", () => {
@@ -403,7 +369,6 @@
       });
       editor.value = templates[0].source;
       markSaved(templates[0].source, "Untitled");
-      renderHighlight(editor.value, null);
       solve();
     }
 
