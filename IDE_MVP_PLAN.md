@@ -30,7 +30,11 @@ This is the "promote run-logic to the lib" item flagged earlier; doing it here p
 
 **Two decisions to lock in M0 (cheap now, expensive later):**
 - **File format.** A `.aven` file holds **source only** — the `solve` block already carries the inputs and solve settings, so there's nothing else to store. UI state (which variable is "solve for", panel layout) lives *outside* the file. Save (M1) and the re-runnable report (M2) both center on that one source text, so they can't drift apart.
-- **Deterministic hashing.** `verify-report` only works if the ledger hash is identical on every machine. Fix the canonical form now: source normalized to **LF line endings, trailing whitespace trimmed, UTF-8 without BOM**; floats via the ledger's existing bit-exact `value_bits`. Write it down before M1 ships the HTML export, or old reports fail to verify later.
+- **Deterministic hashing.** `verify-report` only works if the hash is identical on every machine. Two rules that keep it honest:
+  - The report embeds and verifies the **exact source that was solved** — including whatever the "solve for this" toggle generated — **not the file on disk**. Toggling a variable changes that source, and that's expected; embed it **verbatim** and have `verify-report` re-run *that* text.
+  - The chain is over the settled facts (bit-exact `value_bits`), so verification doesn't hinge on source whitespace at all. Any on-disk normalization (LF endings, UTF-8 without BOM, trailing-whitespace trim) is **editor hygiene only**, and the trim is **scoped to line-ends outside quoted literals** (adapter paths, IPC endpoints) — Aven has no whitespace-sensitive literals today, and scoping the trim keeps it that way.
+
+  Pin both before M1 ships the HTML export, or old reports fail to verify later.
 
 ## 2. Milestones
 
