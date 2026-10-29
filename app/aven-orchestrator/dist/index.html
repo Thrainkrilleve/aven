@@ -167,6 +167,39 @@
     document.getElementById("btn-check").addEventListener("click", check);
     document.getElementById("btn-report").addEventListener("click", report);
 
+    // After a pause, check the text and settle it when the check is clean.
+    // A refusal stays a sentence. A newer edit drops the older result.
+    let refreshTimer = 0;
+    async function refresh() {
+      const run = begin("Checking…");
+      try {
+        const diags = await invoke("check_model", { source: run.source });
+        if (!current(run.id)) return;
+        if (!Array.isArray(diags)) { showFailure(run.id, "Check did not return a diagnostic list"); return; }
+        if (diags.length) {
+          setStatus(diags[0].message, "bad");
+          if (diags.length > 1) {
+            out.insertAdjacentHTML("beforeend", diags.map(d => `<div class="diag">${esc(d.message)}</div>`).join(""));
+          }
+          return;
+        }
+        const r = await invoke("solve_model", { source: run.source });
+        if (!current(run.id)) return;
+        setStatus("Solved", "ok");
+        out.insertAdjacentHTML("beforeend", valuesTable(r.values));
+        if (r.trace && r.trace.length) out.insertAdjacentHTML("beforeend", `<div class="trace">${esc(r.trace.join("\n"))}</div>`);
+        out.insertAdjacentHTML("beforeend", whyRowHtml());
+        wireWhy();
+      } catch (d) {
+        showFailure(run.id, d);
+      }
+    }
+    editor.addEventListener("input", () => {
+      if (!invoke) return;
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(refresh, 400);
+    });
+
     async function boot() {
       if (!invoke) { setStatus("Tauri API unavailable", "bad"); return; }
       const templates = await invoke("list_templates");
