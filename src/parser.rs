@@ -794,18 +794,18 @@ impl Parser {
 
     fn parse_optional_unit(&mut self, line: usize) -> Option<String> {
         let mut parts = String::new();
-        while matches!(
-            self.peek().kind,
-            TokenKind::Ident(_)
-                | TokenKind::Slash
-                | TokenKind::Star
-                | TokenKind::Caret
-                | TokenKind::Number(_)
-        ) {
+        let mut depth = 0i32;
+        loop {
             if self.peek().line != line {
                 break;
             }
-            if matches!(self.peek().kind, TokenKind::Ident(_))
+            // A minus is part of a unit only as the sign of an exponent: s^-1.
+            if matches!(self.peek().kind, TokenKind::Minus) && (depth == 0 && !parts.ends_with('^'))
+            {
+                break;
+            }
+            if depth == 0
+                && matches!(self.peek().kind, TokenKind::Ident(_))
                 && matches!(
                     self.peek_at(1).kind,
                     TokenKind::Equal
@@ -819,7 +819,26 @@ impl Parser {
             {
                 break;
             }
+            match self.peek().kind {
+                TokenKind::Ident(_)
+                | TokenKind::Slash
+                | TokenKind::Star
+                | TokenKind::Caret
+                | TokenKind::Number(_)
+                | TokenKind::Minus
+                | TokenKind::LeftParen
+                | TokenKind::RightParen => {}
+                _ => break,
+            }
+            if matches!(self.peek().kind, TokenKind::RightParen) && depth == 0 {
+                break;
+            }
             let tok = self.take();
+            match tok.kind {
+                TokenKind::LeftParen => depth += 1,
+                TokenKind::RightParen => depth -= 1,
+                _ => {}
+            }
             parts.push_str(&tok.text);
         }
         if parts.is_empty() { None } else { Some(parts) }

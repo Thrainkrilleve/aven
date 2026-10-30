@@ -19,6 +19,7 @@ Unlike traditional imperative languages where functions require hardcoded input/
 | **[Getting Started Guide](docs/GETTING_STARTED.md)** | 15-minute quickstart from installation to first model solve | First-time visitors |
 | **[Aven by Example (Cookbook)](docs/TUTORIAL.md)** | 10 progressive, executable code recipes covering units, C99/WASM codegen, and debugging | Hands-on learners |
 | **[Quick Reference Cheat Sheet](docs/CHEAT_SHEET.md)** | Syntax tables, built-in functions, units, CLI commands, and exit codes | Daily reference |
+| **[Units](docs/UNITS.md)** | Plain-language catalog of every built-in unit, from acres and bushels to moles and pascals | Farmers, technicians, and physicists |
 | **[Engineering Standards](STANDARDS.md)** | Mathematical stability, IEEE-754 semantics, cryptographic ledger, and safety rules | Systems & compliance engineers |
 | **[Package Specification](docs/PACKAGE_SPEC.md)** | `Aven.toml` schema and `.avenpkg` SHA-256 sealed distribution format | Package authors |
 | **[Contributing Guide](CONTRIBUTING.md)** | Architectural ground rules ("Rust compiles, C runs") and PR guidelines | Contributors |
