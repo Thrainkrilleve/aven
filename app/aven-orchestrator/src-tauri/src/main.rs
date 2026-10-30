@@ -164,6 +164,9 @@ fn ensure_html_extension(path: PathBuf) -> PathBuf {
 struct Chooser {
     save: bool,
     title: &'static str,
+    // Only the GTK dialog takes a custom confirm-button label; native
+    // Windows/macOS dialogs supply their own, so this is read on Linux only.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     accept: &'static str,
     filter_name: &'static str,
     extensions: &'static [&'static str],
@@ -249,7 +252,9 @@ fn pick_dialog(chooser: Chooser) -> Result<Option<PathBuf>, String> {
 
 #[cfg(any(windows, target_os = "macos"))]
 fn pick_dialog(chooser: Chooser) -> Result<Option<PathBuf>, String> {
-    let mut dialog = rfd::FileDialog::new().add_filter(chooser.filter_name, chooser.extensions);
+    let mut dialog = rfd::FileDialog::new()
+        .set_title(chooser.title)
+        .add_filter(chooser.filter_name, chooser.extensions);
     if chooser.save {
         dialog = dialog.set_file_name(
             chooser
