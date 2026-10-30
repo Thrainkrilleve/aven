@@ -54,6 +54,10 @@
     .walk-kicker { font-size: .68rem; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
     .walk p { margin: .3rem 0 .55rem; font-size: .85rem; line-height: 1.45; }
     .walk-actions { display: flex; gap: .4rem; }
+    .walk-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+    .walk-collapse, .walk-tab { background: none; border: 1px solid var(--border); color: var(--muted); font-size: .68rem; padding: .1rem .55rem; border-radius: 999px; }
+    .walk-collapse:hover, .walk-tab:hover { color: var(--text); border-color: var(--accent); }
+    .walk-tab { letter-spacing: .06em; text-transform: uppercase; }
   </style>
 </head>
 <body>
@@ -84,11 +88,16 @@
     <section class="pane">
       <h2>Results</h2>
       <div class="walk" id="walk">
-        <div class="walk-kicker">Walkthrough</div>
-        <p id="walk-text"></p>
-        <div class="walk-actions">
-          <button id="walk-next">Next</button>
-          <button id="walk-hide">Hide</button>
+        <button class="walk-tab" id="walk-tab" hidden>Guide ▸</button>
+        <div class="walk-body" id="walk-body">
+          <div class="walk-head">
+            <span class="walk-kicker" id="walk-kicker">Guide</span>
+            <button class="walk-collapse" id="walk-hide" title="Hide the guide">Hide ▾</button>
+          </div>
+          <p id="walk-text"></p>
+          <div class="walk-actions" id="walk-intro-actions" hidden>
+            <button id="walk-next">Got it</button>
+          </div>
         </div>
       </div>
       <div class="out" id="out">
@@ -173,6 +182,7 @@
       if (!current(id)) return;
       setStatus(failureText(d), "bad");
       if (d && d.start && d.start.line) renderHighlight(editor.value, d);
+      pushGuide("Heads up", mismatchNote(editor.value) + insightForDiag(failureText(d)));
     }
 
     function showSolved(r) {
@@ -181,6 +191,7 @@
       out.insertAdjacentHTML("beforeend", valuesTable(r));
       if (r.trace && r.trace.length) out.insertAdjacentHTML("beforeend", `<div class="trace">${esc(r.trace.join("\n"))}</div>`);
       wireResults();
+      pushGuide("This model", mismatchNote(editor.value) + insightForSolved(r));
     }
 
     async function showWhy(name) {
@@ -261,6 +272,7 @@
         if (!diags.length) { setStatus("No unit or structure errors", "ok"); renderHighlight(run.source, null); return; }
         setStatus(diags[0].message, "bad");
         renderHighlight(run.source, diags[0]);
+        pushGuide("Heads up", mismatchNote(run.source) + insightForDiag(diags[0].message));
         if (diags.length > 1) {
           out.insertAdjacentHTML("beforeend", diags.map(d => `<div class="diag">${esc(d.message)}</div>`).join(""));
         }
@@ -294,6 +306,7 @@
     let refreshTimer = 0;
     async function refresh() {
       const run = begin("Checking…");
+      if (!run.source.trim()) { setStatus("Empty model", ""); pushGuide("Start here", insightForEmpty()); return; }
       try {
         const diags = await invoke("check_model", { source: run.source });
         if (!current(run.id)) return;
@@ -301,6 +314,7 @@
         if (diags.length) {
           setStatus(diags[0].message, "bad");
           renderHighlight(run.source, diags[0]);
+          pushGuide("Heads up", mismatchNote(run.source) + insightForDiag(diags[0].message));
           if (diags.length > 1) {
             out.insertAdjacentHTML("beforeend", diags.map(d => `<div class="diag">${esc(d.message)}</div>`).join(""));
           }
@@ -328,14 +342,16 @@
         await invoke("new_model");
       } catch (d) { showFailure(begin("New model").id, d); return; }
       editor.value = "";
+      activeTemplate = null;
       markSaved("", "Untitled");
       const run = begin("New model");
       setStatus("New model", "ok");
+      pushGuide("Start here", insightForEmpty());
       if (!current(run.id)) return;
     }
     async function openFile() {
       if (!discardIfDirty()) return;
-      hideWalk();
+      activeTemplate = null;
       clearTimeout(refreshTimer);
       try {
         const opened = await invoke("open_model");
@@ -365,44 +381,121 @@
         return;
       }
       const templates = await invoke("list_templates");
-      tplSel.innerHTML = templates.map((t, i) => `<option value="${i}">${esc(t.name)}</option>`).join("");
+      tplSel.innerHTML = '<option value="" disabled>Examples ▾</option>'
+        + '<option value="blank">Start from scratch</option>'
+        + templates.map((t, i) => `<option value="${i}">${esc(t.name)}</option>`).join("");
       tplSel.addEventListener("change", () => {
-        hideWalk();
-        editor.value = templates[tplSel.value].source;
+        const v = tplSel.value;
+        if (v === "blank") {
+          editor.value = "";
+          activeTemplate = null;
+          markSaved("", "Untitled");
+          clearTimeout(refreshTimer);
+          setStatus("Empty model", "");
+          pushGuide("Start here", insightForEmpty());
+          return;
+        }
+        const t = templates[Number(v)];
+        activeTemplate = { name: t.name, relations: modelRelations(t.source) };
+        editor.value = t.source;
         refreshDirty();
         solve();
       });
-      editor.value = templates[0].source;
-      markSaved(templates[0].source, "Untitled");
+      const first = templates[0];
+      activeTemplate = { name: first.name, relations: modelRelations(first.source) };
+      tplSel.value = "0";
+      editor.value = first.source;
+      markSaved(first.source, "Untitled");
       solve();
     }
 
-    const WALK = [
-      "Newton is loaded. Force is 4,200 and acceleration is 5. Mass was left blank, so it solves backward.",
-      "Change the force field from 4200 to 8400. Mass updates on its own.",
-      "In the results, choose Solve for this on force. Force becomes the blank, and mass is pinned.",
-      "Export the report. The HTML file holds this source and the ledger hash of those exact bytes. A unit that does not match stays a sentence and marks the line."
-    ];
-    let walkStep = 0;
-    function hideWalk() { document.getElementById("walk").hidden = true; }
-    function renderWalk() {
-      const box = document.getElementById("walk");
-      if (box.hidden) return;
-      document.getElementById("walk-text").textContent = WALK[walkStep];
-      document.getElementById("walk-next").textContent = walkStep === WALK.length - 1 ? "Done" : "Next";
+    // Live guide: reads whatever the model currently is and says where it
+    // stands — not a scripted tour tied to a template. It follows the user's
+    // own work, flags when that work has drifted off a loaded example, and
+    // collapses to a tab the user can bring back.
+    let activeTemplate = null;
+    let lastGuide = { kicker: "Guide", text: "" };
+    let introShowing = false;
+    let introDone = false;
+    try { introDone = localStorage.getItem("aven.introDone") === "1"; } catch (_) {}
+
+    function setGuide(kicker, text) {
+      document.getElementById("walk-kicker").textContent = kicker || "Guide";
+      document.getElementById("walk-text").textContent = text || "";
+    }
+    // Live updates set lastGuide always, but don't paint over the first-run
+    // intro until the user dismisses it.
+    function pushGuide(kicker, text) {
+      lastGuide = { kicker: kicker, text: text };
+      if (!introShowing) setGuide(kicker, text);
+    }
+    function setCollapsed(c) {
+      document.getElementById("walk-body").hidden = c;
+      document.getElementById("walk-tab").hidden = !c;
+    }
+    document.getElementById("walk-hide").addEventListener("click", () => setCollapsed(true));
+    document.getElementById("walk-tab").addEventListener("click", () => setCollapsed(false));
+
+    function maybeIntro() {
+      if (introDone) { introShowing = false; document.getElementById("walk-intro-actions").hidden = true; return; }
+      introShowing = true;
+      setGuide("Welcome", "Pick an example at the top right, or just start writing — this guide follows whatever you build. Try a quick calc like 1 + 2 = x, or a relation with a solve block.");
+      document.getElementById("walk-intro-actions").hidden = false;
     }
     document.getElementById("walk-next").addEventListener("click", () => {
-      if (walkStep >= WALK.length - 1) {
-        document.getElementById("walk").hidden = true;
-        return;
-      }
-      walkStep += 1;
-      renderWalk();
+      introDone = true;
+      try { localStorage.setItem("aven.introDone", "1"); } catch (_) {}
+      introShowing = false;
+      document.getElementById("walk-intro-actions").hidden = true;
+      setGuide(lastGuide.kicker, lastGuide.text);
     });
-    document.getElementById("walk-hide").addEventListener("click", () => {
-      document.getElementById("walk").hidden = true;
-    });
-    renderWalk();
+
+    function modelRelations(src) {
+      const names = [];
+      const re = /\brelation\s+([A-Za-z_]\w*)/g;
+      let m;
+      while ((m = re.exec(src))) names.push(m[1]);
+      return names;
+    }
+    // When the user loads an example then edits every one of its relations
+    // away, the dropdown label is stale — say so once and follow their model.
+    function mismatchNote(src) {
+      if (!activeTemplate || !activeTemplate.relations.length) return "";
+      const have = new Set(modelRelations(src));
+      const gone = activeTemplate.relations.every((n) => !have.has(n));
+      if (!gone) return "";
+      const name = activeTemplate.name;
+      activeTemplate = null;
+      tplSel.selectedIndex = 0;
+      return "You've moved off the " + name + " example — the guide now follows your own model. ";
+    }
+    function insightForSolved(r) {
+      const bound = r.bound || [];
+      const solving = r.solving || [];
+      const names = (r.values || []).map((kv) => kv[0]);
+      const outs = names.filter((n) => bound.indexOf(n) < 0);
+      const parts = [];
+      if (bound.length) parts.push("Inputs: " + bound.join(", ") + ".");
+      if (solving.length) parts.push("Solving " + solving.join(", ") + (bound.length ? " backward from what you pinned." : "."));
+      else if (outs.length) parts.push("Settles " + outs.join(", ") + ".");
+      const tail = bound.length
+        ? "Change an input and it re-settles, or choose ‘Solve for this’ on another value to flip the unknown. Export to lock the source and ledger hash."
+        : "Pin an input with name = number, then leave another blank to solve for it.";
+      return (parts.join(" ") + " " + tail).trim();
+    }
+    function insightForDiag(msg) {
+      const m = (msg || "").toLowerCase();
+      if (m.indexOf("unit") >= 0) return "A unit doesn't line up. Fix the marked line — the value stays a plain sentence until the units resolve.";
+      if (m.indexOf("under") >= 0 || m.indexOf("not enough") >= 0 || m.indexOf("unknown") >= 0 || m.indexOf("determine") >= 0) return "Not enough to pin this down yet. Give one more input (name = number) or add a relation.";
+      if (m.indexOf("inconsist") >= 0 || m.indexOf("over") >= 0 || m.indexOf("conflict") >= 0) return "Over-constrained — you've pinned something the model can also compute. Remove one input or relation.";
+      if (m.indexOf("parse") >= 0 || m.indexOf("expect") >= 0 || m.indexOf("syntax") >= 0 || m.indexOf("unexpected") >= 0) return "That line can't be read yet. Each statement is name = expression, inside a relation or solve block.";
+      return "Fix the marked line and it'll settle on its own.";
+    }
+    function insightForEmpty() {
+      return "Empty model. Write a relation with a solve block, or a quick calc like 1 + 2 = x, and results appear as you type.";
+    }
+
+    maybeIntro();
     boot();
   </script>
 </body>
