@@ -258,6 +258,35 @@ impl Parser {
     fn parse_answer_equation(&mut self) -> Result<Equation, ParseError> {
         let start = self.peek().clone();
         let expr = self.parse_expr()?;
+
+        // Reversed form: `<expr> = <name>` means the same as `<name> = <expr>`,
+        // so `1 + 2 = x` settles x just like `x = 1 + 2`.
+        if matches!(self.peek().kind, TokenKind::Equal | TokenKind::DoubleEqual) {
+            self.take(); // '='
+            let (name, _line, _col) = self.expect_ident()?;
+            if self.peek().kind != TokenKind::Eof {
+                let tok = self.peek();
+                return Err(ParseError {
+                    message: format!(
+                        "after '{} = {}', a calculation ends; found '{}'",
+                        expr.to_string_prec(0),
+                        name,
+                        tok.text
+                    ),
+                    line: tok.line,
+                    col: tok.col,
+                });
+            }
+            return Ok(Equation {
+                lhs: name.clone(),
+                op: ConstraintOp::Equal,
+                rhs: expr.clone(),
+                original_text: format!("{name} = {}", expr.to_string_prec(0)),
+                line: start.line,
+                col: start.col,
+            });
+        }
+
         if self.peek().kind != TokenKind::Eof {
             let tok = self.peek();
             return Err(ParseError {

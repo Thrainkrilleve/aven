@@ -323,7 +323,6 @@
 
     async function newFile() {
       if (!discardIfDirty()) return;
-      hideWalk();
       clearTimeout(refreshTimer);
       try {
         await invoke("new_model");

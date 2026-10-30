@@ -6,11 +6,11 @@
 
 use crate::ast::BlockKind;
 use crate::evaluator::sha256_hex;
-use crate::ledger::{Fact, Ledger, DEFAULT_MAX_DEPTH};
+use crate::ledger::{DEFAULT_MAX_DEPTH, Fact, Ledger};
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::solver::SolverEngine;
-use crate::units::{normalize_bindings, DimensionalChecker, TypeError, UnitScale};
+use crate::units::{DimensionalChecker, TypeError, UnitScale, normalize_bindings};
 use std::collections::{BTreeMap, HashMap};
 
 /// A source position: 1-based line, 1-based column.
@@ -860,6 +860,15 @@ mod tests {
         assert_eq!(reported.values["x"], 11.0);
         let tree = why("x = 1 + 10", "x", None).expect("why");
         assert!(tree.contains("x"), "{tree}");
+    }
+
+    #[test]
+    fn solve_accepts_reversed_equation() {
+        // `<expr> = <name>` settles the name just like `<name> = <expr>`.
+        let values = settled("1 + 2 = x");
+        assert_eq!(values.get("x").copied(), Some(3.0));
+        assert!(!values.contains_key("answer"), "{values:?}");
+        assert!(check("1 + 2 = x").is_empty());
     }
 
     #[test]
