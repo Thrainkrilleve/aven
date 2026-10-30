@@ -52,7 +52,7 @@
     td.act { text-align: right; white-space: nowrap; }
     .walk { padding: .65rem 1rem .75rem; border-bottom: 1px solid var(--border); background: #101826; }
     .walk-kicker { font-size: .68rem; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
-    .walk p { margin: .3rem 0 .55rem; font-size: .85rem; line-height: 1.45; }
+    .walk p { margin: .3rem 0 .55rem; font-size: .85rem; line-height: 1.45; white-space: pre-wrap; }
     .walk-actions { display: flex; gap: .4rem; }
     .walk-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
     .walk-collapse, .walk-tab { background: none; border: 1px solid var(--border); color: var(--muted); font-size: .68rem; padding: .1rem .55rem; border-radius: 999px; }
@@ -191,7 +191,7 @@
       out.insertAdjacentHTML("beforeend", valuesTable(r));
       if (r.trace && r.trace.length) out.insertAdjacentHTML("beforeend", `<div class="trace">${esc(r.trace.join("\n"))}</div>`);
       wireResults();
-      pushGuide("This model", mismatchNote(editor.value) + insightForSolved(r));
+      pushGuide("What happened", mismatchNote(editor.value) + insightForSolved(r));
     }
 
     async function showWhy(name) {
@@ -470,26 +470,35 @@
       return "You've moved off the " + name + " example — the guide now follows your own model. ";
     }
     function insightForSolved(r) {
+      const steps = (r.explanation || "").trim();
       const bound = r.bound || [];
       const solving = r.solving || [];
-      const names = (r.values || []).map((kv) => kv[0]);
-      const outs = names.filter((n) => bound.indexOf(n) < 0);
-      const parts = [];
-      if (bound.length) parts.push("Inputs: " + bound.join(", ") + ".");
-      if (solving.length) parts.push("Solving " + solving.join(", ") + (bound.length ? " backward from what you pinned." : "."));
-      else if (outs.length) parts.push("Settles " + outs.join(", ") + ".");
-      const tail = bound.length
-        ? "Change an input and it re-settles, or choose ‘Solve for this’ on another value to flip the unknown. Export to lock the source and ledger hash."
-        : "Pin an input with name = number, then leave another blank to solve for it.";
-      return (parts.join(" ") + " " + tail).trim();
+      let tail = "";
+      if (solving.length && bound.length) {
+        tail = "Change a pinned number and this is solved again. Choose Solve for this on a pinned name to make that name the blank.";
+      } else if (bound.length) {
+        tail = "Change a pinned number and the results are computed again.";
+      } else if (steps) {
+        tail = "Change a number in the expression and it is computed again.";
+      } else {
+        tail = "Write a rule, pin the numbers you know, and leave the name you want found out of the solve block.";
+      }
+      return steps ? steps + "\n" + tail : tail;
     }
     function insightForDiag(msg) {
-      const m = (msg || "").toLowerCase();
-      if (m.indexOf("unit") >= 0) return "A unit doesn't line up. Fix the marked line — the value stays a plain sentence until the units resolve.";
-      if (m.indexOf("under") >= 0 || m.indexOf("not enough") >= 0 || m.indexOf("unknown") >= 0 || m.indexOf("determine") >= 0) return "Not enough to pin this down yet. Give one more input (name = number) or add a relation.";
-      if (m.indexOf("inconsist") >= 0 || m.indexOf("over") >= 0 || m.indexOf("conflict") >= 0) return "Over-constrained — you've pinned something the model can also compute. Remove one input or relation.";
-      if (m.indexOf("parse") >= 0 || m.indexOf("expect") >= 0 || m.indexOf("syntax") >= 0 || m.indexOf("unexpected") >= 0) return "That line can't be read yet. Each statement is name = expression, inside a relation or solve block.";
-      return "Fix the marked line and it'll settle on its own.";
+      const text = (msg || "").trim();
+      const m = text.toLowerCase();
+      let why = "The marked line stopped the solve.";
+      if (m.indexOf("unit") >= 0 || m.indexOf("can't add") >= 0 || m.indexOf("dimensional") >= 0) {
+        why = "Those are different kinds of quantity, so Aven stops before producing a number.";
+      } else if (m.indexOf("under") >= 0 || m.indexOf("not enough") >= 0 || m.indexOf("determine") >= 0) {
+        why = "A name is still free, so the rule does not pick one answer. Pin one more number, or remove a name the rule cannot find.";
+      } else if (m.indexOf("inconsist") >= 0 || m.indexOf("over") >= 0 || m.indexOf("conflict") >= 0) {
+        why = "A number you pinned is also computed by a rule, and the two disagree. Remove one of them.";
+      } else if (m.indexOf("parse") >= 0 || m.indexOf("expect") >= 0 || m.indexOf("syntax") >= 0 || m.indexOf("unexpected") >= 0) {
+        why = "That line could not be read as a name, an equals sign, and an expression.";
+      }
+      return text ? text + "\n" + why : why;
     }
     function insightForEmpty() {
       return "Empty model. Write a relation with a solve block, or a quick calc like 1 + 2 = x, and results appear as you type.";
