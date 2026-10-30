@@ -1,0 +1,9 @@
+// You know the area and the length. Width is left out, so it is found.
+relation Field {
+    area = length * width
+}
+
+solve Field with {
+    length = 8
+    area = 100
+}

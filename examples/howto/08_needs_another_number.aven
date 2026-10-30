@@ -1,0 +1,8 @@
+// Length is known. Area and width are both blank, so this cannot settle.
+relation Field {
+    area = length * width
+}
+
+solve Field with {
+    length = 8
+}

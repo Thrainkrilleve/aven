@@ -1,0 +1,9 @@
+// You know the length and the width. Area is the blank, so it is computed.
+relation Field {
+    area = length * width
+}
+
+solve Field with {
+    length = 8
+    width = 5
+}

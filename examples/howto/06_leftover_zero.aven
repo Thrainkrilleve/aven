@@ -1,0 +1,9 @@
+// leftover is pinned at 0, and expected is the blank, so expected is found.
+relation Gap {
+    leftover = measured - expected
+}
+
+solve Gap with {
+    measured = 10
+    leftover = 0
+}
