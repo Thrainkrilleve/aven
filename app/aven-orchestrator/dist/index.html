@@ -339,9 +339,13 @@
         const next = await invoke("import_sheet", { source: editor.value, range: range || null });
         if (!next) return;
         editor.value = next;
+        // The editor reports that write as a keystroke and would check again
+        // a moment later, wiping the status this import just settled.
+        clearTimeout(refreshTimer);
         refreshDirty();
         renderHighlight(next, null);
         await refresh();
+        clearTimeout(refreshTimer);
         if (statusEl.classList.contains("ok")) setStatus("Imported sheet", "ok");
       } catch (d) {
         const run = begin("Importing…");
@@ -355,11 +359,13 @@
         if (!opened) return;
         await invoke("new_model");
         editor.value = opened.source;
+        clearTimeout(refreshTimer);
         savedText = "";
         fileNameEl.textContent = opened.name;
         refreshDirty();
         renderHighlight(opened.source, null);
         await refresh();
+        clearTimeout(refreshTimer);
         if (statusEl.classList.contains("bad")) return;
         setStatus("Report verified", "ok");
         out.insertAdjacentHTML("beforeend", `<div class="hash">source sha256: ${esc(opened.source_sha256)}<br>ledger head: ${esc(opened.ledger_head)}</div>`);
