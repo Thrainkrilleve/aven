@@ -8,6 +8,8 @@
     clippy::result_large_err
 )]
 
+#[allow(dead_code)]
+mod api;
 mod ast;
 mod codegen_c;
 mod codegen_wasm;
@@ -108,6 +110,10 @@ fn print_usage() {
     println!(
         "                                        Check an audit log's hash chain and HMAC-SHA256 signatures"
     );
+    println!("  avenc verify-report <report.html>");
+    println!(
+        "                                        Re-solve an HTML report and check its source hash, values, and ledger"
+    );
     println!("  avenc compact-ledger <in.jsonl> -o <out.jsonl>");
     println!(
         "                                        Compact settled historical audit log to bound storage footprint"
@@ -165,6 +171,16 @@ fn real_main() {
                 process::exit(1);
             };
             cmd_verify_ledger(file, key_arg.as_deref());
+        }
+        "verify-report" => {
+            let file_arg = args.iter().skip(2).find(|a| !a.starts_with('-'));
+            let Some(file) = file_arg else {
+                eprintln!(
+                    "Error: missing file argument for 'verify-report': avenc verify-report <report.html>"
+                );
+                process::exit(1);
+            };
+            cmd_verify_report(file);
         }
         "emit-c" => {
             let file_arg = args.iter().skip(2).find(|a| !a.starts_with('-'));
@@ -1051,6 +1067,28 @@ fn cmd_verify_ledger(path: &str, cli_key: Option<&str>) {
         }
         Err(e) => {
             eprintln!("Ledger TAMPERED or invalid: {}", e);
+            process::exit(EXIT_ERROR);
+        }
+    }
+}
+
+fn cmd_verify_report(path: &str) {
+    let html = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) => {
+            eprintln!("Error reading report '{path}': {err}");
+            process::exit(EXIT_ERROR);
+        }
+    };
+    match api::verify_report_html(&html) {
+        Ok(verdict) => {
+            println!(
+                "Report OK: {} fact(s), source sha256 {}, ledger head {}",
+                verdict.facts, verdict.source_sha256, verdict.ledger_head
+            );
+        }
+        Err(err) => {
+            eprintln!("Report TAMPERED or invalid: {err}");
             process::exit(EXIT_ERROR);
         }
     }

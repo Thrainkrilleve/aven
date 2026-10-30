@@ -9,6 +9,7 @@
 // crate keeps its zero-dependency guarantee.
 
 use avenc::api;
+use calamine::Reader;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -161,6 +162,17 @@ fn ensure_html_extension(path: PathBuf) -> PathBuf {
     ensure_extension(path, "html")
 }
 
+fn ensure_pdf_extension(path: PathBuf) -> PathBuf {
+    ensure_extension(path, "pdf")
+}
+
+fn ensure_sheet_extension(path: PathBuf) -> PathBuf {
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some(ext) if ext.eq_ignore_ascii_case("csv") || ext.eq_ignore_ascii_case("xlsx") => path,
+        _ => ensure_extension(path, "csv"),
+    }
+}
+
 struct Chooser {
     save: bool,
     title: &'static str,
@@ -192,6 +204,43 @@ fn report_chooser() -> Chooser {
         filter_name: "HTML report",
         extensions: &["html"],
         suggested: Some("report.html".to_string()),
+    }
+}
+
+fn pdf_chooser() -> Chooser {
+    Chooser {
+        save: true,
+        title: "Export PDF",
+        accept: "Export",
+        filter_name: "PDF report",
+        extensions: &["pdf"],
+        suggested: Some("report.pdf".to_string()),
+    }
+}
+
+fn sheet_chooser(save: bool) -> Chooser {
+    Chooser {
+        save,
+        title: if save { "Export sheet" } else { "Import sheet" },
+        accept: if save { "Export" } else { "Import" },
+        filter_name: "Spreadsheet",
+        extensions: &["csv", "xlsx"],
+        suggested: if save {
+            Some("values.csv".to_string())
+        } else {
+            None
+        },
+    }
+}
+
+fn html_open_chooser() -> Chooser {
+    Chooser {
+        save: false,
+        title: "Open report",
+        accept: "Open",
+        filter_name: "HTML report",
+        extensions: &["html"],
+        suggested: None,
     }
 }
 
@@ -348,6 +397,234 @@ fn solve_for_variable(source: String, target: String) -> Result<String, Diagnost
     api::solve_for(&source, &target).map_err(|d| DiagnosticDto::from(&d))
 }
 
+#[derive(Serialize)]
+struct VerifiedReport {
+    name: String,
+    source: String,
+    source_sha256: String,
+    ledger_head: String,
+    facts: usize,
+}
+
+/// Open an HTML report, re-solve it, and check the ledger. Cancel returns nothing.
+#[tauri::command]
+fn open_report(app: tauri::AppHandle) -> Result<Option<VerifiedReport>, String> {
+    let Some(path) = ask_path(&app, html_open_chooser())? else {
+        return Ok(None);
+    };
+    let html = read_model(&path)?;
+    let verdict = api::verify_report_html(&html)?;
+    let source = api::embedded_source(&html)?;
+    Ok(Some(VerifiedReport {
+        name: display_name(&path),
+        source,
+        source_sha256: verdict.source_sha256,
+        ledger_head: verdict.ledger_head,
+        facts: verdict.facts,
+    }))
+}
+
+/// Write the printable report. This does not change the open model path.
+#[tauri::command]
+fn export_pdf(app: tauri::AppHandle, source: String) -> Result<Option<String>, String> {
+    let bytes = api::report_pdf(&source).map_err(|diag| diag.message)?;
+    let Some(picked) = ask_path(&app, pdf_chooser())? else {
+        return Ok(None);
+    };
+    let path = ensure_pdf_extension(picked);
+    write_bytes(&path, &bytes)?;
+    Ok(Some(display_name(&path)))
+}
+
+/// Write settled values as CSV or xlsx. The extension chooses the format.
+#[tauri::command]
+fn export_sheet(app: tauri::AppHandle, source: String) -> Result<Option<String>, String> {
+    let rows = api::sheet_rows(&source).map_err(|diag| diag.message)?;
+    let Some(picked) = ask_path(&app, sheet_chooser(true))? else {
+        return Ok(None);
+    };
+    let path = ensure_sheet_extension(picked);
+    if is_xlsx(&path) {
+        write_bytes(&path, &xlsx_bytes(&rows)?)?;
+    } else {
+        write_model(&path, &api::render_csv(&rows))?;
+    }
+    Ok(Some(display_name(&path)))
+}
+
+/// Fill solve-block inputs from a CSV or xlsx file. `range` limits an xlsx sheet, like `A1:C20`.
+#[tauri::command]
+fn import_sheet(
+    app: tauri::AppHandle,
+    source: String,
+    range: Option<String>,
+) -> Result<Option<String>, String> {
+    let Some(path) = ask_path(&app, sheet_chooser(false))? else {
+        return Ok(None);
+    };
+    let rows = if is_xlsx(&path) {
+        let bytes = std::fs::read(&path)
+            .map_err(|err| format!("Could not read {}: {err}", path.display()))?;
+        rows_from_xlsx(&bytes, range.as_deref())?
+    } else {
+        api::parse_csv(&read_model(&path)?)?
+    };
+    let next = api::apply_sheet(&source, &rows).map_err(|diag| diag.message)?;
+    Ok(Some(next))
+}
+
+fn write_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|err| format!("Could not create {}: {err}", parent.display()))?;
+        }
+    }
+    std::fs::write(path, bytes).map_err(|err| format!("Could not write {}: {err}", path.display()))
+}
+
+fn is_xlsx(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("xlsx"))
+}
+
+fn xlsx_bytes(rows: &[api::SheetRow]) -> Result<Vec<u8>, String> {
+    let mut workbook = rust_xlsxwriter::Workbook::new();
+    let sheet = workbook.add_worksheet();
+    sheet
+        .write_string(0, 0, "name")
+        .map_err(|err| format!("Could not write the sheet: {err}"))?;
+    sheet
+        .write_string(0, 1, "value")
+        .map_err(|err| format!("Could not write the sheet: {err}"))?;
+    sheet
+        .write_string(0, 2, "unit")
+        .map_err(|err| format!("Could not write the sheet: {err}"))?;
+    for (index, row) in rows.iter().enumerate() {
+        let at = (index + 1) as u32;
+        sheet
+            .write_string(at, 0, &row.name)
+            .map_err(|err| format!("Could not write the sheet: {err}"))?;
+        sheet
+            .write_string(at, 1, &row.value)
+            .map_err(|err| format!("Could not write the sheet: {err}"))?;
+        sheet
+            .write_string(at, 2, &row.unit)
+            .map_err(|err| format!("Could not write the sheet: {err}"))?;
+    }
+    workbook
+        .save_to_buffer()
+        .map_err(|err| format!("Could not write the sheet: {err}"))
+}
+
+fn rows_from_xlsx(bytes: &[u8], range: Option<&str>) -> Result<Vec<api::SheetRow>, String> {
+    let mut book = calamine::Xlsx::new(std::io::Cursor::new(bytes))
+        .map_err(|err| format!("Could not read this workbook: {err}"))?;
+    let sheet = book
+        .worksheet_range_at(0)
+        .ok_or_else(|| "The workbook has no sheet.".to_string())?
+        .map_err(|err| format!("Could not read the first sheet: {err}"))?;
+    let (start, end) = match range.map(str::trim).filter(|text| !text.is_empty()) {
+        None => {
+            let start = sheet
+                .start()
+                .ok_or_else(|| "The first sheet is empty.".to_string())?;
+            let end = sheet
+                .end()
+                .ok_or_else(|| "The first sheet is empty.".to_string())?;
+            (start, end)
+        }
+        Some(text) => parse_a1_range(text)?,
+    };
+    let mut csv = String::new();
+    for row in start.0..=end.0 {
+        for col in start.1..=end.1 {
+            if col != start.1 {
+                csv.push(',');
+            }
+            let cell = sheet
+                .get_value((row, col))
+                .map(cell_text)
+                .unwrap_or_default();
+            csv.push_str(&quote_csv(&cell));
+        }
+        csv.push('\n');
+    }
+    api::parse_csv(&csv)
+}
+
+fn cell_text(data: &calamine::Data) -> String {
+    match data {
+        calamine::Data::Empty => String::new(),
+        calamine::Data::Int(value) => value.to_string(),
+        calamine::Data::Float(value) => number_text(*value),
+        calamine::Data::String(value) => value.trim().to_string(),
+        calamine::Data::Bool(value) => value.to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn number_text(value: f64) -> String {
+    if !value.is_finite() {
+        return String::new();
+    }
+    let rounded = value.round();
+    if (value - rounded).abs() < 1e-9 && rounded.abs() < 1e15 {
+        return format!("{}", rounded as i64);
+    }
+    let text = format!("{value:.12}");
+    let trimmed = text.trim_end_matches('0').trim_end_matches('.');
+    if trimmed.is_empty() || trimmed == "-" {
+        "0".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn quote_csv(text: &str) -> String {
+    if text.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", text.replace('"', "\"\""))
+    } else {
+        text.to_string()
+    }
+}
+
+fn parse_a1_range(text: &str) -> Result<((u32, u32), (u32, u32)), String> {
+    let Some((left, right)) = text.split_once(':') else {
+        return Err("A range looks like A1:C20.".to_string());
+    };
+    let start = parse_a1(left)?;
+    let end = parse_a1(right)?;
+    if start.0 > end.0 || start.1 > end.1 {
+        return Err("The range is backwards. Put the top-left cell first.".to_string());
+    }
+    Ok((start, end))
+}
+
+fn parse_a1(cell: &str) -> Result<(u32, u32), String> {
+    let cell = cell.trim();
+    let bytes = cell.as_bytes();
+    let mut index = 0;
+    let mut col: u32 = 0;
+    while index < bytes.len() && bytes[index].is_ascii_alphabetic() {
+        col = col
+            .saturating_mul(26)
+            .saturating_add((bytes[index].to_ascii_uppercase() - b'A' + 1) as u32);
+        index += 1;
+    }
+    if col == 0 || index == bytes.len() {
+        return Err(format!("{cell} is not a cell. Use a range like A1:C20."));
+    }
+    let row: u32 = cell[index..]
+        .parse()
+        .map_err(|_| format!("{cell} is not a cell. Use a range like A1:C20."))?;
+    if row == 0 {
+        return Err(format!("{cell} is not a cell. Use a range like A1:C20."));
+    }
+    Ok((row - 1, col - 1))
+}
+
 /// Forget the open path so the next save asks for a file.
 #[tauri::command]
 fn new_model(state: tauri::State<CurrentFile>) -> Result<(), String> {
@@ -438,8 +715,9 @@ solve FlightDynamics with {
 #[cfg(test)]
 mod ide_tests {
     use super::{
-        check_model, display_name, ensure_aven_extension, ensure_html_extension, read_model,
-        solve_for_variable, solve_model, write_model, FLIGHT, NEWTON, SERVER_CAPACITY,
+        check_model, display_name, ensure_aven_extension, ensure_html_extension,
+        ensure_sheet_extension, parse_a1_range, read_model, rows_from_xlsx, solve_for_variable,
+        solve_model, write_model, xlsx_bytes, FLIGHT, NEWTON, SERVER_CAPACITY,
     };
 
     #[test]
@@ -561,6 +839,31 @@ mod ide_tests {
             Err(err) => panic!("{}", err.message),
         }
     }
+
+    #[test]
+    fn xlsx_round_trip_respects_a_cell_range() {
+        let rows = avenc::api::sheet_rows(NEWTON).expect("rows");
+        let bytes = xlsx_bytes(&rows).expect("xlsx");
+        let all = rows_from_xlsx(&bytes, None).expect("read");
+        assert!(all
+            .iter()
+            .any(|row| row.name == "force" && row.value == "4200"));
+        let ranged = rows_from_xlsx(&bytes, Some("A1:C3")).expect("range");
+        assert!(ranged.iter().any(|row| row.name == "force"));
+        assert!(
+            ranged.len() < all.len(),
+            "a short range drops later rows: {ranged:?} vs {all:?}"
+        );
+        assert!(parse_a1_range("A1:C20").is_ok());
+        assert!(parse_a1_range("C20:A1").is_err());
+        let csv_path = std::env::temp_dir().join(format!("aven-sheet-{}", std::process::id()));
+        assert_eq!(
+            ensure_sheet_extension(csv_path.join("values")),
+            csv_path.join("values.csv")
+        );
+        let kept = csv_path.join("values.xlsx");
+        assert_eq!(ensure_sheet_extension(kept.clone()), kept);
+    }
 }
 
 fn main() {
@@ -576,7 +879,11 @@ fn main() {
             save_model,
             new_model,
             export_report,
-            solve_for_variable
+            solve_for_variable,
+            open_report,
+            export_pdf,
+            export_sheet,
+            import_sheet
         ])
         .setup(|_app| {
             #[cfg(debug_assertions)]
