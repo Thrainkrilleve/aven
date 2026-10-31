@@ -828,7 +828,15 @@ fn csv_records(text: &str) -> Result<Vec<Vec<String>>, String> {
 
 /// Replace solve-block inputs with the matching rows. Solved blanks stay blank,
 /// so a round trip does not pin the variable the model is solving for.
-pub fn apply_sheet(source: &str, rows: &[SheetRow]) -> Result<String, Diagnostic> {
+/// The rewritten source, plus the names of rows that were skipped because they
+/// name a solved variable rather than a solve-block input — a derived answer
+/// can't be set by import, only recomputed from the inputs.
+pub struct SheetImport {
+    pub source: String,
+    pub skipped: Vec<String>,
+}
+
+pub fn apply_sheet(source: &str, rows: &[SheetRow]) -> Result<SheetImport, Diagnostic> {
     if let Some(diag) = check(source).into_iter().next() {
         return Err(diag);
     }
@@ -844,6 +852,7 @@ pub fn apply_sheet(source: &str, rows: &[SheetRow]) -> Result<String, Diagnostic
     let vars = relation_vars(&module);
     let mut lines = split_keep(source);
     let mut updated = 0usize;
+    let mut skipped = Vec::new();
     for row in rows {
         if !vars.contains(&row.name) {
             return Err(located(
@@ -875,6 +884,7 @@ pub fn apply_sheet(source: &str, rows: &[SheetRow]) -> Result<String, Diagnostic
             .flat_map(|solve| solve.bindings.iter())
             .find(|binding| binding.name == row.name)
         else {
+            skipped.push(row.name.clone());
             continue;
         };
         let unit = if row.unit.trim().is_empty() {
@@ -895,14 +905,22 @@ pub fn apply_sheet(source: &str, rows: &[SheetRow]) -> Result<String, Diagnostic
         updated += 1;
     }
     if updated == 0 {
-        return Err(located(
-            source,
-            "None of these rows match an input in the solve block.",
-            1,
-            1,
-        ));
+        let msg = if skipped.is_empty() {
+            "None of these rows match an input in the solve block.".to_string()
+        } else {
+            format!(
+                "{} {} solved, not an input. Change an input in the solve block, or use 'Solve for this' to set {}.",
+                join_names(&skipped),
+                if skipped.len() == 1 { "is" } else { "are" },
+                if skipped.len() == 1 { "it" } else { "them" }
+            )
+        };
+        return Err(located(source, msg, 1, 1));
     }
-    Ok(lines.concat())
+    Ok(SheetImport {
+        source: lines.concat(),
+        skipped,
+    })
 }
 
 fn rewrite_binding_value(line: &str, number: &str, unit: &str) -> String {
@@ -1830,7 +1848,13 @@ mod tests {
                 row.value = "8400".to_string();
             }
         }
-        let next = apply_sheet(newton(), &edited).expect("apply");
+        let imported = apply_sheet(newton(), &edited).expect("apply");
+        let next = imported.source;
+        assert!(
+            imported.skipped.contains(&"mass".to_string()),
+            "mass is solved, so its row is skipped: {:?}",
+            imported.skipped
+        );
         assert!(
             next.contains("force = 8400")
                 || next.contains("force        = 8400")
@@ -1850,7 +1874,13 @@ mod tests {
         let src = "signal speed : km/h\nsignal time : h\nrelation Travel {\n distance = speed * time\n}\nsolve Travel with {\n speed = 90 km/h\n time = 2.5 h\n}\n";
         let csv = "name,value,unit\nspeed,100,km/h\ntime,2.5,h\ndistance,1,m\n";
         let rows = parse_csv(csv).expect("csv");
-        let next = apply_sheet(src, &rows).expect("apply");
+        let imported = apply_sheet(src, &rows).expect("apply");
+        let next = imported.source;
+        assert!(
+            imported.skipped.contains(&"distance".to_string()),
+            "distance is solved, so its row is skipped: {:?}",
+            imported.skipped
+        );
         assert!(next.contains("speed = 100 km/h"), "{next}");
         assert!(
             next.contains("time = 2.5 h") || next.contains("time = 2.50 h"),

@@ -454,13 +454,20 @@ fn export_sheet(app: tauri::AppHandle, source: String) -> Result<Option<String>,
     Ok(Some(display_name(&path)))
 }
 
+#[derive(Serialize)]
+struct SheetImportDto {
+    source: String,
+    /// Names whose rows were skipped because they're solved, not inputs.
+    skipped: Vec<String>,
+}
+
 /// Fill solve-block inputs from a CSV or xlsx file. `range` limits an xlsx sheet, like `A1:C20`.
 #[tauri::command]
 fn import_sheet(
     app: tauri::AppHandle,
     source: String,
     range: Option<String>,
-) -> Result<Option<String>, String> {
+) -> Result<Option<SheetImportDto>, String> {
     let Some(path) = ask_path(&app, sheet_chooser(false))? else {
         return Ok(None);
     };
@@ -471,8 +478,11 @@ fn import_sheet(
     } else {
         api::parse_csv(&read_model(&path)?)?
     };
-    let next = api::apply_sheet(&source, &rows).map_err(|diag| diag.message)?;
-    Ok(Some(next))
+    let imported = api::apply_sheet(&source, &rows).map_err(|diag| diag.message)?;
+    Ok(Some(SheetImportDto {
+        source: imported.source,
+        skipped: imported.skipped,
+    }))
 }
 
 fn write_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {

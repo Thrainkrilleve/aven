@@ -220,17 +220,28 @@
     async function importSheet() {
       const range = document.getElementById("sheet-range").value.trim();
       try {
-        const next = await invoke("import_sheet", { source: editor.value, range: range || null });
-        if (!next) return;
-        editor.value = next;
+        const res = await invoke("import_sheet", { source: editor.value, range: range || null });
+        if (!res) return;
+        editor.value = res.source;
         // The editor reports that write as a keystroke and would check again
         // a moment later, wiping the status this import just settled.
         clearTimeout(refreshTimer);
         refreshDirty();
-        renderHighlight(next, null);
+        renderHighlight(res.source, null);
         await refresh();
         clearTimeout(refreshTimer);
-        if (statusEl.classList.contains("ok")) setStatus("Imported sheet", "ok");
+        const skipped = res.skipped || [];
+        if (statusEl.classList.contains("ok")) {
+          setStatus(skipped.length ? "Imported — some rows skipped" : "Imported sheet", "ok");
+        }
+        // A derived variable can't be set by import; say so instead of
+        // silently ignoring its row.
+        if (skipped.length) {
+          const one = skipped.length === 1;
+          pushGuide("Import note", skipped.join(", ") + (one ? " is" : " are")
+            + " solved, not an input, so " + (one ? "its" : "their") + " value was skipped. "
+            + "Use ‘Solve for this’ on " + (one ? "it" : "one") + " to set " + (one ? "it" : "them") + ".");
+        }
       } catch (d) {
         const run = begin("Importing…");
         showFailure(run.id, d);
