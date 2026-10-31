@@ -1,0 +1,3 @@
+// The name on the left receives the number.
+x = 1 + 10
+y = x * 2

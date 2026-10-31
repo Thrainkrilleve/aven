@@ -1,0 +1,11 @@
+// target_area is pinned, but it never appears in the relation.
+// The area is still length times width.
+relation Field {
+    area = length * width
+}
+
+solve Field with {
+    length = 8
+    width = 5
+    target_area = 100
+}

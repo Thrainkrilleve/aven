@@ -16,6 +16,7 @@ Unlike traditional imperative languages where functions require hardcoded input/
 
 | Guide | Description | Target Audience |
 |:---|:---|:---|
+| **[How to write a model](docs/HOW_TO.md)** | Follow along: forward, backward, and the checklist that says a test file is right | Anyone writing a model |
 | **[Getting Started Guide](docs/GETTING_STARTED.md)** | 15-minute quickstart from installation to first model solve | First-time visitors |
 | **[Aven by Example (Cookbook)](docs/TUTORIAL.md)** | 10 progressive, executable code recipes covering units, C99/WASM codegen, and debugging | Hands-on learners |
 | **[Quick Reference Cheat Sheet](docs/CHEAT_SHEET.md)** | Syntax tables, built-in functions, units, CLI commands, and exit codes | Daily reference |

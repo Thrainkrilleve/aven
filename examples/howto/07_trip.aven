@@ -1,0 +1,13 @@
+// The unit follows the number. Distance is shown in the unit on its signal.
+signal distance : m
+signal speed : km/h
+signal hours : h
+
+relation Trip {
+    distance = speed * hours
+}
+
+solve Trip with {
+    speed = 90 km/h
+    hours = 2 h
+}

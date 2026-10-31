@@ -1,0 +1,9 @@
+// This line computes leftover. It does not force leftover to be zero.
+relation Gap {
+    leftover = measured - expected
+}
+
+solve Gap with {
+    measured = 10
+    expected = 7
+}
