@@ -826,16 +826,19 @@ fn csv_records(text: &str) -> Result<Vec<Vec<String>>, String> {
     Ok(records)
 }
 
-/// Replace solve-block inputs with the matching rows. Solved blanks stay blank,
-/// so a round trip does not pin the variable the model is solving for.
-/// The rewritten source, plus the names of rows that were skipped because they
-/// name a solved variable rather than a solve-block input — a derived answer
-/// can't be set by import, only recomputed from the inputs.
+/// Rewritten source after a sheet import, plus the names import did not apply.
+#[derive(Debug)]
 pub struct SheetImport {
     pub source: String,
+    /// Names that belong to the model but are not solve-block inputs.
+    /// Import leaves those blanks alone; their sheet cells are ignored.
     pub skipped: Vec<String>,
 }
 
+/// Replace solve-block inputs with the matching rows. Solved blanks stay blank,
+/// so a round trip does not pin the variable the model is solving for.
+/// A row that names a solved variable is reported in [`SheetImport::skipped`]
+/// and is not parsed as a number, because that cell is never written.
 pub fn apply_sheet(source: &str, rows: &[SheetRow]) -> Result<SheetImport, Diagnostic> {
     if let Some(diag) = check(source).into_iter().next() {
         return Err(diag);
@@ -862,6 +865,17 @@ pub fn apply_sheet(source: &str, rows: &[SheetRow]) -> Result<SheetImport, Diagn
                 1,
             ));
         }
+        let Some(binding) = module
+            .solves
+            .iter()
+            .flat_map(|solve| solve.bindings.iter())
+            .find(|binding| binding.name == row.name)
+        else {
+            if !skipped.iter().any(|name| name == &row.name) {
+                skipped.push(row.name.clone());
+            }
+            continue;
+        };
         let value: f64 = row.value.trim().parse().map_err(|_| {
             located(
                 source,
@@ -878,15 +892,6 @@ pub fn apply_sheet(source: &str, rows: &[SheetRow]) -> Result<SheetImport, Diagn
                 1,
             ));
         }
-        let Some(binding) = module
-            .solves
-            .iter()
-            .flat_map(|solve| solve.bindings.iter())
-            .find(|binding| binding.name == row.name)
-        else {
-            skipped.push(row.name.clone());
-            continue;
-        };
         let unit = if row.unit.trim().is_empty() {
             binding.unit.clone().unwrap_or_default()
         } else {
@@ -908,12 +913,7 @@ pub fn apply_sheet(source: &str, rows: &[SheetRow]) -> Result<SheetImport, Diagn
         let msg = if skipped.is_empty() {
             "None of these rows match an input in the solve block.".to_string()
         } else {
-            format!(
-                "{} {} solved, not an input. Change an input in the solve block, or use 'Solve for this' to set {}.",
-                join_names(&skipped),
-                if skipped.len() == 1 { "is" } else { "are" },
-                if skipped.len() == 1 { "it" } else { "them" }
-            )
+            skipped_rows_message(&skipped)
         };
         return Err(located(source, msg, 1, 1));
     }
@@ -921,6 +921,23 @@ pub fn apply_sheet(source: &str, rows: &[SheetRow]) -> Result<SheetImport, Diagn
         source: lines.concat(),
         skipped,
     })
+}
+
+/// "Solve for this" is the button on a pinned input. It makes that input the
+/// blank and pins the name that was solved, which is how a skipped cell becomes
+/// settable. The button is not on the solved name itself.
+fn skipped_rows_message(skipped: &[String]) -> String {
+    let verb = if skipped.len() == 1 { "is" } else { "are" };
+    let kind = if skipped.len() == 1 {
+        "an input"
+    } else {
+        "inputs"
+    };
+    let pronoun = if skipped.len() == 1 { "it" } else { "them" };
+    format!(
+        "{} {verb} solved, not {kind}. Choose Solve for this on a pinned name to make that name the blank, then set {pronoun}.",
+        join_names(skipped)
+    )
 }
 
 fn rewrite_binding_value(line: &str, number: &str, unit: &str) -> String {
@@ -1893,5 +1910,40 @@ mod tests {
         );
         let solved = solve(&next).expect("solve");
         assert!((solved.shown["speed"] - 100.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn sheet_import_refuses_when_every_row_is_solved() {
+        let rows = parse_csv("name,value,unit\nmass,1,\n").expect("csv");
+        let err = apply_sheet(newton(), &rows).expect_err("mass is not an input");
+        assert_eq!(
+            err.message,
+            "mass is solved, not an input. Choose Solve for this on a pinned name to make that name the blank, then set it."
+        );
+    }
+
+    #[test]
+    fn sheet_import_names_every_solved_row_when_none_are_inputs() {
+        let src = "relation Chain {\n y = 2 * x\n z = y + 1\n}\nsolve Chain with {\n x = 3\n}\n";
+        let rows = parse_csv("name,value,unit\nz,9,\ny,1,\n").expect("csv");
+        let err = apply_sheet(src, &rows).expect_err("both solved");
+        assert_eq!(
+            err.message,
+            "z and y are solved, not inputs. Choose Solve for this on a pinned name to make that name the blank, then set them."
+        );
+    }
+
+    #[test]
+    fn sheet_import_ignores_a_non_numeric_solved_cell() {
+        let rows =
+            parse_csv("name,value,unit\nforce,8400,\nmass,not-a-number,\nmass,1,\n").expect("csv");
+        let imported = apply_sheet(newton(), &rows).expect("apply");
+        assert_eq!(imported.skipped, vec!["mass".to_string()]);
+        assert!(
+            imported.source.contains("force = 8400") || imported.source.contains("= 8400"),
+            "{}",
+            imported.source
+        );
+        assert!(!imported.source.contains("mass ="), "{}", imported.source);
     }
 }

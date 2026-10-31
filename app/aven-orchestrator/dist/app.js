@@ -234,13 +234,23 @@
         if (statusEl.classList.contains("ok")) {
           setStatus(skipped.length ? "Imported — some rows skipped" : "Imported sheet", "ok");
         }
-        // A derived variable can't be set by import; say so instead of
-        // silently ignoring its row.
+        // A derived variable can't be set by import. "Solve for this" sits on
+        // a pinned input, not on the solved name, so point at that button.
         if (skipped.length) {
           const one = skipped.length === 1;
-          pushGuide("Import note", skipped.join(", ") + (one ? " is" : " are")
-            + " solved, not an input, so " + (one ? "its" : "their") + " value was skipped. "
-            + "Use ‘Solve for this’ on " + (one ? "it" : "one") + " to set " + (one ? "it" : "them") + ".");
+          const note = joinNames(skipped) + (one ? " is" : " are")
+            + " solved, not " + (one ? "an input" : "inputs")
+            + ", so " + (one ? "its value was" : "their values were") + " skipped. "
+            + "Choose Solve for this on a pinned name to make that name the blank, then set "
+            + (one ? "it" : "them") + ".";
+          if (statusEl.classList.contains("ok")) {
+            const prior = lastGuide.text ? "\n" + lastGuide.text : "";
+            pushGuide("Import note", note + prior);
+          } else if (lastGuide.text) {
+            pushGuide(lastGuide.kicker, lastGuide.text + "\n" + note);
+          } else {
+            pushGuide("Import note", note);
+          }
         }
       } catch (d) {
         const run = begin("Importing…");
@@ -462,9 +472,17 @@
       }
       return steps ? steps + "\n" + tail : tail;
     }
+    function joinNames(names) {
+      if (names.length <= 1) return names[0] || "";
+      if (names.length === 2) return names[0] + " and " + names[1];
+      return names.slice(0, -1).join(", ") + ", and " + names[names.length - 1];
+    }
     function insightForDiag(msg) {
       const text = (msg || "").trim();
       const m = text.toLowerCase();
+      // This refusal already says what to do. The generic line note would
+      // claim a marked line stopped the solve, which is not what happened.
+      if (m.indexOf("solved, not an input") >= 0 || m.indexOf("solved, not inputs") >= 0) return text;
       let why = "The marked line stopped the solve.";
       if (m.indexOf("unit") >= 0 || m.indexOf("can't add") >= 0 || m.indexOf("dimensional") >= 0) {
         why = "Those are different kinds of quantity, so Aven stops before producing a number.";
