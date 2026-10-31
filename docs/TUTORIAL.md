@@ -100,7 +100,7 @@ Settled Environment:
 
 ## Recipe 3: Physical Units & Dimensional Analysis
 
-Aven checks dimensions across ten base dimensions: the SI quantities length, mass, time, current, temperature and amount of substance, plus angle, money, data and transactions. It also converts values: every number is turned into base units before solving and shown back in its declared unit.
+Aven checks dimensions across ten base dimensions: the SI quantities length, mass, time, current, temperature and amount of substance, plus angle, money, data and transactions. It also converts values: every number is turned into base units before solving and shown back in its declared unit. The full list, in plain language, is [Units](UNITS.md).
 
 This is `examples/aerodynamics.aven`:
 ```aven
