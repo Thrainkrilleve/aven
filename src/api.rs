@@ -831,6 +831,7 @@ fn csv_records(text: &str) -> Result<Vec<Vec<String>>, String> {
 /// The rewritten source, plus the names of rows that were skipped because they
 /// name a solved variable rather than a solve-block input — a derived answer
 /// can't be set by import, only recomputed from the inputs.
+#[derive(Debug)]
 pub struct SheetImport {
     pub source: String,
     pub skipped: Vec<String>,
@@ -884,7 +885,10 @@ pub fn apply_sheet(source: &str, rows: &[SheetRow]) -> Result<SheetImport, Diagn
             .flat_map(|solve| solve.bindings.iter())
             .find(|binding| binding.name == row.name)
         else {
-            skipped.push(row.name.clone());
+            // A solved name can appear on more than one row. Say it once.
+            if !skipped.iter().any(|name| name == &row.name) {
+                skipped.push(row.name.clone());
+            }
             continue;
         };
         let unit = if row.unit.trim().is_empty() {
@@ -908,12 +912,7 @@ pub fn apply_sheet(source: &str, rows: &[SheetRow]) -> Result<SheetImport, Diagn
         let msg = if skipped.is_empty() {
             "None of these rows match an input in the solve block.".to_string()
         } else {
-            format!(
-                "{} {} solved, not an input. Change an input in the solve block, or use 'Solve for this' to set {}.",
-                join_names(&skipped),
-                if skipped.len() == 1 { "is" } else { "are" },
-                if skipped.len() == 1 { "it" } else { "them" }
-            )
+            skipped_row_message(&skipped)
         };
         return Err(located(source, msg, 1, 1));
     }
@@ -921,6 +920,21 @@ pub fn apply_sheet(source: &str, rows: &[SheetRow]) -> Result<SheetImport, Diagn
         source: lines.concat(),
         skipped,
     })
+}
+
+/// "Solve for this" is only drawn on a pinned name. It blanks that name and
+/// pins the previous blank, so the hint has to point at a pinned name.
+fn skipped_row_message(skipped: &[String]) -> String {
+    let names = join_names(skipped);
+    if skipped.len() == 1 {
+        format!(
+            "{names} is solved, not an input. Import only fills pinned inputs. To set {names}, choose Solve for this on a pinned name."
+        )
+    } else {
+        format!(
+            "{names} are solved, not inputs. Import only fills pinned inputs. To set one of them, choose Solve for this on a pinned name."
+        )
+    }
 }
 
 fn rewrite_binding_value(line: &str, number: &str, unit: &str) -> String {
@@ -1893,5 +1907,39 @@ mod tests {
         );
         let solved = solve(&next).expect("solve");
         assert!((solved.shown["speed"] - 100.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn sheet_import_explains_a_solved_name_without_pointing_at_it() {
+        let rows = parse_csv("name,value,unit\nmass,10,\n").expect("csv");
+        let err = apply_sheet(newton(), &rows).expect_err("only the solved name");
+        assert!(
+            err.message.contains("mass is solved, not an input"),
+            "{}",
+            err.message
+        );
+        assert!(
+            err.message
+                .contains("choose Solve for this on a pinned name"),
+            "{}",
+            err.message
+        );
+        assert!(
+            !err.message.contains("on it") && !err.message.contains("to set it"),
+            "{}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn sheet_import_explains_several_solved_names() {
+        let src = "relation R {\n y = 2 * x\n z = 3 * x\n}\nsolve R with {\n x = 4\n}\n";
+        let rows = parse_csv("name,value,unit\ny,1,\nz,1,\ny,2,\n").expect("csv");
+        let err = apply_sheet(src, &rows).expect_err("only solved names");
+        assert!(
+            err.message.contains("y and z are solved, not inputs"),
+            "{}",
+            err.message
+        );
     }
 }

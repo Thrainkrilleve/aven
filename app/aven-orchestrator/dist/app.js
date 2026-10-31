@@ -239,8 +239,10 @@
         if (skipped.length) {
           const one = skipped.length === 1;
           pushGuide("Import note", skipped.join(", ") + (one ? " is" : " are")
-            + " solved, not an input, so " + (one ? "its" : "their") + " value was skipped. "
-            + "Use ‘Solve for this’ on " + (one ? "it" : "one") + " to set " + (one ? "it" : "them") + ".");
+            + " solved, not " + (one ? "an input" : "inputs")
+            + ", so " + (one ? "its value was" : "their values were") + " skipped. "
+            + "To set " + (one ? "it" : "one of them")
+            + ", choose Solve for this on a pinned name.");
         }
       } catch (d) {
         const run = begin("Importing…");
@@ -465,6 +467,10 @@
     function insightForDiag(msg) {
       const text = (msg || "").trim();
       const m = text.toLowerCase();
+      // An import refusal already says what to do. Don't append a solve explanation.
+      if (m.indexOf("solved, not an input") >= 0 || m.indexOf("solved, not inputs") >= 0) {
+        return text;
+      }
       let why = "The marked line stopped the solve.";
       if (m.indexOf("unit") >= 0 || m.indexOf("can't add") >= 0 || m.indexOf("dimensional") >= 0) {
         why = "Those are different kinds of quantity, so Aven stops before producing a number.";
