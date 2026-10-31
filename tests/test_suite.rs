@@ -514,9 +514,10 @@ fn test_pareto_frontier_and_knee_point_detection() {
     // At 50k: raw_workers = (50000 * 20)/1000 = 1000
     assert_eq!(frontier[4].vars.get("raw_workers"), Some(1000.0));
 
-    // Knee point detection
+    // Both objectives are linear in the swept input, so the balanced
+    // compromise is the midpoint (index 2 of 5), not the second sample.
     let knee = Orchestrator::find_knee_point(&frontier);
-    assert!(knee.is_some());
+    assert_eq!(knee, Some(2));
 }
 
 #[test]
@@ -1882,9 +1883,10 @@ fn test_kubernetes_multi_objective_pareto_convergence_and_knee_point() {
         first.vars.get("mem_headroom_pct").unwrap() > last.vars.get("mem_headroom_pct").unwrap()
     );
 
-    // Verify Knee Point detection
+    // cpu_utilization and mem_headroom_pct are both linear in target_pods,
+    // so the knee is the midpoint of the six solved samples.
     let knee_idx = Orchestrator::find_knee_point(&frontier);
-    assert!(knee_idx.is_some());
+    assert_eq!(knee_idx, Some(3));
 }
 
 #[test]

@@ -5,7 +5,7 @@
 // logic, so there stays exactly one source of truth for the math.
 
 use crate::ast::BlockKind;
-use crate::evaluator::sha256_hex;
+use crate::evaluator::{knee_of_series, sha256_hex};
 use crate::ledger::{DEFAULT_MAX_DEPTH, Fact, Ledger, from_jsonl};
 use crate::lexer::Lexer;
 use crate::parser::Parser;
@@ -1055,11 +1055,13 @@ pub fn sweep(
     })
 }
 
-/// The knee of a trade-off across the sweep: the point with the greatest
-/// normalized distance from the line joining the endpoints of the two
-/// strongest-moving objectives. Mirrors evaluator::find_knee_point, but over
-/// the sweep's own points. None when fewer than two objectives move, or fewer
-/// than three points solved.
+/// The knee of a trade-off across the sweep. Same geometry as
+/// [`knee_of_series`] (and therefore `find_knee_point`), measured on the
+/// sweep's own solved points rather than an epsilon-filtered frontier, so the
+/// index matches the samples the chart draws. `None` when fewer than two
+/// objectives move, or fewer than three points solved. An objective that is
+/// missing or non-finite is left out of the comparison instead of erasing the
+/// knee of the objectives that did move.
 fn sweep_knee(targets: &[String], points: &[SweepPoint]) -> Option<usize> {
     if targets.len() < 2 || points.len() <= 2 {
         return None;
@@ -1073,64 +1075,7 @@ fn sweep_knee(targets: &[String], points: &[SweepPoint]) -> Option<usize> {
                 .collect()
         })
         .collect();
-    if series.iter().flatten().any(|v| !v.is_finite()) {
-        return None;
-    }
-    let span = |s: &[f64]| {
-        let lo = s.iter().cloned().fold(f64::INFINITY, f64::min);
-        let hi = s.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        (lo, hi - lo)
-    };
-    let last = points.len() - 1;
-    // Pick the pair of objectives with the strongest trade-off.
-    let mut best: Option<(usize, usize)> = None;
-    let mut best_score = f64::NEG_INFINITY;
-    for a in 0..series.len() {
-        for b in (a + 1)..series.len() {
-            let (_, span_a) = span(&series[a]);
-            let (_, span_b) = span(&series[b]);
-            if span_a < 1e-9 || span_b < 1e-9 {
-                continue;
-            }
-            let d1 = series[a][last] - series[a][0];
-            let d2 = series[b][last] - series[b][0];
-            let score = if d1 * d2 < 0.0 {
-                1.0 + span_a * span_b
-            } else {
-                span_a + span_b
-            };
-            if score > best_score {
-                best_score = score;
-                best = Some((a, b));
-            }
-        }
-    }
-    let (a, b) = best?;
-    let (mina, span_a) = span(&series[a]);
-    let (minb, span_b) = span(&series[b]);
-    let span_a = span_a.max(1e-12);
-    let span_b = span_b.max(1e-12);
-    let norm = |v: f64, lo: f64, sp: f64| (v - lo) / sp;
-    let x1 = norm(series[a][0], mina, span_a);
-    let y1 = norm(series[b][0], minb, span_b);
-    let x2 = norm(series[a][last], mina, span_a);
-    let y2 = norm(series[b][last], minb, span_b);
-    let denom = ((y2 - y1).powi(2) + (x2 - x1).powi(2)).sqrt();
-    if denom < 1e-12 {
-        return Some(points.len() / 2);
-    }
-    let mut max_dist = -1.0;
-    let mut knee = points.len() / 2;
-    for i in 1..last {
-        let x0 = norm(series[a][i], mina, span_a);
-        let y0 = norm(series[b][i], minb, span_b);
-        let dist = ((y2 - y1) * x0 - (x2 - x1) * y0 + x2 * y1 - y2 * x1).abs() / denom;
-        if dist > max_dist {
-            max_dist = dist;
-            knee = i;
-        }
-    }
-    Some(knee)
+    knee_of_series(&series)
 }
 
 /// "Solve for this" is the button on a pinned input. It makes that input the
@@ -1652,6 +1597,7 @@ fn join_phrases(parts: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     #[test]
     fn check_clean_model_has_no_diagnostics() {
@@ -2194,10 +2140,72 @@ mod tests {
         let knee = result
             .knee
             .expect("two moving objectives should mark a knee");
+        // Diminishing returns peak near effort 30.25 (sample 6 of 0..=20).
+        // A straight-line tie would land on the midpoint, effort 50.5.
+        let effort = result.points[knee].x;
         assert!(
-            knee > 0 && knee < result.points.len() - 1,
-            "knee is interior: {knee} of {}",
-            result.points.len()
+            (effort - 30.25).abs() < 3.0,
+            "knee effort {effort} at index {knee}, expected the bow near 30.25"
+        );
+    }
+
+    #[test]
+    fn sweep_knee_of_a_straight_tradeoff_is_the_midpoint() {
+        let src = "relation Plan {\n    quality = effort\n    cost = effort * 2\n}\n\nsolve Plan with {\n    effort = 25\n    maximize quality\n    minimize cost\n}\n";
+        let result = sweep(src, "effort", 1.0, 100.0, 20).expect("sweep");
+        assert_eq!(result.points.len(), 21);
+        assert_eq!(result.knee, Some(result.points.len() / 2));
+    }
+
+    #[test]
+    fn sweep_knee_follows_the_bow_not_the_largest_objective() {
+        // noise is collinear with cost and a thousand times larger. Ranking
+        // pairs by raw span would mark that straight pair and miss the bow.
+        let src = "relation Plan {\n    quality = sqrt(effort)\n    cost = effort * 2\n    noise = effort * 1000\n}\n\nsolve Plan with {\n    effort = 25\n    maximize quality\n    minimize cost\n    minimize noise\n}\n";
+        let result = sweep(src, "effort", 1.0, 100.0, 20).expect("sweep");
+        let knee = result.knee.expect("bowed pair should mark a knee");
+        let effort = result.points[knee].x;
+        assert!(
+            (effort - 30.25).abs() < 3.0,
+            "knee effort {effort} at index {knee}, the large linear objective hid the bow"
+        );
+    }
+
+    #[test]
+    fn sweep_knee_ignores_an_objective_that_is_not_on_the_curve() {
+        let mut points = Vec::new();
+        for i in 0..=20 {
+            let effort = 1.0 + (i as f64 / 20.0) * 99.0;
+            let mut values = BTreeMap::new();
+            values.insert("quality".to_string(), effort.sqrt());
+            values.insert("cost".to_string(), effort * 2.0);
+            points.push(SweepPoint { x: effort, values });
+        }
+        let targets = vec![
+            "quality".to_string(),
+            "cost".to_string(),
+            "ghost".to_string(),
+        ];
+        assert_eq!(sweep_knee(&targets, &points), Some(6));
+    }
+
+    #[test]
+    fn sweep_knee_marks_a_spike_when_the_endpoints_meet() {
+        let mut points = Vec::new();
+        for i in 0..5 {
+            let spike = if i == 1 { 5.0 } else { 0.0 };
+            let mut values = BTreeMap::new();
+            values.insert("a".to_string(), spike);
+            values.insert("b".to_string(), spike / 5.0);
+            points.push(SweepPoint {
+                x: i as f64,
+                values,
+            });
+        }
+        assert_eq!(
+            sweep_knee(&["a".to_string(), "b".to_string()], &points),
+            Some(1),
+            "the excursion is the first interior sample, not the midpoint"
         );
     }
 
