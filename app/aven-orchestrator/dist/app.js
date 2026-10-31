@@ -280,6 +280,108 @@
       }
     }
 
+    // Sweep one input across a range and draw how the outputs respond. The
+    // curve comes from the same solve the panel uses, one point per step.
+    function sweepDefaults(cur) {
+      if (!Number.isFinite(cur) || cur === 0) return { lo: 0, hi: 1 };
+      return { lo: Number((cur * 0.5).toPrecision(4)), hi: Number((cur * 2).toPrecision(4)) };
+    }
+    async function graphSweep() {
+      if (!invoke) return;
+      const run = begin("Preparing sweep…");
+      let solved;
+      try {
+        solved = await invoke("solve_model", { source: run.source });
+      } catch (d) { showFailure(run.id, d); return; }
+      if (!current(run.id)) return;
+      const bound = solved.bound || [];
+      const shown = Object.fromEntries(solved.shown || []);
+      if (!bound.length) {
+        setStatus("No inputs to sweep — pin a value in the solve block, or ‘Solve for this’ on one.", "bad");
+        return;
+      }
+      setStatus("Sweep an input", "ok");
+      const opts = bound.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
+      const d0 = sweepDefaults(shown[bound[0]]);
+      out.insertAdjacentHTML("beforeend",
+        `<div class="sweepctl">
+           <label>Sweep <select id="sw-var">${opts}</select></label>
+           <label>from <input id="sw-min" class="slot" value="${d0.lo}" /></label>
+           <label>to <input id="sw-max" class="slot" value="${d0.hi}" /></label>
+           <label>steps <input id="sw-steps" class="slot" value="25" style="width:4rem" /></label>
+           <button class="primary" id="sw-plot">Plot ▶</button>
+         </div>
+         <div id="sw-chart"></div>`);
+      const varSel = document.getElementById("sw-var");
+      varSel.addEventListener("change", () => {
+        const d = sweepDefaults(shown[varSel.value]);
+        document.getElementById("sw-min").value = d.lo;
+        document.getElementById("sw-max").value = d.hi;
+      });
+      document.getElementById("sw-plot").addEventListener("click", plotSweep);
+    }
+
+    async function plotSweep() {
+      const chart = document.getElementById("sw-chart");
+      const v = document.getElementById("sw-var").value;
+      const min = parseFloat(document.getElementById("sw-min").value);
+      const max = parseFloat(document.getElementById("sw-max").value);
+      const steps = parseInt(document.getElementById("sw-steps").value, 10) || 25;
+      if (!Number.isFinite(min) || !Number.isFinite(max)) {
+        if (chart) chart.innerHTML = `<div class="diag">Give a numeric range.</div>`;
+        return;
+      }
+      try {
+        const res = await invoke("sweep_model", { source: editor.value, var: v, min, max, steps });
+        if (chart) chart.innerHTML = buildSweepChart(res);
+      } catch (d) {
+        if (chart) chart.innerHTML = `<div class="diag">${esc(failureText(d))}</div>`;
+      }
+    }
+
+    // A hand-drawn SVG line chart: one series per output that actually moves,
+    // each normalized to its own range, with the knee marked when present.
+    function buildSweepChart(res) {
+      const pts = res.points || [];
+      const varies = res.varies || [];
+      const units = Object.fromEntries(res.units || []);
+      if (pts.length < 2 || !varies.length) {
+        return `<div class="trace">Nothing varied across that sweep.</div>`;
+      }
+      const W = 640, H = 300, padL = 54, padR = 16, padT = 14, padB = 40;
+      const plotW = W - padL - padR, plotH = H - padT - padB;
+      const valMap = pts.map((p) => Object.fromEntries(p.values || []));
+      const xs = pts.map((p) => p.x);
+      const xmin = Math.min(...xs), xmax = Math.max(...xs), xspan = (xmax - xmin) || 1;
+      const sx = (x) => padL + ((x - xmin) / xspan) * plotW;
+      const colors = ["#4fd1e8", "#f5b451", "#4ade80", "#c792ea", "#f87171", "#82aaff"];
+      const series = varies.map((name, i) => {
+        const ys = valMap.map((v) => v[name]);
+        const ymin = Math.min(...ys), ymax = Math.max(...ys), yspan = (ymax - ymin) || 1;
+        const sy = (y) => padT + plotH - ((y - ymin) / yspan) * plotH;
+        const d = pts.map((p, k) => `${k ? "L" : "M"}${sx(p.x).toFixed(1)},${sy(ys[k]).toFixed(1)}`).join(" ");
+        return { name, color: colors[i % colors.length], d, ymin, ymax, unit: units[name] || "" };
+      });
+      const axis = `<line x1="${padL}" y1="${padT + plotH}" x2="${padL + plotW}" y2="${padT + plotH}" stroke="#243042"/>`
+        + `<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + plotH}" stroke="#243042"/>`;
+      const paths = series.map((s) => `<path d="${s.d}" fill="none" stroke="${s.color}" stroke-width="2"/>`).join("");
+      let knee = "";
+      if (res.knee != null && pts[res.knee]) {
+        const kx = sx(pts[res.knee].x);
+        knee = `<line x1="${kx.toFixed(1)}" y1="${padT}" x2="${kx.toFixed(1)}" y2="${padT + plotH}" stroke="#9aa6b8" stroke-dasharray="4 3"/>`
+          + `<text x="${(kx + 3).toFixed(1)}" y="${padT + 10}" fill="#9aa6b8" font-size="10">knee</text>`;
+      }
+      const xu = units[res.var] ? " " + units[res.var] : "";
+      const xlab = `<text x="${padL}" y="${padT + plotH + 16}" fill="#9aa6b8" font-size="10">${esc(fmt(xmin))}</text>`
+        + `<text x="${padL + plotW}" y="${padT + plotH + 16}" fill="#9aa6b8" font-size="10" text-anchor="end">${esc(fmt(xmax))}</text>`
+        + `<text x="${padL + plotW / 2}" y="${H - 6}" fill="#9aa6b8" font-size="11" text-anchor="middle">${esc(res.var)}${esc(xu)}</text>`;
+      const svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="margin-top:.6rem;background:#0d141f;border:1px solid var(--border);border-radius:8px">${axis}${paths}${knee}${xlab}</svg>`;
+      const legend = `<div class="trace">` + series.map((s) =>
+        `<span style="color:${s.color}">■</span> ${esc(s.name)}: ${esc(fmt(s.ymin))} → ${esc(fmt(s.ymax))}${s.unit ? " " + esc(s.unit) : ""}`
+      ).join("<br>") + `</div>`;
+      return svg + legend;
+    }
+
     document.getElementById("btn-solve").addEventListener("click", solve);
     document.getElementById("btn-check").addEventListener("click", check);
     document.getElementById("btn-report").addEventListener("click", report);
@@ -287,6 +389,7 @@
     document.getElementById("btn-verify").addEventListener("click", verifyReport);
     document.getElementById("btn-import").addEventListener("click", importSheet);
     document.getElementById("btn-export-sheet").addEventListener("click", exportSheet);
+    document.getElementById("btn-graph").addEventListener("click", graphSweep);
 
     // After a pause, check the text and settle it when the check is clean.
     // A refusal stays a sentence. A newer edit drops the older result.

@@ -923,6 +923,127 @@ pub fn apply_sheet(source: &str, rows: &[SheetRow]) -> Result<SheetImport, Diagn
     })
 }
 
+/// One solved point of a sweep: the swept input value and every variable's
+/// shown value at that point.
+#[derive(Debug, Clone)]
+pub struct SweepPoint {
+    pub x: f64,
+    pub values: BTreeMap<String, f64>,
+}
+
+/// The result of sweeping one input across a range: the points that solved, the
+/// units for labeling, the names whose value actually changes across the sweep
+/// (what's worth plotting), and an optional knee index (objective models only).
+#[derive(Debug, Clone)]
+pub struct SweepResult {
+    pub var: String,
+    pub points: Vec<SweepPoint>,
+    pub units: BTreeMap<String, String>,
+    pub varies: Vec<String>,
+    pub knee: Option<usize>,
+}
+
+/// Sweep one solve-block input across `min..=max` in `steps` intervals, solving
+/// the model at each value and recording every settled variable. This loops the
+/// same `solve` the rest of the surface uses, so a sweep curve can never diverge
+/// from what Solve shows. Points that do not solve are skipped.
+pub fn sweep(
+    source: &str,
+    var: &str,
+    min: f64,
+    max: f64,
+    steps: usize,
+) -> Result<SweepResult, Diagnostic> {
+    if let Some(diag) = check(source).into_iter().next() {
+        return Err(diag);
+    }
+    let module = parse_source(source)?;
+    let is_input = module
+        .solves
+        .iter()
+        .flat_map(|solve| solve.bindings.iter())
+        .any(|binding| binding.name == var);
+    if !is_input {
+        return Err(located(
+            source,
+            format!(
+                "{var} is not a solve-block input. Sweep an input and watch the outputs; use 'Solve for this' to make {var} an input first."
+            ),
+            1,
+            1,
+        ));
+    }
+    if !min.is_finite() || !max.is_finite() {
+        return Err(located(
+            source,
+            "The sweep range must be two finite numbers.",
+            1,
+            1,
+        ));
+    }
+    let steps = steps.clamp(1, 1000);
+    let mut points: Vec<SweepPoint> = Vec::new();
+    let mut units: BTreeMap<String, String> = BTreeMap::new();
+    for i in 0..=steps {
+        let raw = min + (i as f64 / steps as f64) * (max - min);
+        let row = SheetRow {
+            name: var.to_string(),
+            value: format!("{raw}"),
+            unit: String::new(),
+        };
+        let edited = apply_sheet(source, std::slice::from_ref(&row))?;
+        let Ok(solved) = solve(&edited.source) else {
+            continue;
+        };
+        for (name, unit) in &solved.units {
+            units.entry(name.clone()).or_insert_with(|| unit.clone());
+        }
+        let x = solved.shown.get(var).copied().unwrap_or(raw);
+        let values: BTreeMap<String, f64> = solved
+            .values
+            .iter()
+            .map(|(name, v)| (name.clone(), solved.shown.get(name).copied().unwrap_or(*v)))
+            .collect();
+        points.push(SweepPoint { x, values });
+    }
+    if points.is_empty() {
+        return Err(located(
+            source,
+            "No value in that range solved. Try a different range.",
+            1,
+            1,
+        ));
+    }
+    // A name is worth plotting only if it actually moves across the sweep.
+    let mut varies: Vec<String> = Vec::new();
+    if let Some(first) = points.first() {
+        for name in first.values.keys() {
+            if name == var {
+                continue;
+            }
+            let mut lo = f64::INFINITY;
+            let mut hi = f64::NEG_INFINITY;
+            for point in &points {
+                if let Some(v) = point.values.get(name) {
+                    lo = lo.min(*v);
+                    hi = hi.max(*v);
+                }
+            }
+            if (hi - lo).abs() > 1e-9 {
+                varies.push(name.clone());
+            }
+        }
+    }
+    varies.sort();
+    Ok(SweepResult {
+        var: var.to_string(),
+        points,
+        units,
+        varies,
+        knee: None,
+    })
+}
+
 /// "Solve for this" is the button on a pinned input. It makes that input the
 /// blank and pins the name that was solved, which is how a skipped cell becomes
 /// settable. The button is not on the solved name itself.
@@ -1945,5 +2066,40 @@ mod tests {
             imported.source
         );
         assert!(!imported.source.contains("mass ="), "{}", imported.source);
+    }
+
+    #[test]
+    fn sweep_traces_an_output_across_an_input() {
+        let src = "relation Newton {\n    force = mass * acceleration\n}\n\nsolve Newton with {\n    force = 4200\n    acceleration = 100\n}\n";
+        let result = sweep(src, "force", 1000.0, 8000.0, 7).expect("sweep");
+        assert_eq!(result.points.len(), 8, "steps + 1 points");
+        let first = &result.points[0];
+        let last = result.points.last().unwrap();
+        assert!((first.x - 1000.0).abs() < 1e-6, "{}", first.x);
+        assert!((last.x - 8000.0).abs() < 1e-6, "{}", last.x);
+        // mass = force / acceleration = force / 100
+        assert!(
+            (first.values["mass"] - 10.0).abs() < 1e-6,
+            "{:?}",
+            first.values
+        );
+        assert!(
+            (last.values["mass"] - 80.0).abs() < 1e-6,
+            "{:?}",
+            last.values
+        );
+        assert!(
+            result.varies.contains(&"mass".to_string()),
+            "{:?}",
+            result.varies
+        );
+    }
+
+    #[test]
+    fn sweep_rejects_a_variable_that_is_not_an_input() {
+        let src = "relation Newton {\n    force = mass * acceleration\n}\n\nsolve Newton with {\n    force = 4200\n    acceleration = 100\n}\n";
+        // mass is the solved blank, not an input.
+        let err = sweep(src, "mass", 1.0, 10.0, 5).expect_err("mass is not an input");
+        assert!(err.message.contains("mass"), "{}", err.message);
     }
 }

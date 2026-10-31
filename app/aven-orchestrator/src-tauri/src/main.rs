@@ -112,6 +112,50 @@ fn why_model(
     api::why(&source, &variable, depth).map_err(|d| DiagnosticDto::from(&d))
 }
 
+#[derive(Serialize)]
+struct SweepPointDto {
+    x: f64,
+    values: Vec<(String, f64)>,
+}
+
+#[derive(Serialize)]
+struct SweepResultDto {
+    var: String,
+    points: Vec<SweepPointDto>,
+    units: Vec<(String, String)>,
+    varies: Vec<String>,
+    knee: Option<usize>,
+}
+
+/// Sweep one solve-block input across a range, solving at each step, and return
+/// the points for plotting a sensitivity curve.
+#[tauri::command]
+fn sweep_model(
+    source: String,
+    var: String,
+    min: f64,
+    max: f64,
+    steps: usize,
+) -> Result<SweepResultDto, DiagnosticDto> {
+    match api::sweep(&source, &var, min, max, steps) {
+        Ok(s) => Ok(SweepResultDto {
+            var: s.var,
+            points: s
+                .points
+                .into_iter()
+                .map(|p| SweepPointDto {
+                    x: p.x,
+                    values: p.values.into_iter().collect(),
+                })
+                .collect(),
+            units: s.units.into_iter().collect(),
+            varies: s.varies,
+            knee: s.knee,
+        }),
+        Err(d) => Err(DiagnosticDto::from(&d)),
+    }
+}
+
 /// The data a shareable, re-runnable report renders from.
 #[tauri::command]
 fn report_model(source: String) -> Result<ReportDto, DiagnosticDto> {
@@ -906,7 +950,8 @@ fn main() {
             open_report,
             export_pdf,
             export_sheet,
-            import_sheet
+            import_sheet,
+            sweep_model
         ])
         .setup(|_app| {
             #[cfg(debug_assertions)]

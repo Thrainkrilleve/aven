@@ -59,6 +59,9 @@
     .walk-collapse, .walk-tab { background: none; border: 1px solid var(--border); color: var(--muted); font-size: .68rem; padding: .1rem .55rem; border-radius: 999px; }
     .walk-collapse:hover, .walk-tab:hover { color: var(--text); border-color: var(--accent); }
     .walk-tab { letter-spacing: .06em; text-transform: uppercase; }
+    .sweepctl { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin-top: .6rem; font-size: .8rem; color: var(--muted); }
+    .sweepctl select { padding: .2rem .4rem; }
+    .sweepctl .slot { width: 6rem; text-align: left; }
   </style>
 </head>
 <body>
@@ -87,6 +90,7 @@
         <button id="btn-import">Import</button>
         <input id="sheet-range" class="range" placeholder="A1:C20" aria-label="Sheet range" />
         <button id="btn-export-sheet">Export sheet</button>
+        <button id="btn-graph">Graph</button>
       </div>
       <div class="editor-wrap"><div id="editor-host" aria-label="Aven model source"></div></div>
     </section>
