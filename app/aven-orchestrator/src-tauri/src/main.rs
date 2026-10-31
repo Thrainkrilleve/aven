@@ -56,6 +56,7 @@ struct SolvedDto {
     solving: Vec<String>,
     bound: Vec<String>,
     trace: Vec<String>,
+    explanation: String,
 }
 
 #[derive(Serialize)]
@@ -94,6 +95,7 @@ fn solve_model(source: String) -> Result<SolvedDto, DiagnosticDto> {
             solving: s.solving,
             bound: s.bound,
             trace: s.trace,
+            explanation: s.explanation,
         }),
         Err(d) => Err(DiagnosticDto::from(&d)),
     }
@@ -476,6 +478,17 @@ mod ide_tests {
                 };
                 assert_eq!(value("x"), Some(11.0), "{:?}", solved.values);
                 assert_eq!(value("y"), Some(22.0), "{:?}", solved.values);
+                assert!(
+                    solved.explanation.contains("computes x directly"),
+                    "{}",
+                    solved.explanation
+                );
+                assert!(
+                    solved.explanation.contains("Y comes out 22")
+                        || solved.explanation.contains("computes y from x"),
+                    "{}",
+                    solved.explanation
+                );
             }
             Err(err) => panic!("{src} refused: {}", err.message),
         }

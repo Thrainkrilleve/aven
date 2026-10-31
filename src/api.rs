@@ -68,6 +68,9 @@ pub struct Solved {
     /// Variables the solve block binds, so the panel can blank one of them.
     pub bound: Vec<String>,
     pub trace: Vec<String>,
+    /// Plain sentences for the guide: which rule ran, why that direction, and
+    /// the pinned numbers that produced each result.
+    pub explanation: String,
 }
 
 /// A diagnostic anchored at `line`/`col`, with `end` at the end of that line so
@@ -182,6 +185,7 @@ pub fn solve(source: &str) -> Result<Solved, Diagnostic> {
         Ok(settled) => {
             let values: BTreeMap<String, f64> = settled.into_iter().collect();
             let face = present(&module, &values);
+            let explanation = explain_solution(&solver.trace, &face.shown, &face.units);
             Ok(Solved {
                 values,
                 shown: face.shown,
@@ -189,6 +193,7 @@ pub fn solve(source: &str) -> Result<Solved, Diagnostic> {
                 solving: face.solving,
                 bound: face.bound,
                 trace: solver.trace.clone(),
+                explanation,
             })
         }
         // Solver errors (under-determined, infeasible, …) have no single source
@@ -689,6 +694,133 @@ fn run_with_ledger(source: &str) -> Result<(Ledger, BTreeMap<String, f64>), Diag
     Ok((ledger, solved.into_iter().collect()))
 }
 
+/// One sentence per solver step: the rule, why it ran forward or backward,
+/// and the pinned numbers that produced the result.
+fn explain_solution(
+    trace: &[String],
+    shown: &BTreeMap<String, f64>,
+    units: &BTreeMap<String, String>,
+) -> String {
+    let mut sentences = Vec::new();
+    for line in trace {
+        if let Some(rest) = line.strip_prefix("[optimize] ") {
+            sentences.push(format!("An objective was optimized: {rest}"));
+            continue;
+        }
+        let Some((equation, name, kind)) = parse_trace_step(line) else {
+            if !line.trim().is_empty() {
+                sentences.push(line.clone());
+            }
+            continue;
+        };
+        let value = shown
+            .get(&name)
+            .copied()
+            .map(format_number)
+            .unwrap_or_else(|| "—".to_string());
+        let unit = units
+            .get(&name)
+            .map(|u| format!(" {u}"))
+            .unwrap_or_default();
+        let name_cap = capitalize(&name);
+        let mut others = Vec::new();
+        let mut seen_names = std::collections::BTreeSet::new();
+        for found in equation_names(&equation) {
+            if found != name && seen_names.insert(found.clone()) {
+                others.push(found);
+            }
+        }
+        let causes: Vec<String> = others
+            .iter()
+            .filter_map(|n| {
+                let v = shown.get(n).copied()?;
+                let u = units
+                    .get(n)
+                    .map(|unit| format!(" {unit}"))
+                    .unwrap_or_default();
+                Some(format!("{} is {}{u}", capitalize(n), format_number(v)))
+            })
+            .collect();
+        let sentence = if kind == "backward Newton" {
+            let mut text =
+                format!("{name_cap} was left blank, so `{equation}` was solved for {name}.");
+            if !causes.is_empty() {
+                text.push(' ');
+                text.push_str(&join_phrases(&causes));
+                text.push('.');
+            }
+            text.push(' ');
+            text.push_str(&format!("{name_cap} comes out {value}{unit}."));
+            text
+        } else if causes.is_empty() {
+            format!("`{equation}` computes {name} directly. {name_cap} comes out {value}{unit}.")
+        } else {
+            format!(
+                "`{equation}` computes {name} from {}. {}. {name_cap} comes out {value}{unit}.",
+                join_names(&others),
+                join_phrases(&causes)
+            )
+        };
+        sentences.push(sentence);
+    }
+    sentences.join("\n")
+}
+
+fn parse_trace_step(line: &str) -> Option<(String, String, String)> {
+    let rest = line.strip_prefix('[')?;
+    let (equation, after) = rest.split_once("] ")?;
+    let (name, kind) = after.split_once(" <- ")?;
+    if name.is_empty() || equation.is_empty() {
+        return None;
+    }
+    if kind != "forward eval" && kind != "backward Newton" {
+        return None;
+    }
+    Some((equation.to_string(), name.to_string(), kind.to_string()))
+}
+
+fn equation_names(equation: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut current = String::new();
+    for ch in equation.chars() {
+        let keep =
+            ch.is_ascii_alphabetic() || ch == '_' || (!current.is_empty() && ch.is_ascii_digit());
+        if keep {
+            current.push(ch);
+        } else if !current.is_empty() {
+            names.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        names.push(current);
+    }
+    names
+}
+
+fn capitalize(name: &str) -> String {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+fn join_names(names: &[String]) -> String {
+    join_phrases(names)
+}
+
+fn join_phrases(parts: &[String]) -> String {
+    match parts {
+        [] => String::new(),
+        [only] => only.clone(),
+        [a, b] => format!("{a} and {b}"),
+        _ => {
+            let (last, rest) = parts.split_last().unwrap();
+            format!("{}, and {last}", rest.join(", "))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -738,6 +870,37 @@ mod tests {
         let solved = solve(src).expect("should solve");
         let mass = solved.values.get("mass").copied().expect("mass settled");
         assert!((mass - 840.0).abs() < 1e-9, "mass = {mass}");
+        let why = &solved.explanation;
+        assert!(
+            why.contains("Mass was left blank"),
+            "guide should say why mass was solved: {why}"
+        );
+        assert!(
+            why.contains("force = mass * accel"),
+            "guide should name the rule: {why}"
+        );
+        assert!(why.contains("Force is 4200"), "{why}");
+        assert!(why.contains("Accel is 5"), "{why}");
+        assert!(why.contains("Mass comes out 840"), "{why}");
+    }
+
+    #[test]
+    fn explanation_says_a_calculation_was_computed_directly() {
+        let solved = solve("x = 1 + 10").expect("named sum");
+        let why = &solved.explanation;
+        assert!(why.contains("computes x directly"), "{why}");
+        assert!(why.contains("X comes out 11"), "{why}");
+    }
+
+    #[test]
+    fn explanation_says_a_forward_product_used_the_pinned_numbers() {
+        let src = "relation Field {\n area = length * width\n}\nsolve Field with {\n length = 8\n width = 5\n}\n";
+        let solved = solve(src).expect("forward field");
+        let why = &solved.explanation;
+        assert!(why.contains("computes area from length and width"), "{why}");
+        assert!(why.contains("Length is 8"), "{why}");
+        assert!(why.contains("Width is 5"), "{why}");
+        assert!(why.contains("Area comes out 40"), "{why}");
     }
 
     #[test]
