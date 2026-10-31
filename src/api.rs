@@ -10,7 +10,7 @@ use crate::ledger::{DEFAULT_MAX_DEPTH, Fact, Ledger, from_jsonl};
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::solver::SolverEngine;
-use crate::units::{DimensionalChecker, TypeError, UnitScale, normalize_bindings};
+use crate::units::{DimensionalChecker, TypeError, UnitScale, module_registry, normalize_bindings};
 use std::collections::{BTreeMap, HashMap};
 
 /// A source position: 1-based line, 1-based column.
@@ -923,6 +923,41 @@ pub fn apply_sheet(source: &str, rows: &[SheetRow]) -> Result<SheetImport, Diagn
     })
 }
 
+/// Turn a value in the unit Solve shows into the number written on the binding.
+///
+/// An empty binding unit means the source already speaks the shown unit (the
+/// signal unit, or the base unit when there is no signal), so the number is
+/// kept. A binding written in another unit of the same dimension is converted
+/// so `apply_sheet` can stamp that unit on the number unchanged.
+fn shown_to_binding_number(
+    module: &crate::ast::AvenModule,
+    name: &str,
+    shown: f64,
+    binding_unit: Option<&str>,
+) -> Result<f64, String> {
+    let Some(unit) = binding_unit.map(str::trim).filter(|unit| !unit.is_empty()) else {
+        return Ok(shown);
+    };
+    let scale = UnitScale::for_module(module).map_err(|e| strip_locator(&e.to_string()))?;
+    let registry = module_registry(module);
+    let binding = registry
+        .lookup(unit)
+        .ok_or_else(|| format!("The binding unit '{unit}' is not a unit this model knows."))?;
+    if let Some(signal) = module.signals.iter().find(|signal| signal.name == name) {
+        if let Some(declared) = signal.unit.as_deref() {
+            let shown_unit = registry.lookup(declared).ok_or_else(|| {
+                format!("The signal unit '{declared}' is not a unit this model knows.")
+            })?;
+            if shown_unit.dimension != binding.dimension {
+                return Err(format!(
+                    "Can't sweep {name} in {declared} while its binding is in {unit}."
+                ));
+            }
+        }
+    }
+    Ok(binding.to_unit_value(scale.to_base(name, shown)))
+}
+
 /// One solved point of a sweep: the swept input value and every variable's
 /// shown value at that point.
 #[derive(Debug, Clone)]
@@ -944,8 +979,11 @@ pub struct SweepResult {
 }
 
 /// Sweep one solve-block input across `min..=max` in `steps` intervals, solving
-/// the model at each value and recording every settled variable. This loops the
-/// same `solve` the rest of the surface uses, so a sweep curve can never diverge
+/// the model at each value and recording every settled variable. `min` and `max`
+/// are in the unit Solve shows (the signal unit, otherwise the base unit). Each
+/// sample is converted into the binding's own unit before it is written, so a
+/// panel value in km/h is not stored as that many m/s. This loops the same
+/// `solve` the rest of the surface uses, so a sweep curve can never diverge
 /// from what Solve shows. Points that do not solve are skipped.
 pub fn sweep(
     source: &str,
@@ -982,13 +1020,29 @@ pub fn sweep(
         ));
     }
     let steps = steps.clamp(1, 1000);
+    let binding_unit = module
+        .solves
+        .iter()
+        .flat_map(|solve| solve.bindings.iter())
+        .find(|binding| binding.name == var)
+        .and_then(|binding| binding.unit.clone());
     let mut points: Vec<SweepPoint> = Vec::new();
     let mut units: BTreeMap<String, String> = BTreeMap::new();
     for i in 0..=steps {
-        let raw = min + (i as f64 / steps as f64) * (max - min);
+        let shown = min + (i as f64 / steps as f64) * (max - min);
+        let written = shown_to_binding_number(&module, var, shown, binding_unit.as_deref())
+            .map_err(|message| located(source, message, 1, 1))?;
+        if !written.is_finite() {
+            return Err(located(
+                source,
+                format!("Sweeping {var} produced a non-finite binding."),
+                1,
+                1,
+            ));
+        }
         let row = SheetRow {
             name: var.to_string(),
-            value: format!("{raw}"),
+            value: format_number(written),
             unit: String::new(),
         };
         let edited = apply_sheet(source, std::slice::from_ref(&row))?;
@@ -998,7 +1052,7 @@ pub fn sweep(
         for (name, unit) in &solved.units {
             units.entry(name.clone()).or_insert_with(|| unit.clone());
         }
-        let x = solved.shown.get(var).copied().unwrap_or(raw);
+        let x = solved.shown.get(var).copied().unwrap_or(shown);
         let values: BTreeMap<String, f64> = solved
             .values
             .iter()
@@ -2206,6 +2260,39 @@ mod tests {
             sweep_knee(&["a".to_string(), "b".to_string()], &points),
             Some(1),
             "the excursion is the first interior sample, not the midpoint"
+        );
+    }
+
+    #[test]
+    fn sweep_converts_the_shown_unit_into_the_binding_unit() {
+        // Solve shows speed in km/h. The binding is written in m/s. A sweep
+        // from 90 to 180 is 90 km/h, not 90 m/s.
+        let src = "signal speed : km/h\nsignal time : h\nrelation Travel {\n distance = speed * time\n}\nsolve Travel with {\n speed = 25 m/s\n time = 2 h\n}\n";
+        let result = sweep(src, "speed", 90.0, 180.0, 1).expect("sweep");
+        assert_eq!(result.points.len(), 2);
+        let first = &result.points[0];
+        let last = &result.points[1];
+        assert!(
+            (first.x - 90.0).abs() < 1e-6,
+            "chart x stays in km/h: {}",
+            first.x
+        );
+        assert!(
+            (last.x - 180.0).abs() < 1e-6,
+            "chart x stays in km/h: {}",
+            last.x
+        );
+        // 90 km/h = 25 m/s, 2 h = 7200 s, distance = 180000 m.
+        // Writing 90 as m/s would have produced 648000 m.
+        assert!(
+            (first.values["distance"] - 180_000.0).abs() < 1e-3,
+            "distance {:?}, expected 180000 m",
+            first.values.get("distance")
+        );
+        assert!(
+            (last.values["distance"] - 360_000.0).abs() < 1e-3,
+            "distance {:?}, expected 360000 m",
+            last.values.get("distance")
         );
     }
 
