@@ -6,7 +6,7 @@
 
 use crate::ast::BlockKind;
 use crate::evaluator::sha256_hex;
-use crate::ledger::{DEFAULT_MAX_DEPTH, Fact, Ledger};
+use crate::ledger::{DEFAULT_MAX_DEPTH, Fact, Ledger, from_jsonl};
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::solver::SolverEngine;
@@ -349,6 +349,582 @@ fn escape_html(text: &str) -> String {
     out
 }
 
+fn unescape_html(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find('&') {
+        out.push_str(&rest[..start]);
+        rest = &rest[start..];
+        if let Some(end) = rest.find(';') {
+            let entity = &rest[..=end];
+            let ch = match entity {
+                "&lt;" => Some('<'),
+                "&gt;" => Some('>'),
+                "&quot;" => Some('"'),
+                "&#39;" => Some('\''),
+                "&amp;" => Some('&'),
+                _ => None,
+            };
+            if let Some(ch) = ch {
+                out.push(ch);
+                rest = &rest[end + 1..];
+                continue;
+            }
+        }
+        out.push('&');
+        rest = &rest[1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// What `verify-report` reports when a file passes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReportVerification {
+    pub source_sha256: String,
+    pub ledger_head: String,
+    pub facts: usize,
+}
+
+/// Check an HTML report: the embedded source matches the ledger's first fact,
+/// re-solving that source reproduces each fact's `value_bits`, and the chain
+/// is intact. The values table has to match the re-solved numbers too.
+/// The model text embedded in an HTML report.
+pub fn embedded_source(html: &str) -> Result<String, String> {
+    Ok(unescape_html(&section_pre(html, "Source")?))
+}
+
+pub fn verify_report_html(html: &str) -> Result<ReportVerification, String> {
+    let source = unescape_html(&section_pre(html, "Source")?);
+    let ledger_text = unescape_html(&section_pre(html, "Ledger")?);
+    let digest = sha256_hex(source.as_bytes());
+    let loaded = from_jsonl(&ledger_text, None)
+        .map_err(|err| format!("The ledger does not verify: {err}"))?;
+    let first = loaded
+        .facts()
+        .first()
+        .ok_or_else(|| "The ledger has no facts.".to_string())?;
+    if first.kind != "source" || first.origin != digest {
+        return Err(format!(
+            "The embedded source does not match the ledger's first fact. The file hashes to {digest}."
+        ));
+    }
+    let (fresh, values) = run_with_ledger(&source).map_err(|d| d.message)?;
+    for fact in fresh.facts() {
+        if fact.kind == "source" {
+            continue;
+        }
+        let Some(stored) = loaded.latest(&fact.name) else {
+            return Err(format!("The ledger has no fact for {}.", fact.name));
+        };
+        if stored.kind != fact.kind || stored.value.to_bits() != fact.value.to_bits() {
+            return Err(format!(
+                "Re-solving {} does not reproduce the report.",
+                fact.name
+            ));
+        }
+    }
+    for fact in loaded.facts() {
+        if fact.kind == "source" {
+            continue;
+        }
+        let Some(again) = fresh.latest(&fact.name) else {
+            return Err(format!(
+                "The ledger records {}, which this model does not settle.",
+                fact.name
+            ));
+        };
+        if again.kind != fact.kind || again.value.to_bits() != fact.value.to_bits() {
+            return Err(format!(
+                "Re-solving {} does not reproduce the report.",
+                fact.name
+            ));
+        }
+    }
+    let face = present_source(&source, &values);
+    check_value_table(html, &face)?;
+    Ok(ReportVerification {
+        source_sha256: digest,
+        ledger_head: loaded.head().to_string(),
+        facts: loaded.len(),
+    })
+}
+
+fn section_pre(html: &str, heading: &str) -> Result<String, String> {
+    let marker = format!("<h2>{heading}</h2>");
+    let Some(at) = html.find(&marker) else {
+        return Err(format!("The report has no {heading} section."));
+    };
+    let rest = &html[at + marker.len()..];
+    let Some(open) = rest.find("<pre>") else {
+        return Err(format!("The report's {heading} section has no text."));
+    };
+    let rest = &rest[open + 5..];
+    let Some(close) = rest.find("</pre>") else {
+        return Err(format!("The report's {heading} section is cut off."));
+    };
+    Ok(rest[..close].to_string())
+}
+
+fn check_value_table(html: &str, face: &Face) -> Result<(), String> {
+    let marker = "<h2>Values</h2>";
+    let Some(at) = html.find(marker) else {
+        return Err("The report has no Values section.".to_string());
+    };
+    let rest = &html[at + marker.len()..];
+    let Some(table_end) = rest.find("</table>") else {
+        return Err("The report's Values section is cut off.".to_string());
+    };
+    let table = &rest[..table_end];
+    let mut seen = std::collections::BTreeSet::new();
+    let mut search = table;
+    while let Some(row_at) = search.find("<tr>") {
+        let search_from = &search[row_at + 4..];
+        let Some(row_end) = search_from.find("</tr>") else {
+            break;
+        };
+        let row = &search_from[..row_end];
+        search = &search_from[row_end + 5..];
+        let cells = html_cells(row);
+        if cells.first().map(String::as_str) == Some("name") {
+            continue;
+        }
+        let name = cells
+            .first()
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+        if name.is_empty() {
+            continue;
+        }
+        let shown = face
+            .shown
+            .get(&name)
+            .ok_or_else(|| format!("The report lists {name}, which this model does not settle."))?;
+        let expect = format_number(*shown);
+        let got = cells.get(1).map(|s| s.trim()).unwrap_or("");
+        if got != expect {
+            return Err(format!(
+                "The report shows {name} as {got} but the model settles at {expect}."
+            ));
+        }
+        let unit = face.units.get(&name).map(String::as_str).unwrap_or("");
+        let got_unit = cells.get(2).map(|s| s.trim()).unwrap_or("");
+        if got_unit != unit {
+            return Err(format!(
+                "The report shows {name} in \"{got_unit}\" but the model uses \"{unit}\"."
+            ));
+        }
+        seen.insert(name);
+    }
+    for name in face.shown.keys() {
+        if !seen.contains(name) {
+            return Err(format!("The report omits {name}."));
+        }
+    }
+    Ok(())
+}
+
+fn html_cells(row: &str) -> Vec<String> {
+    let mut cells = Vec::new();
+    let mut rest = row;
+    while let Some(at) = rest.find("<td>") {
+        rest = &rest[at + 4..];
+        let end = rest.find("</td>").unwrap_or(rest.len());
+        cells.push(unescape_html(rest[..end].trim()));
+        rest = &rest[end..];
+    }
+    cells
+}
+
+/// A printable report. The HTML file remains the one `verify-report` checks.
+pub fn report_pdf(source: &str) -> Result<Vec<u8>, Diagnostic> {
+    let report = report(source)?;
+    Ok(render_report_pdf(&report))
+}
+
+pub fn render_report_pdf(report: &Report) -> Vec<u8> {
+    let mut lines = Vec::new();
+    lines.push("Aven report".to_string());
+    lines.push(String::new());
+    lines.push(format!("source sha256 {}", report.source_sha256));
+    lines.push(format!("ledger head {}", report.ledger_head));
+    lines.push(String::new());
+    lines.push("Source".to_string());
+    for line in report.source.lines() {
+        push_wrapped(&mut lines, line, 90);
+    }
+    lines.push(String::new());
+    lines.push("Values".to_string());
+    for (name, value) in &report.values {
+        let shown = report.shown.get(name).copied().unwrap_or(*value);
+        let unit = report.units.get(name).map(String::as_str).unwrap_or("");
+        let gap = if unit.is_empty() { "" } else { " " };
+        push_wrapped(
+            &mut lines,
+            &format!("{name}  {}{gap}{unit}", format_number(shown)),
+            90,
+        );
+    }
+    lines.push(String::new());
+    lines.push("Derivation".to_string());
+    for (name, tree) in &report.derivations {
+        push_wrapped(&mut lines, name, 90);
+        for line in tree.lines() {
+            push_wrapped(&mut lines, line, 90);
+        }
+    }
+    pdf_from_lines(&lines)
+}
+
+fn push_wrapped(lines: &mut Vec<String>, text: &str, width: usize) {
+    if text.is_empty() {
+        lines.push(String::new());
+        return;
+    }
+    let mut rest = text;
+    while rest.chars().count() > width {
+        let end = rest
+            .char_indices()
+            .nth(width)
+            .map(|(index, _)| index)
+            .unwrap_or(rest.len());
+        let (head, tail) = rest.split_at(end);
+        lines.push(head.to_string());
+        rest = tail;
+    }
+    lines.push(rest.to_string());
+}
+
+fn pdf_from_lines(lines: &[String]) -> Vec<u8> {
+    const PER_PAGE: usize = 46;
+    let chunks: Vec<&[String]> = if lines.is_empty() {
+        vec![&[][..]]
+    } else {
+        lines.chunks(PER_PAGE).collect()
+    };
+    let page_count = chunks.len();
+    let font_id = 3;
+    let mut objects: Vec<Vec<u8>> = vec![Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+    let mut kids = String::new();
+    for (index, chunk) in chunks.iter().enumerate() {
+        let page_id = 4 + index * 2;
+        let content_id = page_id + 1;
+        kids.push_str(&format!("{page_id} 0 R "));
+        let stream = pdf_page_stream(chunk);
+        objects.push(format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {content_id} 0 R /Resources << /Font << /F1 {font_id} 0 R >> >> >>"
+        ).into_bytes());
+        let mut content = format!("<< /Length {} >>\nstream\n", stream.len()).into_bytes();
+        content.extend_from_slice(&stream);
+        content.extend_from_slice(b"\nendstream");
+        objects.push(content);
+    }
+    objects[1] = b"<< /Type /Catalog /Pages 2 0 R >>".to_vec();
+    objects[2] = format!("<< /Type /Pages /Kids [{kids}] /Count {page_count} >>").into_bytes();
+    objects[3] = b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec();
+
+    let mut out = Vec::new();
+    out.extend_from_slice(b"%PDF-1.4\n");
+    let mut offsets = vec![0u32; objects.len()];
+    for (id, data) in objects.iter().enumerate().skip(1) {
+        offsets[id] = out.len() as u32;
+        out.extend_from_slice(format!("{id} 0 obj\n").as_bytes());
+        out.extend_from_slice(data);
+        out.extend_from_slice(b"\nendobj\n");
+    }
+    let xref = out.len() as u32;
+    let count = objects.len();
+    out.extend_from_slice(format!("xref\n0 {count}\n").as_bytes());
+    out.extend_from_slice(b"0000000000 65535 f \n");
+    for offset in offsets.iter().skip(1) {
+        out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(
+        format!("trailer\n<< /Size {count} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
+    );
+    out
+}
+
+fn pdf_page_stream(lines: &[String]) -> Vec<u8> {
+    let mut stream = Vec::new();
+    stream.extend_from_slice(b"BT\n/F1 10 Tf\n54 750 Td\n14 TL\n");
+    for line in lines {
+        stream.extend_from_slice(b"(");
+        stream.extend_from_slice(&pdf_text(line));
+        stream.extend_from_slice(b") Tj\nT*\n");
+    }
+    stream.extend_from_slice(b"ET");
+    stream
+}
+
+fn pdf_text(text: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    for ch in text.chars() {
+        match ch {
+            '(' | ')' | '\\' => {
+                out.push(b'\\');
+                out.push(ch as u8);
+            }
+            c if (c as u32) < 128 => out.push(c as u8),
+            '\u{00b7}' => out.push(0xB7),
+            _ => out.push(b'?'),
+        }
+    }
+    out
+}
+
+/// One row of a values sheet. `value` is the number as text, in `unit` when
+/// the variable has one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SheetRow {
+    pub name: String,
+    pub value: String,
+    pub unit: String,
+}
+
+/// Settled values, in declared units, ready to write as CSV or a spreadsheet.
+pub fn sheet_rows(source: &str) -> Result<Vec<SheetRow>, Diagnostic> {
+    let solved = solve(source)?;
+    let mut rows = Vec::new();
+    for (name, value) in &solved.values {
+        let shown = solved.shown.get(name).copied().unwrap_or(*value);
+        rows.push(SheetRow {
+            name: name.clone(),
+            value: format_number(shown),
+            unit: solved.units.get(name).cloned().unwrap_or_default(),
+        });
+    }
+    Ok(rows)
+}
+
+pub fn render_csv(rows: &[SheetRow]) -> String {
+    let mut out = String::from("name,value,unit\n");
+    for row in rows {
+        out.push_str(&csv_field(&row.name));
+        out.push(',');
+        out.push_str(&csv_field(&row.value));
+        out.push(',');
+        out.push_str(&csv_field(&row.unit));
+        out.push('\n');
+    }
+    out
+}
+
+fn csv_field(text: &str) -> String {
+    if text.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", text.replace('"', "\"\""))
+    } else {
+        text.to_string()
+    }
+}
+
+/// Read a headered sheet. The header must name `name` and `value`. `unit` is optional.
+pub fn parse_csv(text: &str) -> Result<Vec<SheetRow>, String> {
+    let records = csv_records(text)?;
+    if records.is_empty() {
+        return Err("The sheet is empty.".to_string());
+    }
+    let header: Vec<String> = records[0]
+        .iter()
+        .map(|cell| cell.trim().to_ascii_lowercase())
+        .collect();
+    let name_at = header
+        .iter()
+        .position(|cell| cell == "name")
+        .ok_or_else(|| "The sheet needs a name column.".to_string())?;
+    let value_at = header
+        .iter()
+        .position(|cell| cell == "value")
+        .ok_or_else(|| "The sheet needs a value column.".to_string())?;
+    let unit_at = header.iter().position(|cell| cell == "unit");
+    let mut rows = Vec::new();
+    for (index, record) in records.iter().skip(1).enumerate() {
+        let name = record.get(name_at).map(|s| s.trim()).unwrap_or("");
+        if name.is_empty() {
+            continue;
+        }
+        let value = record.get(value_at).map(|s| s.trim()).unwrap_or("");
+        if value.is_empty() {
+            return Err(format!("Row {} ({name}) has no value.", index + 2));
+        }
+        let unit = unit_at
+            .and_then(|at| record.get(at))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+        rows.push(SheetRow {
+            name: name.to_string(),
+            value: value.to_string(),
+            unit,
+        });
+    }
+    if rows.is_empty() {
+        return Err("The sheet has no rows.".to_string());
+    }
+    Ok(rows)
+}
+
+fn csv_records(text: &str) -> Result<Vec<Vec<String>>, String> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut records = Vec::new();
+    let mut row = Vec::new();
+    let mut field = String::new();
+    let mut quoted = false;
+    let mut i = 0;
+    while i < chars.len() {
+        let ch = chars[i];
+        if quoted {
+            if ch == '"' {
+                if chars.get(i + 1) == Some(&'"') {
+                    field.push('"');
+                    i += 2;
+                    continue;
+                }
+                quoted = false;
+                i += 1;
+                continue;
+            }
+            field.push(ch);
+            i += 1;
+            continue;
+        }
+        match ch {
+            '"' if field.is_empty() => {
+                quoted = true;
+                i += 1;
+            }
+            ',' => {
+                row.push(std::mem::take(&mut field));
+                i += 1;
+            }
+            '\n' | '\r' => {
+                if ch == '\r' && chars.get(i + 1) == Some(&'\n') {
+                    i += 1;
+                }
+                row.push(std::mem::take(&mut field));
+                if row.iter().any(|cell| !cell.trim().is_empty()) {
+                    records.push(std::mem::take(&mut row));
+                } else {
+                    row.clear();
+                }
+                i += 1;
+            }
+            _ => {
+                field.push(ch);
+                i += 1;
+            }
+        }
+    }
+    if quoted {
+        return Err("A quoted field is missing its closing quote.".to_string());
+    }
+    if !field.is_empty() || !row.is_empty() {
+        row.push(field);
+        if row.iter().any(|cell| !cell.trim().is_empty()) {
+            records.push(row);
+        }
+    }
+    Ok(records)
+}
+
+/// Replace solve-block inputs with the matching rows. Solved blanks stay blank,
+/// so a round trip does not pin the variable the model is solving for.
+pub fn apply_sheet(source: &str, rows: &[SheetRow]) -> Result<String, Diagnostic> {
+    if let Some(diag) = check(source).into_iter().next() {
+        return Err(diag);
+    }
+    let module = parse_source(source)?;
+    if module.solves.is_empty() {
+        return Err(located(
+            source,
+            "This model has no solve block. Import fills inputs that are already in a solve block.",
+            1,
+            1,
+        ));
+    }
+    let vars = relation_vars(&module);
+    let mut lines = split_keep(source);
+    let mut updated = 0usize;
+    for row in rows {
+        if !vars.contains(&row.name) {
+            return Err(located(
+                source,
+                format!("{} is not a variable in this model.", row.name),
+                1,
+                1,
+            ));
+        }
+        let value: f64 = row.value.trim().parse().map_err(|_| {
+            located(
+                source,
+                format!("{} is not a number.", row.value.trim()),
+                1,
+                1,
+            )
+        })?;
+        if !value.is_finite() {
+            return Err(located(
+                source,
+                format!("{} is not a finite number.", row.name),
+                1,
+                1,
+            ));
+        }
+        let Some(binding) = module
+            .solves
+            .iter()
+            .flat_map(|solve| solve.bindings.iter())
+            .find(|binding| binding.name == row.name)
+        else {
+            continue;
+        };
+        let unit = if row.unit.trim().is_empty() {
+            binding.unit.clone().unwrap_or_default()
+        } else {
+            row.unit.trim().to_string()
+        };
+        let index = binding.line - 1;
+        if index >= lines.len() {
+            return Err(located(
+                source,
+                format!("Could not find the binding for {}.", row.name),
+                binding.line,
+                binding.col,
+            ));
+        }
+        lines[index] = rewrite_binding_value(&lines[index], &format_number(value), &unit);
+        updated += 1;
+    }
+    if updated == 0 {
+        return Err(located(
+            source,
+            "None of these rows match an input in the solve block.",
+            1,
+            1,
+        ));
+    }
+    Ok(lines.concat())
+}
+
+fn rewrite_binding_value(line: &str, number: &str, unit: &str) -> String {
+    let ending = if line.ends_with("\r\n") {
+        "\r\n"
+    } else if line.ends_with('\n') {
+        "\n"
+    } else {
+        ""
+    };
+    let content = line.trim_end_matches(['\n', '\r']);
+    let Some(eq) = content.find('=') else {
+        return line.to_string();
+    };
+    let prefix = &content[..=eq];
+    if unit.is_empty() {
+        format!("{prefix} {number}{ending}")
+    } else {
+        format!("{prefix} {number} {unit}{ending}")
+    }
+}
+
 /// Rewrite `source` so `target` is the blank variable. Other blanks are pinned
 /// to the values this source just settled, in their declared units.
 pub fn solve_for(source: &str, target: &str) -> Result<String, Diagnostic> {
@@ -666,30 +1242,37 @@ fn run_with_ledger(source: &str) -> Result<(Ledger, BTreeMap<String, f64>), Diag
     let solved = solver
         .solve(&env)
         .map_err(|e| Diagnostic::error(format!("{e}"), 0, 0))?;
-    for (k, v) in &solved {
-        if !env.contains_key(k) {
-            seq += 1;
-            let mut causes = Vec::new();
-            let mut origin = "derived".to_string();
-            if let Some(eq) = solver.relations.iter().find(|e| &e.lhs == k) {
-                origin = format!("= {}", eq.rhs);
-                for input_var in eq.rhs.vars() {
-                    if let Some(fact) = ledger.latest(&input_var) {
-                        causes.push(fact.seq);
-                    }
+    // Name order, so the same source always builds the same chain.
+    let mut derived: Vec<(String, f64)> = solved
+        .iter()
+        .filter(|(name, _)| !env.contains_key(*name))
+        .map(|(name, value)| (name.clone(), *value))
+        .collect();
+    derived.sort_by(|a, b| a.0.cmp(&b.0));
+    for (k, v) in derived {
+        seq += 1;
+        let mut causes = Vec::new();
+        let mut origin = "derived".to_string();
+        if let Some(eq) = solver.relations.iter().find(|e| e.lhs == k) {
+            origin = format!("= {}", eq.rhs);
+            for input_var in eq.rhs.vars() {
+                if let Some(fact) = ledger.latest(&input_var) {
+                    causes.push(fact.seq);
                 }
             }
-            ledger.append(Fact {
-                seq,
-                tick: 0,
-                kind: "derived".to_string(),
-                name: k.clone(),
-                value: *v,
-                causes,
-                origin,
-                metadata: None,
-            });
         }
+        causes.sort_unstable();
+        causes.dedup();
+        ledger.append(Fact {
+            seq,
+            tick: 0,
+            kind: "derived".to_string(),
+            name: k,
+            value: v,
+            causes,
+            origin,
+            metadata: None,
+        });
     }
     Ok((ledger, solved.into_iter().collect()))
 }
@@ -1183,5 +1766,102 @@ mod tests {
         assert!((second.values["force"] - 4200.0).abs() < 1e-6);
         assert!((second.values["mass"] - 840.0).abs() < 1e-6);
         assert_eq!(second.solving, vec!["force".to_string()]);
+    }
+
+    fn newton() -> &'static str {
+        "relation Newton {\n force = mass * acceleration\n}\nsolve Newton with {\n force = 4200\n acceleration = 5\n}\n"
+    }
+
+    #[test]
+    fn verify_report_accepts_a_fresh_html_report() {
+        let html = report_html(newton()).expect("report");
+        let verdict = verify_report_html(&html).expect("verified");
+        assert_eq!(verdict.source_sha256, sha256_hex(newton().as_bytes()));
+        assert!(verdict.facts >= 3, "{}", verdict.facts);
+        let again = verify_report_html(&html).expect("stable");
+        assert_eq!(verdict.ledger_head, again.ledger_head);
+    }
+
+    #[test]
+    fn verify_report_rejects_a_swapped_source() {
+        let html = report_html(newton()).expect("report");
+        let swapped = html.replacen(
+            "force = mass * acceleration",
+            "force = mass + acceleration",
+            1,
+        );
+        let err = verify_report_html(&swapped).expect_err("swapped source");
+        assert!(err.contains("does not match the ledger"), "{err}");
+    }
+
+    #[test]
+    fn verify_report_rejects_a_displayed_number_that_was_edited() {
+        let html = report_html(newton()).expect("report");
+        let edited = html.replacen("<td>840</td>", "<td>1</td>", 1);
+        let err = verify_report_html(&edited).expect_err("edited table");
+        assert!(err.contains("settles at"), "{err}");
+    }
+
+    #[test]
+    fn report_pdf_carries_the_source_hash() {
+        let pdf = report_pdf(newton()).expect("pdf");
+        assert!(pdf.starts_with(b"%PDF-1.4"));
+        assert!(pdf.windows(5).any(|window| window == b"%%EOF"));
+        let digest = sha256_hex(newton().as_bytes());
+        assert!(
+            pdf.windows(digest.len())
+                .any(|window| window == digest.as_bytes()),
+            "pdf should contain the source hash"
+        );
+    }
+
+    #[test]
+    fn sheet_round_trip_updates_inputs_and_leaves_the_blank_alone() {
+        let rows = sheet_rows(newton()).expect("rows");
+        assert!(
+            rows.iter()
+                .any(|row| row.name == "mass" && row.value == "840")
+        );
+        let csv = render_csv(&rows);
+        let parsed = parse_csv(&csv).expect("csv");
+        let mut edited = parsed;
+        for row in &mut edited {
+            if row.name == "force" {
+                row.value = "8400".to_string();
+            }
+        }
+        let next = apply_sheet(newton(), &edited).expect("apply");
+        assert!(
+            next.contains("force = 8400")
+                || next.contains("force        = 8400")
+                || next.contains("= 8400"),
+            "{next}"
+        );
+        assert!(
+            !next.contains("mass = 840"),
+            "the blank stays blank:\n{next}"
+        );
+        let solved = solve(&next).expect("solve");
+        assert!((solved.values["mass"] - 1680.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn sheet_import_keeps_a_declared_unit() {
+        let src = "signal speed : km/h\nsignal time : h\nrelation Travel {\n distance = speed * time\n}\nsolve Travel with {\n speed = 90 km/h\n time = 2.5 h\n}\n";
+        let csv = "name,value,unit\nspeed,100,km/h\ntime,2.5,h\ndistance,1,m\n";
+        let rows = parse_csv(csv).expect("csv");
+        let next = apply_sheet(src, &rows).expect("apply");
+        assert!(next.contains("speed = 100 km/h"), "{next}");
+        assert!(
+            next.contains("time = 2.5 h") || next.contains("time = 2.50 h"),
+            "{next}"
+        );
+        let solve_block = next.split("solve Travel").nth(1).unwrap_or("");
+        assert!(
+            !solve_block.contains("distance"),
+            "distance stays blank:\n{next}"
+        );
+        let solved = solve(&next).expect("solve");
+        assert!((solved.shown["speed"] - 100.0).abs() < 1e-6);
     }
 }

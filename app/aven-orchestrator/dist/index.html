@@ -47,6 +47,7 @@
     button.link { background: none; border: 0; color: var(--text); padding: 0; font-family: var(--mono); font-size: .82rem; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
     button.tiny { font-size: .72rem; padding: .15rem .45rem; }
     input.slot { width: 7.5rem; font: inherit; font-family: var(--mono); font-size: .82rem; text-align: right; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: .15rem .4rem; }
+    input.range { width: 6.2rem; font: inherit; font-family: var(--mono); font-size: .78rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: .3rem .45rem; }
     .unit { color: var(--muted); }
     .solving { color: var(--accent); font-size: .72rem; }
     td.act { text-align: right; white-space: nowrap; }
@@ -81,6 +82,11 @@
         <button class="primary" id="btn-solve">Solve ▶</button>
         <button id="btn-check">Check units</button>
         <button id="btn-report">Report</button>
+        <button id="btn-pdf">PDF</button>
+        <button id="btn-verify">Verify</button>
+        <button id="btn-import">Import</button>
+        <input id="sheet-range" class="range" placeholder="A1:C20" aria-label="Sheet range" />
+        <button id="btn-export-sheet">Export sheet</button>
       </div>
       <div class="editor-wrap"><div id="editor-host" aria-label="Aven model source"></div></div>
     </section>
@@ -297,9 +303,85 @@
       }
     }
 
+    async function exportPdf() {
+      const run = begin("Exporting PDF…");
+      try {
+        const name = await invoke("export_pdf", { source: run.source });
+        if (!current(run.id)) return;
+        if (!name) { setStatus("PDF not saved", ""); return; }
+        const r = await invoke("solve_model", { source: run.source });
+        if (!current(run.id)) return;
+        showSolved(r);
+        setStatus("PDF saved as " + name, "ok");
+      } catch (d) {
+        showFailure(run.id, d);
+      }
+    }
+
+    async function exportSheet() {
+      const run = begin("Exporting sheet…");
+      try {
+        const name = await invoke("export_sheet", { source: run.source });
+        if (!current(run.id)) return;
+        if (!name) { setStatus("Sheet not saved", ""); return; }
+        const r = await invoke("solve_model", { source: run.source });
+        if (!current(run.id)) return;
+        showSolved(r);
+        setStatus("Sheet saved as " + name, "ok");
+      } catch (d) {
+        showFailure(run.id, d);
+      }
+    }
+
+    async function importSheet() {
+      const range = document.getElementById("sheet-range").value.trim();
+      try {
+        const next = await invoke("import_sheet", { source: editor.value, range: range || null });
+        if (!next) return;
+        editor.value = next;
+        // The editor reports that write as a keystroke and would check again
+        // a moment later, wiping the status this import just settled.
+        clearTimeout(refreshTimer);
+        refreshDirty();
+        renderHighlight(next, null);
+        await refresh();
+        clearTimeout(refreshTimer);
+        if (statusEl.classList.contains("ok")) setStatus("Imported sheet", "ok");
+      } catch (d) {
+        const run = begin("Importing…");
+        showFailure(run.id, d);
+      }
+    }
+
+    async function verifyReport() {
+      try {
+        const opened = await invoke("open_report");
+        if (!opened) return;
+        await invoke("new_model");
+        editor.value = opened.source;
+        clearTimeout(refreshTimer);
+        savedText = "";
+        fileNameEl.textContent = opened.name;
+        refreshDirty();
+        renderHighlight(opened.source, null);
+        await refresh();
+        clearTimeout(refreshTimer);
+        if (statusEl.classList.contains("bad")) return;
+        setStatus("Report verified", "ok");
+        out.insertAdjacentHTML("beforeend", `<div class="hash">source sha256: ${esc(opened.source_sha256)}<br>ledger head: ${esc(opened.ledger_head)}</div>`);
+      } catch (d) {
+        const run = begin("Verifying…");
+        showFailure(run.id, d);
+      }
+    }
+
     document.getElementById("btn-solve").addEventListener("click", solve);
     document.getElementById("btn-check").addEventListener("click", check);
     document.getElementById("btn-report").addEventListener("click", report);
+    document.getElementById("btn-pdf").addEventListener("click", exportPdf);
+    document.getElementById("btn-verify").addEventListener("click", verifyReport);
+    document.getElementById("btn-import").addEventListener("click", importSheet);
+    document.getElementById("btn-export-sheet").addEventListener("click", exportSheet);
 
     // After a pause, check the text and settle it when the check is clean.
     // A refusal stays a sentence. A newer edit drops the older result.
