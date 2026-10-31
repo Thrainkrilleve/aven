@@ -1035,13 +1035,102 @@ pub fn sweep(
         }
     }
     varies.sort();
+    // When the model declares two or more objectives, mark the knee of their
+    // trade-off across the sweep — the balanced-compromise point.
+    let mut targets: Vec<String> = Vec::new();
+    for solve in &module.solves {
+        for obj in &solve.objectives {
+            if !targets.contains(&obj.target) {
+                targets.push(obj.target.clone());
+            }
+        }
+    }
+    let knee = sweep_knee(&targets, &points);
     Ok(SweepResult {
         var: var.to_string(),
         points,
         units,
         varies,
-        knee: None,
+        knee,
     })
+}
+
+/// The knee of a trade-off across the sweep: the point with the greatest
+/// normalized distance from the line joining the endpoints of the two
+/// strongest-moving objectives. Mirrors evaluator::find_knee_point, but over
+/// the sweep's own points. None when fewer than two objectives move, or fewer
+/// than three points solved.
+fn sweep_knee(targets: &[String], points: &[SweepPoint]) -> Option<usize> {
+    if targets.len() < 2 || points.len() <= 2 {
+        return None;
+    }
+    let series: Vec<Vec<f64>> = targets
+        .iter()
+        .map(|t| {
+            points
+                .iter()
+                .map(|p| p.values.get(t).copied().unwrap_or(f64::NAN))
+                .collect()
+        })
+        .collect();
+    if series.iter().flatten().any(|v| !v.is_finite()) {
+        return None;
+    }
+    let span = |s: &[f64]| {
+        let lo = s.iter().cloned().fold(f64::INFINITY, f64::min);
+        let hi = s.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        (lo, hi - lo)
+    };
+    let last = points.len() - 1;
+    // Pick the pair of objectives with the strongest trade-off.
+    let mut best: Option<(usize, usize)> = None;
+    let mut best_score = f64::NEG_INFINITY;
+    for a in 0..series.len() {
+        for b in (a + 1)..series.len() {
+            let (_, span_a) = span(&series[a]);
+            let (_, span_b) = span(&series[b]);
+            if span_a < 1e-9 || span_b < 1e-9 {
+                continue;
+            }
+            let d1 = series[a][last] - series[a][0];
+            let d2 = series[b][last] - series[b][0];
+            let score = if d1 * d2 < 0.0 {
+                1.0 + span_a * span_b
+            } else {
+                span_a + span_b
+            };
+            if score > best_score {
+                best_score = score;
+                best = Some((a, b));
+            }
+        }
+    }
+    let (a, b) = best?;
+    let (mina, span_a) = span(&series[a]);
+    let (minb, span_b) = span(&series[b]);
+    let span_a = span_a.max(1e-12);
+    let span_b = span_b.max(1e-12);
+    let norm = |v: f64, lo: f64, sp: f64| (v - lo) / sp;
+    let x1 = norm(series[a][0], mina, span_a);
+    let y1 = norm(series[b][0], minb, span_b);
+    let x2 = norm(series[a][last], mina, span_a);
+    let y2 = norm(series[b][last], minb, span_b);
+    let denom = ((y2 - y1).powi(2) + (x2 - x1).powi(2)).sqrt();
+    if denom < 1e-12 {
+        return Some(points.len() / 2);
+    }
+    let mut max_dist = -1.0;
+    let mut knee = points.len() / 2;
+    for i in 1..last {
+        let x0 = norm(series[a][i], mina, span_a);
+        let y0 = norm(series[b][i], minb, span_b);
+        let dist = ((y2 - y1) * x0 - (x2 - x1) * y0 + x2 * y1 - y2 * x1).abs() / denom;
+        if dist > max_dist {
+            max_dist = dist;
+            knee = i;
+        }
+    }
+    Some(knee)
 }
 
 /// "Solve for this" is the button on a pinned input. It makes that input the
@@ -2092,6 +2181,23 @@ mod tests {
             result.varies.contains(&"mass".to_string()),
             "{:?}",
             result.varies
+        );
+        assert!(result.knee.is_none(), "no objectives, no knee");
+    }
+
+    #[test]
+    fn sweep_marks_a_knee_for_two_objectives() {
+        // quality has diminishing returns while cost is linear, so the
+        // trade-off curve bows and has an interior knee.
+        let src = "relation Plan {\n    quality = sqrt(effort)\n    cost = effort * 2\n}\n\nsolve Plan with {\n    effort = 25\n    maximize quality\n    minimize cost\n}\n";
+        let result = sweep(src, "effort", 1.0, 100.0, 20).expect("sweep");
+        let knee = result
+            .knee
+            .expect("two moving objectives should mark a knee");
+        assert!(
+            knee > 0 && knee < result.points.len() - 1,
+            "knee is interior: {knee} of {}",
+            result.points.len()
         );
     }
 
