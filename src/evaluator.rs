@@ -2143,82 +2143,146 @@ impl Orchestrator {
         if n_objs < 2 {
             return Some(0);
         }
-
-        // Find the pair of objectives with the strongest trade-off (negative correlation)
-        let mut best_pair = (0, 1);
-        let mut best_tradeoff_score = f64::NEG_INFINITY;
-
-        for j1 in 0..n_objs {
-            for j2 in (j1 + 1)..n_objs {
-                let vals1: Vec<f64> = frontier.iter().map(|p| p.objectives[j1].1).collect();
-                let vals2: Vec<f64> = frontier.iter().map(|p| p.objectives[j2].1).collect();
-
-                let min1 = vals1.iter().cloned().fold(f64::INFINITY, f64::min);
-                let max1 = vals1.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-                let min2 = vals2.iter().cloned().fold(f64::INFINITY, f64::min);
-                let max2 = vals2.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-
-                let span1 = max1 - min1;
-                let span2 = max2 - min2;
-
-                if span1 < 1e-9 || span2 < 1e-9 {
-                    continue;
-                }
-
-                let d1 = vals1.last().unwrap() - vals1.first().unwrap();
-                let d2 = vals2.last().unwrap() - vals2.first().unwrap();
-
-                let is_conflicting = (d1 * d2) < 0.0;
-                let score = if is_conflicting {
-                    1.0 + (span1.abs() * span2.abs())
-                } else {
-                    span1.abs() + span2.abs()
-                };
-
-                if score > best_tradeoff_score {
-                    best_tradeoff_score = score;
-                    best_pair = (j1, j2);
-                }
-            }
-        }
-
-        let (j1, j2) = best_pair;
-
-        let vals1: Vec<f64> = frontier.iter().map(|p| p.objectives[j1].1).collect();
-        let vals2: Vec<f64> = frontier.iter().map(|p| p.objectives[j2].1).collect();
-
-        let min1 = vals1.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max1 = vals1.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        let min2 = vals2.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max2 = vals2.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-
-        let span1 = (max1 - min1).max(1e-12);
-        let span2 = (max2 - min2).max(1e-12);
-
-        let x1 = (vals1[0] - min1) / span1;
-        let y1 = (vals2[0] - min2) / span2;
-        let x2 = (vals1[vals1.len() - 1] - min1) / span1;
-        let y2 = (vals2[vals2.len() - 1] - min2) / span2;
-
-        let denom = ((y2 - y1).powi(2) + (x2 - x1).powi(2)).sqrt();
-        if denom < 1e-12 {
+        // A ragged frontier has no single objective axis to measure.
+        if frontier.iter().any(|p| p.objectives.len() != n_objs) {
             return Some(frontier.len() / 2);
         }
 
-        let mut max_dist = -1.0;
-        let mut knee_idx = frontier.len() / 2;
+        let series: Vec<Vec<f64>> = (0..n_objs)
+            .map(|j| frontier.iter().map(|p| p.objectives[j].1).collect())
+            .collect();
+        // A flat or empty trade-off still yields a point, matching earlier callers
+        // that only check `is_some`. The balanced sample on a straight front is
+        // the midpoint.
+        Some(knee_of_series(&series).unwrap_or(frontier.len() / 2))
+    }
+}
 
-        // Scan interior points (indices 1 to n-2) to pick the true balanced trade-off
-        for i in 1..(frontier.len() - 1) {
-            let x0 = (frontier[i].objectives[j1].1 - min1) / span1;
-            let y0 = (frontier[i].objectives[j2].1 - min2) / span2;
-            let dist = ((y2 - y1) * x0 - (x2 - x1) * y0 + x2 * y1 - y2 * x1).abs() / denom;
-            if dist > max_dist {
-                max_dist = dist;
-                knee_idx = i;
+/// Below this normalized chord distance the curve is straight, and the
+/// balanced compromise is the midpoint rather than a noisy interior sample.
+const KNEE_FLAT: f64 = 1e-6;
+
+/// Index of the balanced compromise across parallel series.
+///
+/// Each series is one objective sampled at the same parameter values. The pair
+/// whose normalized curve bows farthest from the chord between its endpoints
+/// supplies the index, so a large-unit straight objective cannot hide a smaller
+/// curved trade-off. A straight pair stays at the midpoint. A pair whose
+/// endpoints meet is measured by distance from that point, so a spike is not
+/// reported as the middle sample. `None` when fewer than two series move or
+/// fewer than three samples exist.
+pub fn knee_of_series(series: &[Vec<f64>]) -> Option<usize> {
+    if series.len() < 2 {
+        return None;
+    }
+    let n = series[0].len();
+    if n <= 2 || series.iter().any(|s| s.len() != n) {
+        return None;
+    }
+    let mut best: Option<(usize, f64)> = None;
+    for a in 0..series.len() {
+        for b in (a + 1)..series.len() {
+            let Some((idx, dev)) = chord_knee(&series[a], &series[b]) else {
+                continue;
+            };
+            let replace = match best {
+                None => true,
+                Some((_, best_dev)) => dev > best_dev,
+            };
+            if replace {
+                best = Some((idx, dev));
             }
         }
+    }
+    best.map(|(idx, _)| idx)
+}
 
-        Some(knee_idx)
+/// Knee index and its normalized deviation for one pair. `None` when either
+/// series is non-finite or does not move.
+fn chord_knee(a: &[f64], b: &[f64]) -> Option<(usize, f64)> {
+    if a.iter().chain(b.iter()).any(|v| !v.is_finite()) {
+        return None;
+    }
+    let extent = |s: &[f64]| {
+        let lo = s.iter().copied().fold(f64::INFINITY, f64::min);
+        let hi = s.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        (lo, hi - lo)
+    };
+    let (lo_a, span_a) = extent(a);
+    let (lo_b, span_b) = extent(b);
+    if span_a < 1e-9 || span_b < 1e-9 {
+        return None;
+    }
+    let norm = |v: f64, lo: f64, span: f64| (v - lo) / span;
+    let last = a.len() - 1;
+    let x1 = norm(a[0], lo_a, span_a);
+    let y1 = norm(b[0], lo_b, span_b);
+    let x2 = norm(a[last], lo_a, span_a);
+    let y2 = norm(b[last], lo_b, span_b);
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    let denom = (dx * dx + dy * dy).sqrt();
+    let mid = a.len() / 2;
+    let mut best_i = mid;
+    let mut best_d = 0.0;
+    for i in 1..last {
+        let x0 = norm(a[i], lo_a, span_a);
+        let y0 = norm(b[i], lo_b, span_b);
+        let dist = if denom < 1e-12 {
+            ((x0 - x1).powi(2) + (y0 - y1).powi(2)).sqrt()
+        } else {
+            (dy * x0 - dx * y0 + x2 * y1 - y2 * x1).abs() / denom
+        };
+        if dist > KNEE_FLAT && dist > best_d {
+            best_d = dist;
+            best_i = i;
+        }
+    }
+    Some((best_i, best_d))
+}
+
+#[cfg(test)]
+mod knee_tests {
+    use super::knee_of_series;
+
+    #[test]
+    fn straight_tradeoff_knee_is_the_midpoint() {
+        let a: Vec<f64> = (0..21).map(|i| i as f64).collect();
+        let b: Vec<f64> = a.iter().map(|v| v * 3.0).collect();
+        assert_eq!(knee_of_series(&[a, b]), Some(10));
+    }
+
+    #[test]
+    fn bowed_pair_beats_a_larger_straight_pair() {
+        let mut quality = Vec::new();
+        let mut cost = Vec::new();
+        let mut noise = Vec::new();
+        for i in 0..=20 {
+            let effort = 1.0 + (i as f64 / 20.0) * 99.0;
+            quality.push(effort.sqrt());
+            cost.push(effort * 2.0);
+            noise.push(effort * 1000.0);
+        }
+        assert_eq!(knee_of_series(&[quality, cost, noise]), Some(6));
+    }
+
+    #[test]
+    fn spike_off_the_midpoint_when_endpoints_meet() {
+        let a = vec![0.0, 5.0, 0.0, 0.0, 0.0];
+        let b = vec![0.0, 1.0, 0.0, 0.0, 0.0];
+        assert_eq!(knee_of_series(&[a, b]), Some(1));
+    }
+
+    #[test]
+    fn a_non_finite_series_does_not_erase_the_other_pair() {
+        let mut quality = Vec::new();
+        let mut cost = Vec::new();
+        let ghost = vec![f64::NAN; 21];
+        for i in 0..=20 {
+            let effort = 1.0 + (i as f64 / 20.0) * 99.0;
+            quality.push(effort.sqrt());
+            cost.push(effort * 2.0);
+        }
+        assert_eq!(knee_of_series(&[quality, cost, ghost]), Some(6));
     }
 }
