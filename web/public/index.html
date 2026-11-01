@@ -100,6 +100,10 @@
           </div>
 <pre data-lang="aven">
 // One equation. No input or output is fixed.
+signal force        : N
+signal mass         : kg
+signal acceleration : m/s^2
+
 relation Dynamics {
     force = mass * acceleration
 }
@@ -115,9 +119,9 @@ solve Dynamics with {
   [force = mass * acceleration] mass &lt;- backward Newton
 
 <span class="muted">Settled Environment:</span>
-  acceleration     = 5.0000
-  force            = 4200.0000
-  mass             = <span class="val">840.0000</span>
+  acceleration     = 5.0000 m/s^2
+  force            = 4200.0000 N
+  mass             = <span class="val">840.0000 kg</span>
 
 <span class="muted">Fact Ledger: 3 facts settled.</span></pre>
         </div>

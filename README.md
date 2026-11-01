@@ -102,6 +102,7 @@ signal airspeed     : m/s
 signal air_density  : kg/m^3
 signal wing_area    : m^2
 signal lift_coeff   : scalar
+signal lapse_rate   : degC/m
 
 relation FlightDynamics {
     ambient_temp     = surface_temp - lapse_rate * altitude
@@ -139,6 +140,11 @@ Settled Environment:
 For real-time control and high-frequency streams, declare relations backed by persistent socket services:
 
 ```aven
+signal air_density : kg/m^3
+signal airspeed    : m/s
+signal wing_area   : m^2
+signal lift_coeff  : scalar
+
 // Connect directly to a persistent telemetry daemon via local TCP socket
 relation FlightDynamics using ipc("127.0.0.1:9090") {
     // The daemon supplies the observed facts over TCP; these equations solve over them
@@ -151,6 +157,13 @@ relation FlightDynamics using ipc("127.0.0.1:9090") {
 When all inputs are known and execution must be deterministic without iterative relaxation, use `forward`:
 
 ```aven
+signal reqs_per_second    : scalar
+signal avg_latency_ms     : scalar
+signal target_utilization : scalar
+signal ram_per_worker     : scalar
+signal socket_buffer_mb   : scalar
+signal os_kernel_ram_mb   : scalar
+
 forward ServerSizing {
     raw_workers = (reqs_per_second * avg_latency_ms) / 1000.0
     allocated_workers = ceil(raw_workers / target_utilization)

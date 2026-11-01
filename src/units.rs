@@ -1184,7 +1184,8 @@ impl DimensionalChecker {
         // no determinable dimension is an undeclared signal.
         for blk in &module.blocks {
             for eq in &blk.equations {
-                let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+                let mut names: std::collections::BTreeSet<String> =
+                    std::collections::BTreeSet::new();
                 names.insert(eq.lhs.clone());
                 eq.rhs.collect_vars(&mut names);
                 for name in &names {
@@ -1215,6 +1216,11 @@ impl DimensionalChecker {
     ) -> Result<Option<Dim>, TypeError> {
         match expr {
             Expr::Num(_) => Ok(Some(Dim::SCALAR)),
+            // Built-in math constants (pi, e, tau) are dimensionless scalars.
+            // `collect_vars` already treats them as constants rather than free
+            // variables, so the inferred dimension must agree, otherwise a bare
+            // `x = 2 * pi` would have no inferable unit.
+            Expr::Var(name) if crate::ast::is_builtin_constant(name) => Ok(Some(Dim::SCALAR)),
             Expr::Var(name) => Ok(var_dims.get(name).cloned()),
             Expr::UnaryMinus(inner) => self.infer_expr(inner, var_dims, line, col),
             Expr::Bin(BinaryOp::Add | BinaryOp::Sub, left, right) => {

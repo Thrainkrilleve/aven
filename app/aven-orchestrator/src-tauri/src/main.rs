@@ -712,6 +712,10 @@ fn list_templates() -> Vec<Template> {
 
 const NEWTON: &str = r#"// Equations are invariants: leave a variable out of the
 // solve block and Aven solves for it. Here mass is found backward.
+signal force        : N
+signal mass         : kg
+signal acceleration : m/s^2
+
 relation Newton {
     force = mass * acceleration
 }
@@ -723,6 +727,16 @@ solve Newton with {
 "#;
 
 const SERVER_CAPACITY: &str = r#"// Little's Law sizing with queueing headroom.
+// Rates, counts and sizes are abstract numbers, so inputs are : scalar.
+signal reqs_per_second        : scalar
+signal avg_latency_ms         : scalar
+signal avg_payload_kb         : scalar
+signal ram_per_worker         : scalar
+signal socket_buffer_mb       : scalar
+signal os_kernel_ram_mb       : scalar
+signal target_utilization     : scalar
+signal framing_overhead_ratio : scalar
+
 relation WorkerScaling {
     raw_workers       = (reqs_per_second * avg_latency_ms) / 1000
     allocated_workers = ceil(raw_workers / target_utilization)
@@ -750,6 +764,7 @@ signal airspeed     : m/s
 signal air_density  : kg/m^3
 signal wing_area    : m^2
 signal lift_coeff   : scalar
+signal lapse_rate   : degC/m
 
 relation FlightDynamics {
     ambient_temp     = surface_temp - lapse_rate * altitude

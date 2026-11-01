@@ -4,6 +4,21 @@
 // Demonstrates bidirectional algebraic solving, risk-return tradeoff constraints,
 // and capital conservation invariants for quantitative wealth management.
 
+// Weights, returns, volatilities and ratios are all abstract numbers, so every
+// free input is declared : scalar; the derived values infer from them.
+signal portfolio_value        : scalar
+signal equity_weight          : scalar
+signal bond_weight            : scalar
+signal reit_weight            : scalar
+signal equity_return_pct      : scalar
+signal bond_return_pct        : scalar
+signal reit_return_pct        : scalar
+signal equity_vol_pct         : scalar
+signal bond_vol_pct           : scalar
+signal reit_vol_pct           : scalar
+signal diversification_factor : scalar
+signal risk_free_rate_pct     : scalar
+
 relation CapitalAllocation {
     // Total portfolio value split across 3 asset classes (Equities, Bonds, Real Estate)
     equity_value  = portfolio_value * equity_weight

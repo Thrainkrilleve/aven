@@ -1,4 +1,8 @@
 // leftover is pinned at 0, and expected is the blank, so expected is found.
+signal leftover : scalar
+signal measured : scalar
+signal expected : scalar
+
 relation Gap {
     leftover = measured - expected
 }

@@ -140,6 +140,9 @@ The solver:
 ### 5.3 Live Telemetry & IPC Sensor Fusion
 Relations can take facts from a local TCP daemon:
 ```aven
+signal temp_c         : degC
+signal observed_temp_c : degC
+
 relation WeatherStation using ipc("127.0.0.1:9090") {
     temp_c = observed_temp_c
 }
@@ -154,6 +157,15 @@ relation WeatherStation using ipc("127.0.0.1:9090") {
 
 ### 6.1 Hardware Capacity & Cost Sizing (Mixed-Integer)
 ```aven
+// Capacities, efficiencies and costs are abstract numbers (: scalar); nodes and
+// drives_per_node are the integer decision variables.
+signal drive_size_tb    : scalar
+signal ec_efficiency    : scalar
+signal node_base_cost   : scalar
+signal drive_unit_cost  : scalar
+signal nodes            : scalar
+signal drives_per_node  : scalar
+
 relation StorageCluster {
     int nodes
     int drives_per_node
@@ -183,6 +195,21 @@ solve StorageCluster with {
 
 ### 6.2 Data Center Fleet & Thermal Digital Twin
 ```aven
+// Powers, temperatures and ratios carried as plain numbers (physical constants
+// are baked-in literals), so every free input is declared : scalar.
+signal servers          : scalar
+signal idle_w           : scalar
+signal dynamic_w        : scalar
+signal cluster_util     : scalar
+signal crac_status      : scalar
+signal crac_setpoint_c  : scalar
+signal outside_temp_c   : scalar
+signal recirc_ratio     : scalar
+signal air_density      : scalar
+signal air_cp           : scalar
+signal airflow_m3s      : scalar
+signal thermal_limit_c  : scalar
+
 relation DatacenterFleet {
     // IT Power & compute utilization
     server_power_w = idle_w + cluster_util * dynamic_w
@@ -230,6 +257,24 @@ physics — note the distinction between divergence, shear and deformation. Its 
 written for °C and hPa, so the inputs are plain numbers (see rule 7).
 
 ```aven
+// The formulas are written for °C and hPa with baked-in constants, so every
+// free input is a plain : scalar number (see rule 7).
+signal temperature_k  : scalar
+signal dewpoint_c     : scalar
+signal pressure_hpa   : scalar
+signal layer_depth_m  : scalar
+signal du_dx          : scalar
+signal dv_dy          : scalar
+signal du_dy          : scalar
+signal dv_dx          : scalar
+signal wind_u         : scalar
+signal wind_v         : scalar
+signal aloft_u        : scalar
+signal aloft_v        : scalar
+signal aloft_height_m  : scalar
+signal radar_dbz       : scalar
+signal precip_rate_mmh : scalar
+
 relation RadarAtmosphericCell {
     // 1. Kinematics: divergence (1/s) and vertical motion via continuity (w = 0 at ground)
     div_horizontal = du_dx + dv_dy

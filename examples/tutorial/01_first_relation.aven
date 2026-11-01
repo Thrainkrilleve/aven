@@ -2,6 +2,10 @@
 // Demonstrates omnidirectional relational solving:
 // Any unknown can be solved automatically without rewriting the equation.
 
+signal force        : N
+signal mass         : kg
+signal acceleration : m/s^2
+
 relation Dynamics {
     force = mass * acceleration
 }

@@ -326,7 +326,7 @@ fn stream_converts_input_and_reports_derived_values() {
 #[test]
 fn stream_does_not_claim_convergence_when_the_solve_fails() {
     let out = stream(
-        "relation R {\n    c = a + b\n    d = c * 2\n    d = a + b\n}\n",
+        "signal a : scalar\nsignal b : scalar\nrelation R {\n    c = a + b\n    d = c * 2\n    d = a + b\n}\n",
         &["{\"a\": 1, \"b\": 2}"],
     );
     assert!(!out.contains("SETTLED"), "{}", out);
@@ -346,7 +346,7 @@ fn adapters_start_when_the_model_is_named_without_a_directory() {
     .unwrap();
     std::fs::write(
         dir.join("model.aven"),
-        "relation Sensor using external(\"python3\", \"sensor.py\") {\n    y = x * 3\n}\n",
+        "signal x : scalar\nrelation Sensor using external(\"python3\", \"sensor.py\") {\n    y = x * 3\n}\n",
     )
     .unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_avenc"))
@@ -385,7 +385,7 @@ fn fractional_powers_have_the_right_dimension_or_are_refused() {
 #[test]
 fn stream_reports_broken_limits_as_alarms() {
     let out = stream(
-        "relation S {\n    margin = limit - reading\n}\nsolve S with {\n    limit = 18\n    margin >= 0\n}\n",
+        "signal limit : scalar\nsignal reading : scalar\nrelation S {\n    margin = limit - reading\n}\nsolve S with {\n    limit = 18\n    margin >= 0\n}\n",
         &["{\"reading\": 21}", "{\"reading\": 9}"],
     );
     assert!(out.contains("ALARM"), "{}", out);

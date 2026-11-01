@@ -99,7 +99,7 @@ fn readme_omnidirectional_f_equals_ma_solves_each_unknown() {
     ];
     for (bindings, unknown, expected) in cases {
         let src = format!(
-            "relation Newton {{\n force = mass * accel\n}}\nsolve Newton with {{\n {}\n}}\n",
+            "signal force : N\nsignal mass : kg\nsignal accel : m/s^2\nrelation Newton {{\n force = mass * accel\n}}\nsolve Newton with {{\n {}\n}}\n",
             bindings
         );
         let run = run_model(&src, &[]);
@@ -114,7 +114,7 @@ fn readme_omnidirectional_f_equals_ma_solves_each_unknown() {
 
 #[test]
 fn spec_block_comments_are_supported() {
-    let src = "/* header\n spans lines */\nrelation R {\n y = 2 * x /* inline */\n}\nsolve R with {\n x = 4\n}\n";
+    let src = "/* header\n spans lines */\nsignal x : scalar\nsignal y : scalar\nrelation R {\n y = 2 * x /* inline */\n}\nsolve R with {\n x = 4\n}\n";
     let run = run_model(src, &[]);
     assert_eq!(run.code, 0, "stderr: {}", run.stderr);
     assert_close(&settled(&run), "y", 8.0, 1e-9);
@@ -131,7 +131,8 @@ fn spec_integer_keyword_declares_integer_variable() {
 #[test]
 fn spec_builtin_functions_evaluate() {
     // sqrt, abs, ceil, floor, sin, cos, tan, ln, exp
-    let src = "relation F {
+    let src = "signal x : scalar
+relation F {
  a = sqrt(x)
  b = abs(0 - x)
  c = ceil(x + 0.5)
@@ -163,7 +164,7 @@ solve F with {
 
 #[test]
 fn spec_builtin_constants() {
-    let src = "relation C {\n a = pi * k\n b = e * k\n c = tau * k\n d = PI * k\n}\nsolve C with {\n k = 1\n}\n";
+    let src = "signal k : scalar\nrelation C {\n a = pi * k\n b = e * k\n c = tau * k\n d = PI * k\n}\nsolve C with {\n k = 1\n}\n";
     let run = run_model(src, &[]);
     assert_eq!(run.code, 0, "stderr: {}", run.stderr);
     let env = settled(&run);
@@ -176,7 +177,8 @@ fn spec_builtin_constants() {
 #[test]
 fn spec_operator_precedence_and_associativity() {
     // ^ binds tighter than unary minus and is right-associative.
-    let src = "relation P {
+    let src = "signal k : scalar
+relation P {
  neg_sq = 0 - 2 ^ 2 + k
  unary = -2 ^ 2 + k
  right = 2 ^ 3 ^ 2 + k
@@ -199,7 +201,7 @@ solve P with {
 
 #[test]
 fn spec_negative_numeric_literal_binding() {
-    let src = "relation L {\n t = surface - rate * h\n}\nsolve L with {\n surface = 288.15\n rate = -0.0065\n h = 1000\n}\n";
+    let src = "signal surface : scalar\nsignal rate : scalar\nsignal h : scalar\nrelation L {\n t = surface - rate * h\n}\nsolve L with {\n surface = 288.15\n rate = -0.0065\n h = 1000\n}\n";
     let run = run_model(src, &[]);
     assert_eq!(run.code, 0, "stderr: {}", run.stderr);
     assert_close(&settled(&run), "t", 294.65, 1e-4);
@@ -208,11 +210,11 @@ fn spec_negative_numeric_literal_binding() {
 // wiki/Language-Specification.md §4.2: <=, >=, <, >, ==, !=
 #[test]
 fn spec_strict_inequalities_are_enforced() {
-    let ok = "relation R {\n y = 2 * x\n}\nsolve R with {\n x = 3\n y > 5\n y < 7\n}\n";
+    let ok = "signal x : scalar\nsignal y : scalar\nrelation R {\n y = 2 * x\n}\nsolve R with {\n x = 3\n y > 5\n y < 7\n}\n";
     let run = run_model(ok, &[]);
     assert_eq!(run.code, 0, "stderr: {}", run.stderr);
 
-    let bad = "relation R {\n y = 2 * x\n}\nsolve R with {\n x = 3\n y > 6\n}\n";
+    let bad = "signal x : scalar\nsignal y : scalar\nrelation R {\n y = 2 * x\n}\nsolve R with {\n x = 3\n y > 6\n}\n";
     let run = run_model(bad, &[]);
     assert_ne!(run.code, 0, "y = 6 must violate 'y > 6'");
 }
@@ -262,7 +264,7 @@ fn toolchain_pareto_command_exists() {
 // wiki/Compiler-Toolchain-avenc.md §4: exit codes
 #[test]
 fn toolchain_exit_code_0_only_when_fully_settled() {
-    let under = "relation R {\n v = l * w * h\n}\nsolve R with {\n v = 1000\n h = 10\n}\n";
+    let under = "signal v : m^3\nsignal l : m\nsignal w : m\nsignal h : m\nrelation R {\n v = l * w * h\n}\nsolve R with {\n v = 1000\n h = 10\n}\n";
     let run = run_model(under, &[]);
     assert_ne!(
         run.code, 0,
@@ -272,7 +274,7 @@ fn toolchain_exit_code_0_only_when_fully_settled() {
 
 #[test]
 fn toolchain_exit_code_2_on_constraint_violation() {
-    let src = "relation R {\n y = 2 * x\n}\nsolve R with {\n x = 10\n y <= 5\n}\n";
+    let src = "signal x : scalar\nsignal y : scalar\nrelation R {\n y = 2 * x\n}\nsolve R with {\n x = 10\n y <= 5\n}\n";
     let run = run_model(src, &[]);
     assert_eq!(
         run.code, 2,
@@ -288,7 +290,7 @@ fn stale_adapter_model(ttl_ms: u64, timestamp_ms: u64) -> String {
     );
     let py = if cfg!(windows) { "python" } else { "python3" };
     format!(
-        "relation Sensor using external(\"{}\", \"-c\", \"{}\") {{\n y = x * 2\n z = y + 1\n}}\nsolve Sensor with {{\n}}\n",
+        "signal x : scalar\nsignal y : scalar\nsignal z : scalar\nrelation Sensor using external(\"{}\", \"-c\", \"{}\") {{\n y = x * 2\n z = y + 1\n}}\nsolve Sensor with {{\n}}\n",
         py,
         script.replace('"', "\\\"")
     )
@@ -358,7 +360,7 @@ fn freshness_taint_follows_backward_solved_values() {
     let script = "import json; print(json.dumps({'x': 4.0, 'ttl_ms': 0, 'timestamp_ms': 0}))";
     let py = if cfg!(windows) { "python" } else { "python3" };
     let src = format!(
-        "relation Sensor using external(\"{}\", \"-c\", \"{}\") {{\n x = 2 * q\n}}\nsolve Sensor with {{\n}}\n",
+        "signal x : scalar\nsignal q : scalar\nrelation Sensor using external(\"{}\", \"-c\", \"{}\") {{\n x = 2 * q\n}}\nsolve Sensor with {{\n}}\n",
         py,
         script.replace('"', "\\\"")
     );
@@ -393,7 +395,10 @@ fn provenance_external_facts_carry_payload_sha256() {
 // README §3 "Direction-Pinned Forward Blocks": `forward` blocks are evaluated by `avenc run`
 #[test]
 fn readme_forward_block_is_evaluated_by_run() {
-    let src = "forward ServerSizing {
+    let src = "signal reqs_per_second : scalar
+signal avg_latency_ms : scalar
+signal target_utilization : scalar
+forward ServerSizing {
     raw_workers = (reqs_per_second * avg_latency_ms) / 1000.0
     allocated_workers = ceil(raw_workers / target_utilization)
 }
@@ -489,7 +494,7 @@ fn flight_model_matches_us_standard_atmosphere_1976() {
     ];
     for (h, t_ref, p_ref) in reference {
         let src = format!(
-            "relation Atmos {{{}\n}}\nsolve Atmos with {{\n surface_temp_c = 15\n surface_altim_hpa = 1013.25\n baro_altitude_m = {}\n velocity_ms = 200\n vertical_rate_ms = 0\n gauge_elevation_m = 0\n river_discharge_cfs = 0\n}}\n",
+            "signal surface_temp_c : scalar\nsignal surface_altim_hpa : scalar\nsignal baro_altitude_m : scalar\nsignal velocity_ms : scalar\nsignal vertical_rate_ms : scalar\nsignal gauge_elevation_m : scalar\nsignal river_discharge_cfs : scalar\nrelation Atmos {{{}\n}}\nsolve Atmos with {{\n surface_temp_c = 15\n surface_altim_hpa = 1013.25\n baro_altitude_m = {}\n velocity_ms = 200\n vertical_rate_ms = 0\n gauge_elevation_m = 0\n river_discharge_cfs = 0\n}}\n",
             body, h
         );
         let run = run_model(&src, &["--json"]);
@@ -607,7 +612,9 @@ fn ledger_cli_detects_tampering() {
 // Non-convex integer models are certified globally optimal by interval branch-and-bound
 #[test]
 fn nonconvex_integer_optimum_is_proven() {
-    let src = "relation Cluster {
+    let src = "signal nodes : scalar
+signal drives : scalar
+relation Cluster {
     int nodes
     int drives
     capacity = nodes * drives * 13.5
@@ -643,7 +650,7 @@ fn adapter_is_not_asked_for_values_other_relations_compute() {
         now
     );
     let src = format!(
-        "relation Weather using external(\"{}\", \"-c\", \"{}\") {{\n outside_c = surface_temp_c\n}}\nrelation Plant {{\n it_kw = load * 2\n cop = 7.5 - 0.12 * outside_c\n}}\nsolve Plant, Weather with {{\n load = 100\n it_kw <= 800\n}}\n",
+        "signal surface_temp_c : scalar\nsignal outside_c : scalar\nsignal load : scalar\nrelation Weather using external(\"{}\", \"-c\", \"{}\") {{\n outside_c = surface_temp_c\n}}\nrelation Plant {{\n it_kw = load * 2\n cop = 7.5 - 0.12 * outside_c\n}}\nsolve Plant, Weather with {{\n load = 100\n it_kw <= 800\n}}\n",
         py,
         script.replace('"', "\\\"")
     );
@@ -667,7 +674,7 @@ fn backward_solve_is_damped_near_domain_edges() {
         (45.0, (10f64.powf(4.5) / 200.0).powf(1.0 / 1.6)),
     ] {
         let src = format!(
-            "relation R {{\n dbz = 10 * log(200 * rain ^ 1.6) / 2.302585092994046\n}}\nsolve R with {{\n dbz = {}\n}}\n",
+            "signal dbz : scalar\nsignal rain : scalar\nrelation R {{\n dbz = 10 * log(200 * rain ^ 1.6) / 2.302585092994046\n}}\nsolve R with {{\n dbz = {}\n}}\n",
             dbz
         );
         let run = run_model(&src, &[]);
@@ -680,7 +687,7 @@ fn backward_solve_is_damped_near_domain_edges() {
 // must not stop a solvable 2x2 system from settling.
 #[test]
 fn independent_subsystems_solve_separately() {
-    let src = "relation R {\n total = a * b\n other = a + 2 * b\n y = sqrt(x) + sqrt(z)\n}\nsolve R with {\n total = 6\n other = 8\n y = -1\n}\n";
+    let src = "signal a : scalar\nsignal b : scalar\nsignal x : scalar\nsignal z : scalar\nrelation R {\n total = a * b\n other = a + 2 * b\n y = sqrt(x) + sqrt(z)\n}\nsolve R with {\n total = 6\n other = 8\n y = -1\n}\n";
     let run = run_model(src, &["--json"]);
     assert_eq!(run.code, 1, "the sqrt equation has no real solution");
     let line = run.stdout.lines().last().unwrap_or("");
@@ -695,7 +702,7 @@ fn independent_subsystems_solve_separately() {
 // An integer variable fixed by equations at a fractional value makes the model infeasible
 #[test]
 fn integer_determined_by_equations_must_be_whole() {
-    let src = "relation R {\n int n\n total = 3 * n\n}\nsolve R with {\n total = 10\n}\n";
+    let src = "signal n : scalar\nsignal total : scalar\nrelation R {\n int n\n total = 3 * n\n}\nsolve R with {\n total = 10\n}\n";
     let run = run_model(src, &[]);
     assert_ne!(
         run.code, 0,
@@ -748,8 +755,10 @@ fn weather_cell_physics() {
             v
         ));
     }
+    let signals = "signal temp_c : scalar\nsignal dewpoint_c : scalar\nsignal rh_reported : scalar\nsignal pressure_hpa : scalar\nsignal wind_u : scalar\nsignal wind_v : scalar\nsignal aloft_u : scalar\nsignal aloft_v : scalar\nsignal aloft_height_m : scalar\nsignal steer_u : scalar\nsignal steer_v : scalar\nsignal radar_dbz : scalar\nsignal gauge_available : scalar\nsignal gauge_rate_mmh : scalar\nsignal upstream_dbz_15 : scalar\nsignal upstream_dbz_30 : scalar\nsignal upstream_dbz_60 : scalar\nsignal layer_depth_m : scalar\nsignal x1 : scalar\nsignal y1 : scalar\nsignal u1 : scalar\nsignal v1 : scalar\nsignal x2 : scalar\nsignal y2 : scalar\nsignal u2 : scalar\nsignal v2 : scalar\nsignal x3 : scalar\nsignal y3 : scalar\nsignal u3 : scalar\nsignal v3 : scalar\nsignal mp_rain_mmh : scalar\nsignal mp_rain_15_mmh : scalar\nsignal mp_rain_30_mmh : scalar\nsignal mp_rain_60_mmh : scalar\n";
     let src = format!(
-        "{}\nsolve WeatherCell with {{\n{}}}\n",
+        "{}{}\nsolve WeatherCell with {{\n{}}}\n",
+        signals,
         &model[start..end],
         binds
     );
@@ -783,7 +792,7 @@ fn weather_cell_physics() {
 #[test]
 fn milp_gcd_test_catches_integer_infeasibility() {
     // 2*x0 + 2*x1 is always even; it cannot equal 3. The objective is unbounded below.
-    let src = "relation S {\n int x0\n int x1\n r = 2 * x0 + 2 * x1\n r == 3\n obj = 0 - x0\n}\nsolve S with {\n minimize(obj)\n}\n";
+    let src = "signal x0 : scalar\nsignal x1 : scalar\nrelation S {\n int x0\n int x1\n r = 2 * x0 + 2 * x1\n r == 3\n obj = 0 - x0\n}\nsolve S with {\n minimize(obj)\n}\n";
     let run = run_model(src, &[]);
     assert_ne!(run.code, 0, "must not settle: {}", run.stdout);
     assert!(
@@ -801,7 +810,7 @@ fn milp_gcd_test_catches_integer_infeasibility() {
 // A feasible integer model with an unbounded improving direction is correctly unbounded.
 #[test]
 fn milp_feasible_and_unbounded_is_unbounded() {
-    let src = "relation S {\n int x\n obj = 0 - x\n x >= 0\n}\nsolve S with {\n minimize(obj)\n}\n";
+    let src = "signal x : scalar\nrelation S {\n int x\n obj = 0 - x\n x >= 0\n}\nsolve S with {\n minimize(obj)\n}\n";
     let run = run_model(src, &[]);
     assert_ne!(run.code, 0, "unbounded model must not settle");
     assert!(run.stderr.contains("unbounded"), "stderr: {}", run.stderr);
@@ -812,7 +821,13 @@ fn milp_feasible_and_unbounded_is_unbounded() {
 // never assert a false verdict.
 #[test]
 fn milp_unbounded_domain_solved_and_proven_by_cuts() {
-    let src = "relation S {
+    let src = "signal x0 : scalar
+signal x1 : scalar
+signal x2 : scalar
+signal x3 : scalar
+signal x4 : scalar
+signal x5 : scalar
+relation S {
     int x0
     int x1
     int x2
@@ -897,7 +912,7 @@ fn desktop_shell_version_matches_workspace() {
 fn standards_non_finite_results_are_rejected() {
     for expr in ["exp(x * 1000)", "x / 0", "sqrt(x - 5)", "ln(x - 5)"] {
         let src = format!(
-            "relation R {{\n    y = {}\n}}\nsolve R with {{\n    x = 1\n}}\n",
+            "signal x : scalar\nsignal y : scalar\nrelation R {{\n    y = {}\n}}\nsolve R with {{\n    x = 1\n}}\n",
             expr
         );
         let run = run_model(&src, &[]);

@@ -193,6 +193,9 @@ fn test_phase4_randomized_shm_ring_buffer_and_latency() {
     // 5. Test End-to-End Compiler Execution with `using shm(...)`
     let model_src = format!(
         r#"
+signal baro_pa : scalar
+signal ambient_k : scalar
+signal flow_lps : scalar
 relation FlowInference using shm("{path}") {{
     gas_density = baro_pa / (287.05 * ambient_k)
     mass_flow = gas_density * (flow_lps / 1000.0)
@@ -380,6 +383,8 @@ pub unsafe extern "C" fn aven_solve_hydro(
     // 5. Test End-to-End Compiler Execution with `using native(...)`
     let model_src = format!(
         r#"
+signal out_z : scalar
+signal target_margin : scalar
 relation NativeHydro using native("{lib_path}", "aven_solve_hydro") {{
     out_z = target_margin * 1.0
 }}
@@ -486,6 +491,8 @@ fn test_phase4_randomized_bidirectional_ipc_daemon_control() {
     let model_name = rng.rand_ident("ipc_bidirectional");
     let model_src = format!(
         r#"
+signal inflow_rate : scalar
+signal tank_level : scalar
 relation ActuatorLoop using ipc("127.0.0.1:{port}") {{
     target_outflow = inflow_rate * 1.25
     actuator_valve = (target_outflow / tank_level) * 100.0

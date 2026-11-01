@@ -36,6 +36,11 @@ Aven validates physical unit consistency at compile time and converts values to 
 
 ### Capacity Planning (Discrete Sizing)
 ```aven
+signal drive_size_tb   : scalar
+signal raid_eff        : scalar
+signal nodes           : scalar
+signal drives_per_node : scalar
+
 relation HardwareSizing {
     int nodes
     int drives_per_node
@@ -55,6 +60,16 @@ solve HardwareSizing with {
 
 ### Thermal Digital Twin
 ```aven
+signal idle_w    : scalar
+signal dynamic_w : scalar
+signal util      : scalar
+signal inlet_c   : scalar
+signal recirc    : scalar
+signal rho       : scalar
+signal cp        : scalar
+signal flow_m3s  : scalar
+signal limit_c   : scalar
+
 relation ThermalTwin {
     power_w = idle_w + util * dynamic_w
     exhaust_c = inlet_c + (1.0 + recirc) * power_w / (rho * cp * flow_m3s)

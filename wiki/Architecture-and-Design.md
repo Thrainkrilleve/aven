@@ -29,6 +29,10 @@ In physical engineering, industrial telemetry, aerospace, and datacenter infrast
 In Aven, you write the mathematical invariant once:
 
 ```aven
+signal force        : N
+signal mass         : kg
+signal acceleration : m/s^2
+
 relation Mechanics {
     force = mass * acceleration
 }

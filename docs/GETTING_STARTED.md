@@ -18,6 +18,13 @@ allocated_workers = math.ceil(raw_workers / 0.7)
 
 In Aven, you declare **physical and mathematical relationships** as timeless bidirectional invariants:
 ```aven
+signal reqs_per_second    : scalar
+signal avg_latency_ms     : scalar
+signal target_utilization : scalar
+signal ram_per_worker     : scalar
+signal socket_buffer_mb   : scalar
+signal os_kernel_ram_mb   : scalar
+
 relation ClusterCapacity {
     raw_workers       = (reqs_per_second * avg_latency_ms) / 1000
     allocated_workers = ceil(raw_workers / target_utilization)
@@ -55,6 +62,11 @@ avenc run examples/server_capacity.aven
 
 Create `thermostat.aven`:
 ```aven
+signal current_temp_c               : degC
+signal target_temp_c                : degC
+signal thermal_conductivity_w_per_c : W/degC
+signal line_voltage_v               : V
+
 relation Thermostat {
     temp_delta_c = current_temp_c - target_temp_c
     cooling_power_w = temp_delta_c * thermal_conductivity_w_per_c
@@ -82,13 +94,13 @@ Solver Trace:
   [compressor_amps = cooling_power_w / line_voltage_v] compressor_amps <- forward eval
 
 Settled Environment:
-  compressor_amps  = 3.7500
-  cooling_power_w  = 900.0000
-  current_temp_c   = 29.5000
-  line_voltage_v   = 240.0000
-  target_temp_c    = 22.0000
-  temp_delta_c     = 7.5000
-  thermal_conductivity_w_per_c = 120.0000
+  compressor_amps  = 3.7500 A
+  cooling_power_w  = 900.0000 W
+  current_temp_c   = 29.5000 degC
+  line_voltage_v   = 240.0000 V
+  target_temp_c    = 22.0000 degC
+  temp_delta_c     = 7.5000 degC
+  thermal_conductivity_w_per_c = 120.0000 W/degC
 
 Fact Ledger: 7 facts settled.
 ```

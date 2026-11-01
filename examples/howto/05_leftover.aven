@@ -1,4 +1,8 @@
 // This line computes leftover. It does not force leftover to be zero.
+signal leftover : scalar
+signal measured : scalar
+signal expected : scalar
+
 relation Gap {
     leftover = measured - expected
 }
