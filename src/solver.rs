@@ -131,6 +131,7 @@ impl SolverEngine {
                 lhs: eq.lhs,
                 op: eq.op,
                 rhs: eq.rhs,
+                unit: None,
                 original_text: eq.original_text,
                 line: eq.line,
                 col: eq.col,

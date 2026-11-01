@@ -908,6 +908,19 @@ pub fn normalize_bindings(module: &mut AvenModule) -> Result<UnitScale, TypeErro
                 None => scale.to_base(&b.name, b.value),
             };
         }
+        // A numeric bound with a unit (`power <= 2000 W`) converts to base
+        // units too, so it compares against the variable's base-unit value.
+        for c in &mut solve.constraints {
+            if let Some(ref u_str) = c.unit {
+                if let crate::ast::Expr::Num(v) = c.rhs {
+                    let converted = registry
+                        .lookup(u_str)
+                        .ok_or_else(|| unknown_unit(&registry, u_str, c.line, c.col))?
+                        .to_base_value(v);
+                    c.rhs = crate::ast::Expr::Num(converted);
+                }
+            }
+        }
     }
     Ok(scale)
 }

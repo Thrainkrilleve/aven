@@ -1878,6 +1878,25 @@ mod tests {
         assert!(settled("x = sign(0)")["x"].abs() < 1e-9);
     }
 
+    #[test]
+    fn a_numeric_bound_carries_and_converts_its_unit() {
+        let src = "relation D {\n    dist = speed * time\n}\nsolve D with {\n    speed = 10\n    time = 5\n    dist <= 1 km\n}\n";
+        let tokens = Lexer::new(src).tokenize().expect("lex");
+        let mut module = Parser::new(tokens).parse_module("m").expect("parse");
+        assert_eq!(
+            module.solves[0].constraints[0].unit.as_deref(),
+            Some("km"),
+            "the bound keeps its unit"
+        );
+        normalize_bindings(&mut module).expect("normalize");
+        match module.solves[0].constraints[0].rhs {
+            crate::ast::Expr::Num(v) => {
+                assert!((v - 1000.0).abs() < 1e-6, "1 km -> 1000 m, got {v}")
+            }
+            _ => panic!("bound rhs should be a number"),
+        }
+    }
+
     fn settled(src: &str) -> BTreeMap<String, f64> {
         solve(src)
             .unwrap_or_else(|e| panic!("{src} refused: {}", e.message))

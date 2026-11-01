@@ -204,6 +204,10 @@ pub struct Constraint {
     pub lhs: String,
     pub op: ConstraintOp,
     pub rhs: Expr,
+    /// A unit literal written after a numeric bound, e.g. `power <= 2000 W`.
+    /// `normalize_bindings` converts the bound into base units, the same as a
+    /// binding's unit.
+    pub unit: Option<String>,
     pub original_text: String,
     pub line: usize,
     pub col: usize,

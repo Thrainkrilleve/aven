@@ -724,11 +724,21 @@ impl Parser {
                     _ => unreachable!(),
                 };
                 let rhs = self.parse_expr()?;
-                let original_text = format!("{} {} {}", name, op, rhs);
+                // A numeric bound may carry a unit literal, e.g. `power <= 2000 W`.
+                let unit = if matches!(rhs, Expr::Num(_)) {
+                    self.parse_optional_unit(b_line)
+                } else {
+                    None
+                };
+                let original_text = match &unit {
+                    Some(u) => format!("{} {} {} {}", name, op, rhs, u),
+                    None => format!("{} {} {}", name, op, rhs),
+                };
                 constraints.push(Constraint {
                     lhs: name,
                     op,
                     rhs,
+                    unit,
                     original_text,
                     line: b_line,
                     col: b_col,
