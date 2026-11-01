@@ -133,6 +133,9 @@ fn plain_type_message(err: &TypeError) -> String {
                 format!("Unknown function '{name}' (line {line}).")
             }
         }
+        TypeError::UndeclaredSignal { name, line, .. } => {
+            format!("'{name}' has no declared unit (line {line}). Add 'signal {name} : <unit>' (or ': scalar').")
+        }
         other => strip_locator(&other.to_string()),
     }
 }

@@ -958,6 +958,11 @@ pub enum TypeError {
         line: usize,
         col: usize,
     },
+    UndeclaredSignal {
+        name: String,
+        line: usize,
+        col: usize,
+    },
 }
 
 impl TypeError {
@@ -968,7 +973,8 @@ impl TypeError {
             | TypeError::InvalidFunctionArgument { line, col, .. }
             | TypeError::UnknownUnit { line, col, .. }
             | TypeError::AmbiguousUnit { line, col, .. }
-            | TypeError::UnknownFunction { line, col, .. } => (*line, *col),
+            | TypeError::UnknownFunction { line, col, .. }
+            | TypeError::UndeclaredSignal { line, col, .. } => (*line, *col),
         }
     }
 }
@@ -1021,6 +1027,11 @@ impl fmt::Display for TypeError {
                 f,
                 "Type Error at line {}, col {}: unknown function '{}'",
                 line, col, name
+            ),
+            TypeError::UndeclaredSignal { name, line, col } => write!(
+                f,
+                "Type Error at line {}, col {}: '{}' has no declared or inferable unit — declare it with 'signal {} : <unit>' (or ': scalar')",
+                line, col, name, name
             ),
         }
     }
@@ -1163,6 +1174,26 @@ impl DimensionalChecker {
                                 col: c.col,
                             });
                         }
+                    }
+                }
+            }
+        }
+
+        // 5. Strict declaration rule: after propagation, every variable used in
+        // a relation must resolve to a unit (declared or inferred). A name with
+        // no determinable dimension is an undeclared signal.
+        for blk in &module.blocks {
+            for eq in &blk.equations {
+                let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+                names.insert(eq.lhs.clone());
+                eq.rhs.collect_vars(&mut names);
+                for name in &names {
+                    if !var_dims.contains_key(name) {
+                        return Err(TypeError::UndeclaredSignal {
+                            name: name.clone(),
+                            line: eq.line,
+                            col: eq.col,
+                        });
                     }
                 }
             }
