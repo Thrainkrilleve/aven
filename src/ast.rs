@@ -37,6 +37,27 @@ pub fn is_builtin_constant(name: &str) -> bool {
     matches!(name, "pi" | "PI" | "e" | "E" | "tau" | "TAU")
 }
 
+/// The functions the evaluator (`diff::eval_expr`) actually implements. The
+/// dimensional checker rejects any other call, so an unknown function like
+/// `log10` fails at check time rather than slipping through to solve.
+pub fn is_builtin_function(name: &str) -> bool {
+    matches!(
+        name,
+        "sqrt"
+            | "ceil"
+            | "floor"
+            | "round"
+            | "abs"
+            | "sign"
+            | "log"
+            | "ln"
+            | "exp"
+            | "sin"
+            | "cos"
+            | "tan"
+    )
+}
+
 impl Expr {
     pub fn collect_vars(&self, set: &mut std::collections::BTreeSet<String>) {
         match self {

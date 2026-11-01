@@ -940,6 +940,11 @@ pub enum TypeError {
         line: usize,
         col: usize,
     },
+    UnknownFunction {
+        name: String,
+        line: usize,
+        col: usize,
+    },
 }
 
 impl TypeError {
@@ -949,7 +954,8 @@ impl TypeError {
             TypeError::DimensionalMismatch { line, col, .. }
             | TypeError::InvalidFunctionArgument { line, col, .. }
             | TypeError::UnknownUnit { line, col, .. }
-            | TypeError::AmbiguousUnit { line, col, .. } => (*line, *col),
+            | TypeError::AmbiguousUnit { line, col, .. }
+            | TypeError::UnknownFunction { line, col, .. } => (*line, *col),
         }
     }
 }
@@ -997,6 +1003,11 @@ impl fmt::Display for TypeError {
                 col,
                 unit,
                 candidates.join(", ")
+            ),
+            TypeError::UnknownFunction { name, line, col } => write!(
+                f,
+                "Type Error at line {}, col {}: unknown function '{}'",
+                line, col, name
             ),
         }
     }
@@ -1245,6 +1256,13 @@ impl DimensionalChecker {
                 }
             }
             Expr::Call(fn_name, inner) => {
+                if !crate::ast::is_builtin_function(fn_name) {
+                    return Err(TypeError::UnknownFunction {
+                        name: fn_name.clone(),
+                        line,
+                        col,
+                    });
+                }
                 let d_inner = self.infer_expr(inner, var_dims, line, col)?;
                 if matches!(fn_name.as_str(), "sin" | "cos" | "tan") {
                     if let Some(ref d) = d_inner {
@@ -1274,7 +1292,7 @@ impl DimensionalChecker {
                         },
                         None => Ok(None),
                     }
-                } else if matches!(fn_name.as_str(), "exp" | "ln" | "log" | "log10") {
+                } else if matches!(fn_name.as_str(), "exp" | "ln" | "log") {
                     if let Some(ref d) = d_inner {
                         if !d.is_dimensionless() {
                             return Err(TypeError::InvalidFunctionArgument {

@@ -126,6 +126,13 @@ fn plain_type_message(err: &TypeError) -> String {
         } if op == "+/-" => {
             format!("Can't add {left_dim} to {right_dim} (line {line}).")
         }
+        TypeError::UnknownFunction { name, line, .. } => {
+            if name == "log10" {
+                format!("No log10 function (line {line}). Base-10 log is ln(x) / ln(10).")
+            } else {
+                format!("Unknown function '{name}' (line {line}).")
+            }
+        }
         other => strip_locator(&other.to_string()),
     }
 }
@@ -1827,12 +1834,48 @@ mod tests {
             neg_sqrt.message
         );
 
+        // Unknown functions are now caught at check time (capitalized message
+        // from plain_type_message), so solve refuses them there.
         let unknown_fn = solve("bogus(1)").expect_err("unknown function");
         assert!(
-            unknown_fn.message.contains("unknown function"),
+            unknown_fn
+                .message
+                .to_lowercase()
+                .contains("unknown function"),
             "{}",
             unknown_fn.message
         );
+    }
+
+    #[test]
+    fn log10_is_rejected_at_check_with_a_hint() {
+        let diags = check("x = log10(100)");
+        assert!(!diags.is_empty(), "log10 should fail check, not just solve");
+        let msg = diags[0].message.to_lowercase();
+        assert!(msg.contains("log10"), "{}", diags[0].message);
+        assert!(
+            msg.contains("ln(x) / ln(10)"),
+            "should hint the ln form: {}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn check_rejects_an_unknown_function() {
+        let diags = check("y = arctan(2)");
+        assert!(!diags.is_empty(), "an unknown function should fail check");
+        assert!(
+            diags[0].message.to_lowercase().contains("arctan"),
+            "{}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn sign_is_available_in_the_solver() {
+        assert!((settled("x = sign(-5)")["x"] + 1.0).abs() < 1e-9);
+        assert!((settled("x = sign(7)")["x"] - 1.0).abs() < 1e-9);
+        assert!(settled("x = sign(0)")["x"].abs() < 1e-9);
     }
 
     fn settled(src: &str) -> BTreeMap<String, f64> {
