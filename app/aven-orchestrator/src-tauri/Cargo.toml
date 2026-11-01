@@ -25,7 +25,7 @@ avenc = { path = "../../.." }
 gtk = "0.19"
 
 [target.'cfg(any(windows, target_os = "macos"))'.dependencies]
-rfd = "0.15"
+rfd = "0.17"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
