@@ -1010,3 +1010,24 @@ fn emitted_c_output_matches_avenc_run() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// `avenc check` must not call a determined system under-determined because its variables
+// are in very different units: w in GiB is ~1.9e11 bytes, which pushed the coefficient on
+// `per` below the rank test's tolerance when only rows were scaled.
+#[test]
+fn check_rank_is_independent_of_unit_scale() {
+    let src = "signal w : GiB\nsignal ap : scalar\nsignal tp : scalar\nsignal n : scalar\n\
+               signal f : ratio\nsignal per : GiB\nsignal k : scalar\nsignal x : GiB\n\
+               relation R {\n    f = ap / tp\n    per = w * f / n\n    x = k * per\n}\n\
+               solve R with {\n    w = 172.52 GiB\n    ap = 22\n    tp = 235\n    n = 94\n    k = 3\n}\n";
+    let path = write_model(src);
+    let check = avenc(&["check", path.to_str().unwrap()]);
+    assert!(check.stdout.contains("System Determinacy PASSED"), "{}", check.stdout);
+    assert!(!check.stdout.contains("UNDER-DETERMINED"), "{}", check.stdout);
+
+    // A genuinely under-determined system at the same scale is still reported
+    let free = src.replace("    k = 3\n", "");
+    let path = write_model(&free);
+    let check = avenc(&["check", path.to_str().unwrap()]);
+    assert!(check.stdout.contains("UNDER-DETERMINED"), "{}", check.stdout);
+}

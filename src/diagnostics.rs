@@ -412,9 +412,20 @@ fn rank_and_pivots(mat: &[Vec<f64>]) -> (usize, Vec<usize>, Vec<usize>) {
     let mut a: Vec<Vec<f64>> = mat.to_vec();
     let mut row_indices: Vec<usize> = (0..rows).collect();
 
-    // Row-equilibrate (normalize each non-zero row by its infinity norm)
-    // so equations across vastly different physical units (e.g. Joules ~ 1e6, Pa ~ 1e5, m/s ~ 1, s^-1 ~ 1e-4)
-    // do not artificially suppress pivot selection for other independent equations.
+    // Column-equilibrate, then row-equilibrate (each non-zero column, then row, divided by
+    // its infinity norm), so variables and equations in vastly different units (bytes
+    // ~ 1e11 from a GiB, Pa ~ 1e5, s^-1 ~ 1e-4) do not push an independent entry under
+    // the pivot tolerance. Scaling rows and columns never changes the rank. Rows alone
+    // are not enough: in `per = w * f / n` with w in GiB, the coefficient on f is ~2e9
+    // bytes, and dividing the row by it left per's coefficient of 1 at ~5e-10.
+    for c in 0..cols {
+        let c_max = a.iter().map(|row| row[c].abs()).fold(0.0f64, f64::max);
+        if c_max > 1e-15 {
+            for row in a.iter_mut() {
+                row[c] /= c_max;
+            }
+        }
+    }
     for row in a.iter_mut() {
         let r_max = row.iter().map(|v| v.abs()).fold(0.0f64, f64::max);
         if r_max > 1e-15 {
