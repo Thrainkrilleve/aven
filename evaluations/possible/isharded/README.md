@@ -57,6 +57,10 @@ avenc run   evaluations/possible/isharded/isharded_route.aven
 avenc why   evaluations/possible/isharded/isharded_route.aven avg_hop_ms
 ```
 
+## Live data
+
+[LIVE_DATA_PLAN.md](LIVE_DATA_PLAN.md) reviews what iSharded already exposes, what is missing, and the options for feeding live readings into this model, the IDE and `avenc stream`.
+
 ## Questions for iSharded's developer
 
 1. Does `POST /admin/plan` expose, per stage, the bytes read per token and the measured bandwidth of each pool? Those would replace most of the assumptions above.
