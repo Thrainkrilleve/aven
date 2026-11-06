@@ -219,18 +219,22 @@ cargo build --release
 Output:
 ```text
 Solver Trace:
+  [air_density = pressure / (gas_constant * temperature)] air_density <- forward eval
   [dynamic_pressure = 0.5 * air_density * velocity ^ 2] dynamic_pressure <- forward eval
   [lift = dynamic_pressure * wing_area * lift_coeff] lift <- forward eval
 
 Settled Environment:
   air_density      = 1.2250 kg/m^3
-  dynamic_pressure = 2953.8002 Pa
-  lift             = 51986.8827 N
+  dynamic_pressure = 2953.8297 Pa
+  gas_constant     = 287.0500 J/(kg*K)
+  lift             = 51987.4033 N
   lift_coeff       = 0.5500 scalar
+  pressure         = 101325.0000 Pa
+  temperature      = 288.1500 K
   velocity         = 250.0000 km/h
   wing_area        = 32.0000 m^2
 
-Fact Ledger: 6 facts settled.
+Fact Ledger: 9 facts settled.
 ```
 Values print in their declared unit, or in the base unit of their inferred dimension. `lift_coeff` is declared `scalar` (dimensionless), so `lift` is inferred as newtons; a coefficient left without a unit would leave `lift`'s dimension unknown and unlabelled. `--json` prints base-unit values with a `units` map.
 

@@ -5,8 +5,14 @@ signal velocity : km/h
 signal wing_area : m^2
 signal air_density : kg/m^3
 signal lift_coeff : scalar
+signal pressure : Pa
+signal temperature : K
+signal gas_constant : J/(kg*K)
 
 relation Aerodynamics {
+    // Air density from the ideal gas law, rho = P / (R * T), rather than a
+    // hardcoded constant — so a change in pressure or temperature flows through.
+    air_density = pressure / (gas_constant * temperature)
     dynamic_pressure = 0.5 * air_density * velocity^2
     lift = dynamic_pressure * wing_area * lift_coeff
 }
@@ -15,5 +21,7 @@ solve Aerodynamics with {
     velocity = 250 km/h
     wing_area = 32 m^2
     lift_coeff = 0.55
-    air_density = 1.225 kg/m^3
+    pressure = 101325 Pa
+    temperature = 288.15 K
+    gas_constant = 287.05 J/(kg*K)
 }

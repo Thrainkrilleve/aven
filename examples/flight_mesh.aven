@@ -12,10 +12,14 @@ signal air_density  : kg/m^3
 signal wing_area    : m^2
 signal lift_coeff   : scalar
 signal lapse_rate   : degC/m
+signal pressure     : Pa
+signal gas_constant : J/(kg*K)
 
 relation FlightDynamics {
     // ISA troposphere: temperature falls at the lapse rate with altitude.
     ambient_temp     = surface_temp - lapse_rate * altitude
+    // Air density from ISA pressure and the local temperature: rho = P / (R * T).
+    air_density      = pressure / (gas_constant * ambient_temp)
     // Dynamic pressure and the lift it produces over the wing.
     dynamic_pressure = 0.5 * air_density * airspeed^2
     lift             = dynamic_pressure * wing_area * lift_coeff
@@ -24,7 +28,8 @@ relation FlightDynamics {
 solve FlightDynamics with {
     surface_temp = 15 degC
     altitude     = 3000 m
-    air_density  = 0.909 kg/m^3
+    pressure     = 70121 Pa
+    gas_constant = 287.05 J/(kg*K)
     lapse_rate   = 0.0065
     wing_area    = 32 m^2
     lift_coeff   = 0.55

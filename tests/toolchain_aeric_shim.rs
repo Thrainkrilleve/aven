@@ -165,25 +165,34 @@ fn test_aeric_shim_aerodynamics_golden() {
     let bundle =
         CTranspiler::generate_aeric_shim(blk, "aerodynamics").expect("generate_aeric_shim");
 
-    assert_eq!(bundle.n_in, 4);
-    assert_eq!(bundle.n_out, 2);
+    assert_eq!(bundle.n_in, 6);
+    assert_eq!(bundle.n_out, 3);
 
-    let expected_inputs = ["air_density", "lift_coeff", "velocity", "wing_area"];
+    // air_density is now derived from the ideal gas law, so pressure,
+    // temperature and gas_constant are the inputs in its place.
+    let expected_inputs = [
+        "gas_constant",
+        "lift_coeff",
+        "pressure",
+        "temperature",
+        "velocity",
+        "wing_area",
+    ];
     assert_eq!(bundle.input_names, expected_inputs);
 
-    let expected_outputs = ["dynamic_pressure", "lift"];
+    let expected_outputs = ["air_density", "dynamic_pressure", "lift"];
     assert_eq!(bundle.output_names, expected_outputs);
 
     assert_eq!(bundle.model_hash.len(), 64);
     assert!(
         bundle
             .header_h
-            .contains("#define MODEL_AERODYNAMICS_N_IN   4")
+            .contains("#define MODEL_AERODYNAMICS_N_IN   6")
     );
     assert!(
         bundle
             .header_h
-            .contains("#define MODEL_AERODYNAMICS_N_OUT  2")
+            .contains("#define MODEL_AERODYNAMICS_N_OUT  3")
     );
 }
 

@@ -245,8 +245,8 @@ fn debug_what_if_reads_values_in_the_declared_unit() {
     ]);
     assert_eq!(run.code, 0, "stderr: {}", run.stderr);
     assert!(run.stdout.contains("300.0000 km/h"), "{}", run.stdout);
-    // q scales with v^2: 2953.80 * (300/250)^2 = 4253.47
-    assert!(run.stdout.contains("4253.4722"), "{}", run.stdout);
+    // q scales with v^2: 2953.83 * (300/250)^2 = 4253.51
+    assert!(run.stdout.contains("4253.5148"), "{}", run.stdout);
 }
 
 #[test]

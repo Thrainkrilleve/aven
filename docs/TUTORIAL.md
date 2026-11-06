@@ -121,8 +121,12 @@ signal velocity : km/h
 signal wing_area : m^2
 signal air_density : kg/m^3
 signal lift_coeff : scalar
+signal pressure : Pa
+signal temperature : K
+signal gas_constant : J/(kg*K)
 
 relation Aerodynamics {
+    air_density = pressure / (gas_constant * temperature)
     dynamic_pressure = 0.5 * air_density * velocity^2
     lift = dynamic_pressure * wing_area * lift_coeff
 }
@@ -131,7 +135,9 @@ solve Aerodynamics with {
     velocity = 250 km/h
     wing_area = 32 m^2
     lift_coeff = 0.55
-    air_density = 1.225 kg/m^3
+    pressure = 101325 Pa
+    temperature = 288.15 K
+    gas_constant = 287.05 J/(kg*K)
 }
 ```
 
@@ -140,18 +146,22 @@ avenc run examples/aerodynamics.aven
 ```
 ```text
 Solver Trace:
+  [air_density = pressure / (gas_constant * temperature)] air_density <- forward eval
   [dynamic_pressure = 0.5 * air_density * velocity ^ 2] dynamic_pressure <- forward eval
   [lift = dynamic_pressure * wing_area * lift_coeff] lift <- forward eval
 
 Settled Environment:
   air_density      = 1.2250 kg/m^3
-  dynamic_pressure = 2953.8002 Pa
-  lift             = 51986.8827 N
+  dynamic_pressure = 2953.8297 Pa
+  gas_constant     = 287.0500 J/(kg*K)
+  lift             = 51987.4033 N
   lift_coeff       = 0.5500 scalar
+  pressure         = 101325.0000 Pa
+  temperature      = 288.1500 K
   velocity         = 250.0000 km/h
   wing_area        = 32.0000 m^2
 
-Fact Ledger: 6 facts settled.
+Fact Ledger: 9 facts settled.
 ```
 
 250 km/h was solved as 69.44 m/s, so the dynamic pressure is in pascals. `lift_coeff` is declared `scalar` (dimensionless), so `lift` is inferred as newtons; leaving the coefficient without a unit would leave `lift`'s dimension unknown.
