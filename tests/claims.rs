@@ -1022,12 +1022,24 @@ fn check_rank_is_independent_of_unit_scale() {
                solve R with {\n    w = 172.52 GiB\n    ap = 22\n    tp = 235\n    n = 94\n    k = 3\n}\n";
     let path = write_model(src);
     let check = avenc(&["check", path.to_str().unwrap()]);
-    assert!(check.stdout.contains("System Determinacy PASSED"), "{}", check.stdout);
-    assert!(!check.stdout.contains("UNDER-DETERMINED"), "{}", check.stdout);
+    assert!(
+        check.stdout.contains("System Determinacy PASSED"),
+        "{}",
+        check.stdout
+    );
+    assert!(
+        !check.stdout.contains("UNDER-DETERMINED"),
+        "{}",
+        check.stdout
+    );
 
     // A genuinely under-determined system at the same scale is still reported
     let free = src.replace("    k = 3\n", "");
     let path = write_model(&free);
     let check = avenc(&["check", path.to_str().unwrap()]);
-    assert!(check.stdout.contains("UNDER-DETERMINED"), "{}", check.stdout);
+    assert!(
+        check.stdout.contains("UNDER-DETERMINED"),
+        "{}",
+        check.stdout
+    );
 }
