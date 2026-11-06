@@ -338,7 +338,10 @@ fn test_randomized_1_package_manifest_and_dependency_graph() {
         fs::write(pkg_dir.join("Aven.toml"), &toml_str).unwrap();
         fs::write(
             pkg_dir.join("lib.aven"),
-            format!("relation Rel{} {{ out_val = in_val * 2 }}\n", i),
+            format!(
+                "signal in_val : scalar\nrelation Rel{} {{ out_val = in_val * 2 }}\n",
+                i
+            ),
         )
         .unwrap();
 
@@ -668,7 +671,7 @@ fn test_wasm_builtins_match_avenc_run() {
     if Command::new("node").arg("--version").output().is_err() {
         return;
     }
-    let src = "forward Fns {\n\
+    let src = "signal x : scalar\nforward Fns {\n\
                    f = floor(x)\n\
                    c = ceil(x)\n\
                    r = round(x)\n\

@@ -8,6 +8,17 @@
 //   - 3x Replication profile:     raid_efficiency = 1 / 3 = 0.333 (33.3% usable)
 //   - Traditional RAID 6:         raid_efficiency = (N - 2) / N
 
+// Units: these engineering quantities are carried as bare scalars.
+signal total_iops : scalar
+signal drives : scalar
+signal iops_per_drive : scalar
+signal usable_tb : scalar
+signal drive_size_tb : scalar
+signal raid_efficiency : scalar
+signal throughput_mbps : scalar
+signal block_size_kb : scalar
+signal wire_rate_gbps : scalar
+
 relation StorageCluster {
     total_iops      = drives * iops_per_drive
     usable_tb       = drives * drive_size_tb * raid_efficiency

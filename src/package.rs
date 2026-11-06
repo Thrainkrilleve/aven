@@ -258,6 +258,9 @@ impl PackageManager {
         if !entry_path.exists() {
             let sample_code = format!(
                 "// {} — Aven Unit-Verified Relation Library\n\
+                 signal voltage_v : scalar\n\
+                 signal current_a : scalar\n\
+                 signal operating_hours : scalar\n\
                  relation {}Relations {{\n\
                      power_kw = (voltage_v * current_a) / 1000\n\
                      energy_kwh = power_kw * operating_hours\n\

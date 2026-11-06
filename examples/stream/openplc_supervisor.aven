@@ -6,6 +6,17 @@
 // a cycle that breaks one is reported as ALARM. The limits are example values: set them
 // for your own controller, enclosure and power supply.
 
+// Limits (from the solve) and the live telemetry fields (from the stream) are
+// all plain numbers; the margins infer. Everything is declared : scalar.
+signal scan_deadline_ms  : scalar
+signal scan_ms           : scalar
+signal enclosure_limit_c : scalar
+signal temp_c            : scalar
+signal psu_limit_w       : scalar
+signal power_w           : scalar
+signal quality_floor_pct : scalar
+signal quality_pct       : scalar
+
 relation LineSupervisor {
     scan_margin_ms    = scan_deadline_ms - scan_ms
     thermal_margin_c  = enclosure_limit_c - temp_c

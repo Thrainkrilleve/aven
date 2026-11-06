@@ -7,6 +7,15 @@
 //
 // Aven uses Newton-Raphson with an analytical Jacobian to solve for frequency 'f'.
 
+// Units: these engineering quantities are carried as bare scalars.
+signal total_power_w : scalar
+signal cores : scalar
+signal alpha : scalar
+signal f : scalar
+signal beta : scalar
+signal reqs_per_second : scalar
+signal throughput_per_core_per_ghz : scalar
+
 relation CpuPowerEnvelope {
     total_power_w   = cores * (alpha * (f ^ 3) + beta * f)
     reqs_per_second = cores * throughput_per_core_per_ghz * f

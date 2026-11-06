@@ -4,6 +4,18 @@
 // Invariant modeling of rotor thrust, aerodynamic drag, battery internal resistance voltage sag,
 // and flight recovery authority.
 
+// Physical constants (g, coefficients) are baked in as bare numeric literals,
+// so every quantity is carried as a pure : scalar rather than a dimensioned unit.
+signal total_mass_kg                    : scalar
+signal motor_rpm                        : scalar
+signal thrust_coeff                     : scalar
+signal air_density                      : scalar
+signal prop_diameter_m                  : scalar
+signal amps_per_newton                  : scalar
+signal base_avionics_amps               : scalar
+signal battery_open_circuit_volts       : scalar
+signal battery_internal_resistance_ohms : scalar
+
 relation MultirotorDynamics {
     // Total vertical thrust from 4 synchronized brushless motors (in Newtons)
     // Thrust = 4 * c_t * rho * (rpm / 60)^2 * prop_diameter^4

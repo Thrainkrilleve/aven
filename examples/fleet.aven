@@ -1,4 +1,17 @@
 // examples/fleet.aven — Fleet Economics & Trip Model
+//
+// Money, counts and rates — all abstract quantities, so every signal is : scalar.
+signal price       : scalar
+signal units       : scalar
+signal revenue     : scalar
+signal cost        : scalar
+signal profit      : scalar
+signal distance    : scalar
+signal speed       : scalar
+signal time        : scalar
+signal consumption : scalar
+signal fuel        : scalar
+signal price_fuel  : scalar
 
 relation Economics {
     revenue = price * units

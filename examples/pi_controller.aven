@@ -10,6 +10,11 @@
 //
 // Free inputs (avenc sorts alphabetically): i_prev, r, y
 // Outputs (equation order):                 u, i_next
+// Setpoint, measurement and the fed-back accumulator are abstract numbers.
+signal r      : scalar
+signal y      : scalar
+signal i_prev : scalar
+
 forward PIController {
     u = 0.5 * (r - y) + i_next
     i_next = i_prev + 0.1 * (r - y)

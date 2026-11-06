@@ -11,6 +11,7 @@ signal airspeed     : m/s
 signal air_density  : kg/m^3
 signal wing_area    : m^2
 signal lift_coeff   : scalar
+signal lapse_rate   : degC/m
 
 relation FlightDynamics {
     // ISA troposphere: temperature falls at the lapse rate with altitude.

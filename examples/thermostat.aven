@@ -6,6 +6,11 @@
 // room is ABOVE the setpoint, so cooling power and compressor current are
 // positive when cooling is needed.
 
+signal current_temp_c               : degC
+signal target_temp_c                : degC
+signal thermal_conductivity_w_per_c : W/degC
+signal line_voltage_v               : V
+
 relation Thermostat {
     temp_delta_c    = current_temp_c - target_temp_c
     cooling_power_w = temp_delta_c * thermal_conductivity_w_per_c

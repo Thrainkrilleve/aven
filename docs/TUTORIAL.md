@@ -35,7 +35,12 @@ If you have 10 interrelated variables, procedural code requires writing dozens o
 In **Aven**, you declare **invariants** that must hold true. The compiler determines which unknowns need to be calculated based on what you observe:
 
 ```aven
-// The physical law is declared once
+// The physical law is declared once. Every name it uses needs a unit,
+// declared on a `signal` line (or inferred from the ones that are).
+signal force        : N
+signal mass         : kg
+signal acceleration : m/s^2
+
 relation Dynamics {
     force = mass * acceleration
 }
@@ -48,6 +53,10 @@ relation Dynamics {
 Save this to `dynamics.aven`:
 
 ```aven
+signal force        : N
+signal mass         : kg
+signal acceleration : m/s^2
+
 relation Dynamics {
     force = mass * acceleration
 }
@@ -66,9 +75,9 @@ avenc run dynamics.aven
 Output:
 ```text
 Settled Environment:
-  acceleration     = 3.5000
-  force            = 4200.0000
-  mass             = 1200.0000
+  acceleration     = 3.5000 m/s^2
+  force            = 4200.0000 N
+  mass             = 1200.0000 kg
 ```
 
 Now, solve **backwards**. Suppose you measure $4200\,\text{N}$ of force and want to determine the required mass to achieve $5.0\,\text{m/s}^2$. Replace the `solve` block in `dynamics.aven` with this one (all solve blocks in a file describe one scenario, so two contradictory ones would be reported as an inconsistency):
@@ -90,9 +99,9 @@ Solver Trace:
   [force = mass * acceleration] mass <- backward Newton
 
 Settled Environment:
-  acceleration     = 5.0000
-  force            = 4200.0000
-  mass             = 840.0000
+  acceleration     = 5.0000 m/s^2
+  force            = 4200.0000 N
+  mass             = 840.0000 kg
 ```
 > **Notice**: You did not write `mass = force / acceleration`. Aven solved the same equation for `mass` with Newton's method, using the equation's symbolic derivative.
 
@@ -101,6 +110,8 @@ Settled Environment:
 ## Recipe 3: Physical Units & Dimensional Analysis
 
 Aven checks dimensions across ten base dimensions: the SI quantities length, mass, time, current, temperature and amount of substance, plus angle, money, data and transactions. It also converts values: every number is turned into base units before solving and shown back in its declared unit. The full list, in plain language, is [Units](UNITS.md).
+
+Because of this checking, **every name a relation uses must resolve to a unit** — either declared directly with a `signal name : unit` line, or inferred from its declared neighbours (once `air_density` and `velocity` are declared, `dynamic_pressure` follows). A name that Aven cannot pin a unit to is an error: `avenc check` names it and tells you to add a `signal` line. For a pure count, ratio or coefficient that has no physical unit, declare it `: scalar`.
 
 This is `examples/aerodynamics.aven`:
 ```aven
@@ -168,6 +179,12 @@ Physical engineering often involves discrete units (e.g. whole server nodes, who
 
 Create `cluster_sizing.aven`:
 ```aven
+signal cores_per_node     : scalar
+signal ram_per_node_gb    : scalar
+signal node_monthly_cost  : scalar
+signal required_cores     : scalar
+signal required_ram_gb    : scalar
+
 relation ServerProvisioning {
     int nodes
     total_cores = nodes * cores_per_node
@@ -202,15 +219,15 @@ Solver Trace:
   [optimize] simplex branch-and-bound (1 nodes) — objective = 7.000000 (proven optimal) [bound = 7.000000, duality_gap = 0.00e0, cuts = 1, dual_norm = 3.00e0]
 
 Settled Environment:
-  cores_per_node   = 16.0000
-  node_monthly_cost = 145.0000
+  cores_per_node   = 16.0000 scalar
+  node_monthly_cost = 145.0000 scalar
   nodes            = 7 (int)
-  ram_per_node_gb  = 64.0000
-  required_cores   = 100.0000
-  required_ram_gb  = 350.0000
-  total_cores      = 112.0000
-  total_cost_monthly = 1015.0000
-  total_ram_gb     = 448.0000
+  ram_per_node_gb  = 64.0000 scalar
+  required_cores   = 100.0000 scalar
+  required_ram_gb  = 350.0000 scalar
+  total_cores      = 112.0000 scalar
+  total_cost_monthly = 1015.0000 scalar
+  total_ram_gb     = 448.0000 scalar
 
 Fact Ledger: 10 facts settled.
 ```
@@ -224,6 +241,11 @@ When deploying to embedded microcontrollers or fixed-rate control loops, an iter
 
 Create `governor.aven`:
 ```aven
+signal target_rpm    : scalar
+signal current_rpm   : scalar
+signal kp            : scalar
+signal base_throttle : scalar
+
 forward ThrottleGovernor {
     error = target_rpm - current_rpm
     p_term = error * kp
@@ -307,6 +329,11 @@ Aven connects to live sensors, message brokers, and telemetry streams via subpro
 A `using` clause attaches a backend to a relation; the backend supplies facts and the relation's equations are solved over them:
 
 ```aven
+signal altitude_ft        : ft
+signal current_altitude_m : m
+signal vibration_ms2      : m/s^2
+signal turbine_vibration_g : m/s^2
+
 // Ingest from an external Python simulator (prints JSON facts):
 relation Altimeter using external("python", "sensor_stream.py") {
     altitude_ft = current_altitude_m * 3.28084
@@ -432,6 +459,11 @@ Settled Environment:
 ### Diagnostic: Underdetermined System
 If you provide fewer facts than unknowns, Aven reports the degrees of freedom and the bindings that would fix them, and exits with code 1:
 ```aven
+signal volume : m^3
+signal length : m
+signal width  : m
+signal height : m
+
 relation Box {
     volume = length * width * height
 }

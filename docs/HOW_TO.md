@@ -30,6 +30,8 @@ Two parts make a model:
 
 A short calculation does not need either block. The name on the left of `=` is the result.
 
+Every name that a `relation` uses must have a unit. You give it one with a `signal` line — `signal area : m^2` — and Aven infers the rest from there, so once `length` and `width` are declared in metres, `area` is known to be in `m^2` without a line of its own. When a quantity is a plain count or ratio with no physical unit, declare it `: scalar`. A relation that uses a name Aven cannot pin a unit to fails `avenc check` with a message telling you which name to declare. The bare calculations above need no `signal` line because they are not inside a relation.
+
 ## 1. Add two numbers
 
 `examples/howto/01_add.aven`:
@@ -72,6 +74,10 @@ You know the length and the width of a field. Area is the blank.
 
 ```aven
 // You know the length and the width. Area is the blank, so it is computed.
+signal area   : m^2
+signal length : m
+signal width  : m
+
 relation Field {
     area = length * width
 }
@@ -91,9 +97,9 @@ Solver Trace:
   [area = length * width] area <- forward eval
 
 Settled Environment:
-  area             = 40.0000
-  length           = 8.0000
-  width            = 5.0000
+  area             = 40.0000 m^2
+  length           = 8.0000 m
+  width            = 5.0000 m
 
 Fact Ledger: 3 facts settled.
 ```
@@ -108,6 +114,10 @@ You know the area you want, and you know the length. Leave width out of the solv
 
 ```aven
 // You know the area and the length. Width is left out, so it is found.
+signal area   : m^2
+signal length : m
+signal width  : m
+
 relation Field {
     area = length * width
 }
@@ -127,9 +137,9 @@ Solver Trace:
   [area = length * width] width <- backward Newton
 
 Settled Environment:
-  area             = 100.0000
-  length           = 8.0000
-  width            = 12.5000
+  area             = 100.0000 m^2
+  length           = 8.0000 m
+  width            = 12.5000 m
 
 Fact Ledger: 3 facts settled.
 ```
@@ -160,6 +170,10 @@ Pinning a name does not make it a goal. The name has to appear in the relation.
 ```aven
 // target_area is pinned, but it never appears in the relation.
 // The area is still length times width.
+signal area   : m^2
+signal length : m
+signal width  : m
+
 relation Field {
     area = length * width
 }
@@ -180,10 +194,10 @@ Solver Trace:
   [area = length * width] area <- forward eval
 
 Settled Environment:
-  area             = 40.0000
-  length           = 8.0000
+  area             = 40.0000 m^2
+  length           = 8.0000 m
   target_area      = 100.0000
-  width            = 5.0000
+  width            = 5.0000 m
 
 Fact Ledger: 4 facts settled.
 ```
@@ -198,6 +212,10 @@ This equation computes a leftover. With both measurements pinned, the leftover c
 
 ```aven
 // This line computes leftover. It does not force leftover to be zero.
+signal leftover : scalar
+signal measured : scalar
+signal expected : scalar
+
 relation Gap {
     leftover = measured - expected
 }
@@ -217,9 +235,9 @@ Solver Trace:
   [leftover = measured - expected] leftover <- forward eval
 
 Settled Environment:
-  expected         = 7.0000
-  leftover         = 3.0000
-  measured         = 10.0000
+  expected         = 7.0000 scalar
+  leftover         = 3.0000 scalar
+  measured         = 10.0000 scalar
 
 Fact Ledger: 3 facts settled.
 ```
@@ -230,6 +248,10 @@ To make the leftover come out as zero, pin `leftover = 0` and leave `expected` o
 
 ```aven
 // leftover is pinned at 0, and expected is the blank, so expected is found.
+signal leftover : scalar
+signal measured : scalar
+signal expected : scalar
+
 relation Gap {
     leftover = measured - expected
 }
@@ -249,9 +271,9 @@ Solver Trace:
   [leftover = measured - expected] expected <- backward Newton
 
 Settled Environment:
-  expected         = 10.0000
-  leftover         = 0.0000
-  measured         = 10.0000
+  expected         = 10.0000 scalar
+  leftover         = 0.0000 scalar
+  measured         = 10.0000 scalar
 
 Fact Ledger: 3 facts settled.
 ```
@@ -264,6 +286,10 @@ Hand check: 10 minus expected is 0, so expected is 10. The trace says `expected 
 
 ```aven-fragment
 // Length is known. Area and width are both blank, so this cannot settle.
+signal area   : m^2
+signal length : m
+signal width  : m
+
 relation Field {
     area = length * width
 }

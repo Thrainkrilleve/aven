@@ -3,6 +3,17 @@
 // Incorporates Little's Law queueing theory (target utilization for queue stability)
 // and physical Ethernet/IP wire-rate framing overhead.
 
+// Rates, counts and sizes carried as abstract numbers; free inputs are : scalar
+// and the worker/RAM/bandwidth figures infer from them.
+signal reqs_per_second        : scalar
+signal avg_latency_ms         : scalar
+signal avg_payload_kb         : scalar
+signal ram_per_worker         : scalar
+signal socket_buffer_mb       : scalar
+signal os_kernel_ram_mb       : scalar
+signal target_utilization     : scalar
+signal framing_overhead_ratio : scalar
+
 relation WorkerScaling {
     // Little's Law: raw concurrent requests = arrival_rate * latency
     raw_workers       = (reqs_per_second * avg_latency_ms) / 1000

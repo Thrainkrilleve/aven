@@ -2479,6 +2479,9 @@ fn cmd_demo() {
     println!("Pillar 1: 1D Backward Newton-Raphson Solving");
     println!("------------------------------------------------------------");
     let src1 = r#"
+        signal depth : m
+        signal gravity : m/s^2
+        signal time : s
         relation Fall {
             depth = 0.5 * gravity * time * time
         }
@@ -2502,6 +2505,10 @@ fn cmd_demo() {
     println!("Pillar 2: Multidimensional Coupled System Solving");
     println!("------------------------------------------------------------");
     let src2 = r#"
+        signal supply : scalar
+        signal demand : scalar
+        signal price : scalar
+        signal clearing : scalar
         relation Market {
             supply = 10 + 2 * price
             demand = 100 - 3 * price
@@ -2525,6 +2532,13 @@ fn cmd_demo() {
     println!("Pillar 3: Direction-Pinned C Transpilation");
     println!("------------------------------------------------------------");
     let src3 = r#"
+        signal distance : scalar
+        signal speed : scalar
+        signal time : scalar
+        signal fuel : scalar
+        signal consumption : scalar
+        signal cost : scalar
+        signal price : scalar
         forward Trip {
             distance = speed * time
             fuel = distance * consumption
@@ -2559,6 +2573,11 @@ fn cmd_demo() {
     println!("Pillar 5: Trade-off sweep & knee detection");
     println!("------------------------------------------------------------");
     let src5 = r#"
+        signal raw_workers : scalar
+        signal reqs_per_second : scalar
+        signal avg_latency_ms : scalar
+        signal allocated_workers : scalar
+        signal target_utilization : scalar
         relation Capacity {
             raw_workers = (reqs_per_second * avg_latency_ms) / 1000.0
             allocated_workers = ceil(raw_workers / target_utilization)

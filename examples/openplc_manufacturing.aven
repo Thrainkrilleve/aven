@@ -4,6 +4,12 @@
 // CPU load and target rate. The coefficients are illustrative, not measured on any
 // controller: fit them to your own line before relying on the numbers. For checking live
 // readings against limits, see examples/stream/openplc_supervisor.aven.
+// Coefficients are baked-in literals, so the free inputs are plain : scalar
+// numbers; scan_ms, power_w, temp_c, throughput_pph and quality_pct infer.
+signal io_points    : scalar
+signal cpu_load_pct : scalar
+signal target_rate  : scalar
+
 relation OpenPLCSupervisor {
     scan_ms = 7.5 + (cpu_load_pct * 0.04) + (io_points * 0.08)
     power_w = 120.0 + (io_points * 2.8) + (cpu_load_pct * 0.75)

@@ -1,7 +1,7 @@
 use std::process::Command;
 
 fn newton() -> &'static str {
-    "relation Newton {\n force = mass * acceleration\n}\nsolve Newton with {\n force = 4200\n acceleration = 5\n}\n"
+    "signal force : N\nsignal mass : kg\nsignal acceleration : m/s^2\nrelation Newton {\n force = mass * acceleration\n}\nsolve Newton with {\n force = 4200\n acceleration = 5\n}\n"
 }
 
 #[test]

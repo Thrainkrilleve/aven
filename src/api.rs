@@ -133,6 +133,11 @@ fn plain_type_message(err: &TypeError) -> String {
                 format!("Unknown function '{name}' (line {line}).")
             }
         }
+        TypeError::UndeclaredSignal { name, line, .. } => {
+            format!(
+                "'{name}' has no declared unit (line {line}). Add 'signal {name} : <unit>' (or ': scalar')."
+            )
+        }
         other => strip_locator(&other.to_string()),
     }
 }
@@ -1662,7 +1667,7 @@ mod tests {
 
     #[test]
     fn check_clean_model_has_no_diagnostics() {
-        let src = "relation R {\n y = 2 * x\n}\nsolve R with {\n x = 3\n}\n";
+        let src = "signal x : scalar\nsignal y : scalar\nrelation R {\n y = 2 * x\n}\nsolve R with {\n x = 3\n}\n";
         assert!(check(src).is_empty());
     }
 
@@ -1701,7 +1706,7 @@ mod tests {
     #[test]
     fn solve_runs_backward_for_the_blank_variable() {
         // force = mass * accel; give force + accel, solve mass backward.
-        let src = "relation N {\n force = mass * accel\n}\nsolve N with {\n force = 4200\n accel = 5\n}\n";
+        let src = "signal force : N\nsignal mass : kg\nsignal accel : m/s^2\nrelation N {\n force = mass * accel\n}\nsolve N with {\n force = 4200\n accel = 5\n}\n";
         let solved = solve(src).expect("should solve");
         let mass = solved.values.get("mass").copied().expect("mass settled");
         assert!((mass - 840.0).abs() < 1e-9, "mass = {mass}");
@@ -1729,7 +1734,7 @@ mod tests {
 
     #[test]
     fn explanation_says_a_forward_product_used_the_pinned_numbers() {
-        let src = "relation Field {\n area = length * width\n}\nsolve Field with {\n length = 8\n width = 5\n}\n";
+        let src = "signal area : m^2\nsignal length : m\nsignal width : m\nrelation Field {\n area = length * width\n}\nsolve Field with {\n length = 8\n width = 5\n}\n";
         let solved = solve(src).expect("forward field");
         let why = &solved.explanation;
         assert!(why.contains("computes area from length and width"), "{why}");
@@ -1985,16 +1990,14 @@ mod tests {
 
     #[test]
     fn solve_runs_forward() {
-        let src =
-            "relation N {\n force = mass * accel\n}\nsolve N with {\n mass = 2\n accel = 3\n}\n";
+        let src = "signal force : N\nsignal mass : kg\nsignal accel : m/s^2\nrelation N {\n force = mass * accel\n}\nsolve N with {\n mass = 2\n accel = 3\n}\n";
         let solved = solve(src).expect("should solve");
         assert!((solved.values["force"] - 6.0).abs() < 1e-9);
     }
 
     #[test]
     fn why_traces_a_derived_value_to_its_inputs() {
-        let src =
-            "relation N {\n force = mass * accel\n}\nsolve N with {\n mass = 2\n accel = 3\n}\n";
+        let src = "signal force : N\nsignal mass : kg\nsignal accel : m/s^2\nrelation N {\n force = mass * accel\n}\nsolve N with {\n mass = 2\n accel = 3\n}\n";
         let tree = why(src, "force", None).expect("why");
         assert!(tree.contains("force"), "{tree}");
         assert!(tree.contains("mass") || tree.contains("accel"), "{tree}");
@@ -2002,8 +2005,7 @@ mod tests {
 
     #[test]
     fn report_has_source_hash_values_derivation_and_head() {
-        let src =
-            "relation N {\n force = mass * accel\n}\nsolve N with {\n mass = 2\n accel = 3\n}\n";
+        let src = "signal force : N\nsignal mass : kg\nsignal accel : m/s^2\nrelation N {\n force = mass * accel\n}\nsolve N with {\n mass = 2\n accel = 3\n}\n";
         let r = report(src).expect("report");
         assert_eq!(r.source_sha256.len(), 64);
         assert!((r.values["force"] - 6.0).abs() < 1e-9);
@@ -2016,15 +2018,15 @@ mod tests {
 
     #[test]
     fn report_source_hash_tracks_the_source() {
-        let a = report("relation N {\n y = 2 * x\n}\nsolve N with {\n x = 3\n}\n").unwrap();
-        let b = report("relation N {\n y = 2 * x\n}\nsolve N with {\n x = 4\n}\n").unwrap();
+        let a = report("signal x : scalar\nsignal y : scalar\nrelation N {\n y = 2 * x\n}\nsolve N with {\n x = 3\n}\n").unwrap();
+        let b = report("signal x : scalar\nsignal y : scalar\nrelation N {\n y = 2 * x\n}\nsolve N with {\n x = 4\n}\n").unwrap();
         assert_ne!(a.source_sha256, b.source_sha256);
         assert_ne!(a.ledger_head, b.ledger_head);
     }
 
     #[test]
     fn report_ledger_starts_with_the_source_hash() {
-        let src = "relation N {\n y = 2 * x\n}\nsolve N with {\n x = 3\n}\n";
+        let src = "signal x : scalar\nsignal y : scalar\nrelation N {\n y = 2 * x\n}\nsolve N with {\n x = 3\n}\n";
         let r = report(src).unwrap();
         let first = r.ledger_jsonl.lines().next().expect("a fact");
         assert!(first.contains("\"seq\": 1"), "{first}");
@@ -2039,7 +2041,7 @@ mod tests {
 
     #[test]
     fn report_html_escapes_the_source_and_names_the_hash() {
-        let src = "relation N {\n // <script>alert(1)</script>\n y = 2 * x\n}\nsolve N with {\n x = 3\n}\n";
+        let src = "signal x : scalar\nsignal y : scalar\nrelation N {\n // <script>alert(1)</script>\n y = 2 * x\n}\nsolve N with {\n x = 3\n}\n";
         let html = report_html(src).expect("html");
         assert!(
             html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"),
@@ -2053,7 +2055,7 @@ mod tests {
 
     #[test]
     fn solve_for_blanks_the_chosen_variable_and_pins_the_old_one() {
-        let src = "relation Newton {\n force = mass * acceleration\n}\nsolve Newton with {\n force = 4200\n acceleration = 5\n}\n";
+        let src = "signal force : N\nsignal mass : kg\nsignal acceleration : m/s^2\nrelation Newton {\n force = mass * acceleration\n}\nsolve Newton with {\n force = 4200\n acceleration = 5\n}\n";
         let first = solve(src).expect("mass solves backward");
         assert!((first.values["mass"] - 840.0).abs() < 1e-6);
         assert_eq!(first.solving, vec!["mass".to_string()]);
@@ -2076,7 +2078,7 @@ mod tests {
     }
 
     fn newton() -> &'static str {
-        "relation Newton {\n force = mass * acceleration\n}\nsolve Newton with {\n force = 4200\n acceleration = 5\n}\n"
+        "signal force : N\nsignal mass : kg\nsignal acceleration : m/s^2\nrelation Newton {\n force = mass * acceleration\n}\nsolve Newton with {\n force = 4200\n acceleration = 5\n}\n"
     }
 
     #[test]
@@ -2196,7 +2198,7 @@ mod tests {
 
     #[test]
     fn sheet_import_names_every_solved_row_when_none_are_inputs() {
-        let src = "relation Chain {\n y = 2 * x\n z = y + 1\n}\nsolve Chain with {\n x = 3\n}\n";
+        let src = "signal x : scalar\nsignal y : scalar\nsignal z : scalar\nrelation Chain {\n y = 2 * x\n z = y + 1\n}\nsolve Chain with {\n x = 3\n}\n";
         let rows = parse_csv("name,value,unit\nz,9,\ny,1,\n").expect("csv");
         let err = apply_sheet(src, &rows).expect_err("both solved");
         assert_eq!(
@@ -2221,7 +2223,7 @@ mod tests {
 
     #[test]
     fn sweep_traces_an_output_across_an_input() {
-        let src = "relation Newton {\n    force = mass * acceleration\n}\n\nsolve Newton with {\n    force = 4200\n    acceleration = 100\n}\n";
+        let src = "signal force : N\nsignal mass : kg\nsignal acceleration : m/s^2\nrelation Newton {\n    force = mass * acceleration\n}\n\nsolve Newton with {\n    force = 4200\n    acceleration = 100\n}\n";
         let result = sweep(src, "force", 1000.0, 8000.0, 7).expect("sweep");
         assert_eq!(result.points.len(), 8, "steps + 1 points");
         let first = &result.points[0];
@@ -2251,7 +2253,7 @@ mod tests {
     fn sweep_marks_a_knee_for_two_objectives() {
         // quality has diminishing returns while cost is linear, so the
         // trade-off curve bows and has an interior knee.
-        let src = "relation Plan {\n    quality = sqrt(effort)\n    cost = effort * 2\n}\n\nsolve Plan with {\n    effort = 25\n    maximize quality\n    minimize cost\n}\n";
+        let src = "signal effort : scalar\nrelation Plan {\n    quality = sqrt(effort)\n    cost = effort * 2\n}\n\nsolve Plan with {\n    effort = 25\n    maximize quality\n    minimize cost\n}\n";
         let result = sweep(src, "effort", 1.0, 100.0, 20).expect("sweep");
         let knee = result
             .knee
@@ -2267,7 +2269,7 @@ mod tests {
 
     #[test]
     fn sweep_knee_of_a_straight_tradeoff_is_the_midpoint() {
-        let src = "relation Plan {\n    quality = effort\n    cost = effort * 2\n}\n\nsolve Plan with {\n    effort = 25\n    maximize quality\n    minimize cost\n}\n";
+        let src = "signal effort : scalar\nrelation Plan {\n    quality = effort\n    cost = effort * 2\n}\n\nsolve Plan with {\n    effort = 25\n    maximize quality\n    minimize cost\n}\n";
         let result = sweep(src, "effort", 1.0, 100.0, 20).expect("sweep");
         assert_eq!(result.points.len(), 21);
         assert_eq!(result.knee, Some(result.points.len() / 2));
@@ -2277,7 +2279,7 @@ mod tests {
     fn sweep_knee_follows_the_bow_not_the_largest_objective() {
         // noise is collinear with cost and a thousand times larger. Ranking
         // pairs by raw span would mark that straight pair and miss the bow.
-        let src = "relation Plan {\n    quality = sqrt(effort)\n    cost = effort * 2\n    noise = effort * 1000\n}\n\nsolve Plan with {\n    effort = 25\n    maximize quality\n    minimize cost\n    minimize noise\n}\n";
+        let src = "signal effort : scalar\nrelation Plan {\n    quality = sqrt(effort)\n    cost = effort * 2\n    noise = effort * 1000\n}\n\nsolve Plan with {\n    effort = 25\n    maximize quality\n    minimize cost\n    minimize noise\n}\n";
         let result = sweep(src, "effort", 1.0, 100.0, 20).expect("sweep");
         let knee = result.knee.expect("bowed pair should mark a knee");
         let effort = result.points[knee].x;
@@ -2360,7 +2362,7 @@ mod tests {
 
     #[test]
     fn sweep_rejects_a_variable_that_is_not_an_input() {
-        let src = "relation Newton {\n    force = mass * acceleration\n}\n\nsolve Newton with {\n    force = 4200\n    acceleration = 100\n}\n";
+        let src = "signal force : N\nsignal mass : kg\nsignal acceleration : m/s^2\nrelation Newton {\n    force = mass * acceleration\n}\n\nsolve Newton with {\n    force = 4200\n    acceleration = 100\n}\n";
         // mass is the solved blank, not an input.
         let err = sweep(src, "mass", 1.0, 10.0, 5).expect_err("mass is not an input");
         assert!(err.message.contains("mass"), "{}", err.message);

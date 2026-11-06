@@ -9,6 +9,48 @@
 // and the KBQX-KBYY-KGVW triangle; winds aloft from PSX).
 //   avenc run examples/weather_nowcast.aven
 
+// Every physical constant in this model (273.15, gas constants, g, ...) is a
+// bare numeric literal, so the quantities are carried as pure : scalar numbers.
+// Declaring the free inputs is enough; all derived fields infer.
+signal temp_c               : scalar
+signal dewpoint_c           : scalar
+signal rh_reported          : scalar
+signal pressure_hpa         : scalar
+signal nws_pressure_hpa     : scalar
+signal metar_altimeter_hpa  : scalar
+signal station_elev_m       : scalar
+signal layer_depth_m        : scalar
+signal wind_u               : scalar
+signal wind_v               : scalar
+signal x1                   : scalar
+signal y1                   : scalar
+signal u1                   : scalar
+signal v1                   : scalar
+signal x2                   : scalar
+signal y2                   : scalar
+signal u2                   : scalar
+signal v2                   : scalar
+signal x3                   : scalar
+signal y3                   : scalar
+signal u3                   : scalar
+signal v3                   : scalar
+signal aloft_u              : scalar
+signal aloft_v              : scalar
+signal aloft_height_m       : scalar
+signal steer_u              : scalar
+signal steer_v              : scalar
+signal cell_u               : scalar
+signal cell_v               : scalar
+signal radar_dbz            : scalar
+signal gauge_available      : scalar
+signal gauge_rate_mmh       : scalar
+signal upstream_dbz_15      : scalar
+signal upstream_dbz_30      : scalar
+signal upstream_dbz_60      : scalar
+signal cell_upstream_dbz_15 : scalar
+signal cell_upstream_dbz_30 : scalar
+signal cell_upstream_dbz_60 : scalar
+
 forward WeatherNowcast {
     // ----------------------------------------------------
     // 1. Moisture: saturation vapor pressure over liquid water, Ambaum (2020) Eq. 13

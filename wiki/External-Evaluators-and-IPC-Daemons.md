@@ -10,6 +10,9 @@ Aven provides two primary mechanisms to connect declarative relational models to
 
 ### 1.1 Declaration Syntax
 ```aven
+signal ambient_temp_c  : degC
+signal dewpoint_temp_c : degC
+
 relation AtmosphericDynamics using external("python", "evaluations/weather/nws_adapter.py") {
     dewpoint_spread_c = ambient_temp_c - dewpoint_temp_c
 }
@@ -48,6 +51,9 @@ To push telemetry ingestion into the **sub-10ms regime** (and achieve hundreds o
 
 ### 2.1 Declaration Syntax
 ```aven
+signal baro_altitude_m   : m
+signal gauge_elevation_m : m
+
 relation FlightAtmosphericDynamics using ipc("127.0.0.1:9090") {
     terrain_clearance_m = baro_altitude_m - gauge_elevation_m
 }
