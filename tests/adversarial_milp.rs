@@ -66,9 +66,21 @@ solve Infrastructure with {
     let run = run_model(src, &["--json"]);
     assert_eq!(run.code, 0, "must settle cleanly: {}", run.stderr);
     let line = run.stdout.lines().last().unwrap();
-    assert!(line.contains("\"optimality\": \"proven\""), "must be proven optimal: {}", line);
-    assert!(line.contains("\"servers\": 4"), "servers must be rounded to 4 (ceil of 3.5): {}", line);
-    assert!(line.contains("\"cost\": 3000"), "cost must be 500*4 + 0.02*50000 = 3000: {}", line);
+    assert!(
+        line.contains("\"optimality\": \"proven\""),
+        "must be proven optimal: {}",
+        line
+    );
+    assert!(
+        line.contains("\"servers\": 4"),
+        "servers must be rounded to 4 (ceil of 3.5): {}",
+        line
+    );
+    assert!(
+        line.contains("\"cost\": 3000"),
+        "cost must be 500*4 + 0.02*50000 = 3000: {}",
+        line
+    );
 }
 
 #[test]
@@ -89,7 +101,8 @@ solve Allocation with {
     maximize(output)
 }
 "#;
-    let ledger_file = std::env::temp_dir().join(format!("ledger_audit_{}.jsonl", std::process::id()));
+    let ledger_file =
+        std::env::temp_dir().join(format!("ledger_audit_{}.jsonl", std::process::id()));
     let ledger_path = ledger_file.to_string_lossy().into_owned();
     let run = run_model(src, &["--ledger", &ledger_path]);
     assert_eq!(run.code, 0, "run must succeed: {}", run.stderr);
@@ -103,12 +116,24 @@ solve Allocation with {
             && l.contains("duality_gap:")
             && l.contains("proven_optimal:true")
     });
-    assert!(has_cert, "ledger must contain milp_certificate fact with telemetry: {}", content);
+    assert!(
+        has_cert,
+        "ledger must contain milp_certificate fact with telemetry: {}",
+        content
+    );
 
     // Cryptographic chain verification
     let v_run = avenc(&["verify-ledger", &ledger_path]);
-    assert_eq!(v_run.code, 0, "ledger hash chain must verify: {}", v_run.stderr);
-    assert!(v_run.stdout.contains("Ledger OK"), "ledger must be intact: {}", v_run.stdout);
+    assert_eq!(
+        v_run.code, 0,
+        "ledger hash chain must verify: {}",
+        v_run.stderr
+    );
+    assert!(
+        v_run.stdout.contains("Ledger OK"),
+        "ledger must be intact: {}",
+        v_run.stdout
+    );
 }
 
 #[test]
@@ -136,5 +161,9 @@ solve ParallelSlices with {
     let run = run_model(src, &["--json"]);
     assert_eq!(run.code, 0, "must solve cleanly: {}", run.stderr);
     let line = run.stdout.lines().last().unwrap();
-    assert!(line.contains("\"optimality\": \"proven\""), "must prove optimum: {}", line);
+    assert!(
+        line.contains("\"optimality\": \"proven\""),
+        "must prove optimum: {}",
+        line
+    );
 }

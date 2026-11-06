@@ -8,6 +8,9 @@
   ],
   "workers_dev": true,
   "preview_urls": true,
+  "placement": {
+    "mode": "smart"
+  },
   "routes": [
     {
       "pattern": "avenc.dev",
@@ -27,13 +30,8 @@
       "migrations_dir": "./migrations"
     }
   ],
-  // The live weather nowcast (/weather): a site at minutes 0 and 2 of every 5, scoring at
-  // minute 4 (see TASKS_BY_CRON in src/weather/cycle.ts)
-  "triggers": {
-    "crons": ["*/5 * * * *", "2-59/5 * * * *", "4-59/5 * * * *"]
-  },
   "vars": {
-    "AVEN_VERSION": "0.6.0",
+    "AVEN_VERSION": "0.9.0",
     "REGISTRY_URL": "https://avenc.dev",
     "ENVIRONMENT": "production"
   },
@@ -41,6 +39,9 @@
     "enabled": true,
     "head_sampling_rate": 1,
     "redact_query_string": false,
+    "issues": {
+      "enabled": true
+    },
     "logs": {
       "enabled": true,
       "head_sampling_rate": 1,
@@ -52,5 +53,22 @@
       "head_sampling_rate": 1,
       "persist": true
     }
+  },
+  // `npx wrangler preview` refuses to run without this block. Vars and D1 are
+  // not inherited from the top level. There is no separate preview database.
+  "previews": {
+    "vars": {
+      "AVEN_VERSION": "0.9.0",
+      "REGISTRY_URL": "https://avenc.dev",
+      "ENVIRONMENT": "preview"
+    },
+    "d1_databases": [
+      {
+        "binding": "DB",
+        "database_name": "avenc_db",
+        "database_id": "d8aaf321-ccdb-4997-a557-e9a65d98ad68",
+        "migrations_dir": "./migrations"
+      }
+    ]
   }
 }

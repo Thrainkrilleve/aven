@@ -1,0 +1,12 @@
+// Length is known. Area and width are both blank, so this cannot settle.
+signal area   : m^2
+signal length : m
+signal width  : m
+
+relation Field {
+    area = length * width
+}
+
+solve Field with {
+    length = 8
+}

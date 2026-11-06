@@ -106,29 +106,33 @@ All mathematical functions are unary expressions and validate inputs against num
 
 ## 4. Units
 
-Aven checks dimensions across ten base dimensions: the SI quantities length, mass, time, current, temperature and amount of substance, plus angle, money, data and transactions. Values are converted to base units (SI, bit, radian, transaction, US dollar) before solving and shown back in each variable's declared unit.
+Aven checks dimensions across ten base dimensions: the SI quantities length, mass, time, current, temperature and amount of substance, plus angle, money, data and transactions. Values are converted to base units (SI, bit, radian, transaction, US dollar) before solving and shown back in each variable's declared unit. The plain-language catalog, with what each symbol measures, is [Units](UNITS.md).
 
 | Dimension | Built-in units |
 |:---|:---|
 | Length | `m`, `km`, `cm`, `mm`, `um`, `in`, `ft`, `mi`, `nmi` |
+| Area | `acre`, `ha` |
+| Volume | `L`, `mL`, `uL`, `gal` (US gallon), `bu` (US bushel) |
 | Time | `s`, `ms`, `us`, `ns`, `min`, `h`, `hr`, `day` |
-| Mass | `kg`, `g`, `mg`, `lb` |
+| Mass | `kg`, `g`, `mg`, `lb`, `oz`, `ton` (US short ton), `tonne` |
 | Current | `A`, `mA` |
 | Temperature | `K`, `degC`, `degF` (absolute temperatures; write differences in `K`) |
 | Amount | `mol` |
 | Angle | `rad`, `deg` |
+| Plain numbers | `scalar`, `ratio`, `percent`, `ppm`, `ppb`, `dB`, `dBm`, `dBZ` |
 | Money | `$`, `USD`. `EUR` and `GBP` are separate dimensions: there are no built-in exchange rates |
 | Force | `N`, `kN` |
 | Pressure | `Pa`, `hPa`, `kPa`, `MPa`, `bar`, `atm`, `psi` |
 | Energy | `J`, `kJ`, `MJ`, `Wh`, `kWh`, `MWh` |
 | Power | `W`, `mW`, `kW`, `MW` |
 | Electrical | `V`, `mV`, `kV`, `ohm` |
-| Frequency | `Hz`, `kHz`, `MHz`, `GHz` |
+| Frequency | `Hz`, `kHz`, `MHz`, `GHz`, `rpm` |
+| Speed | `mph` |
 | Data | `b`/`bit`, `B`/`byte`, `kbit`, `Mbit`, `Gbit`, `Tbit`, `kB`/`KB`, `MB`, `GB`, `TB`, `PB`, `KiB`, `MiB`, `GiB`, `TiB` |
 | Transactions | `req`, `iop`, `pkt`, `tx` |
 | Rates | `bps`, `kbps`, `Mbps`, `Gbps`, `Tbps`, `iops`, `rps`, `pph` |
 
-- **Compound units** combine these with `/`, `*` and integer `^`: `km/h`, `kg/m^3`, `kW*h`.
+- **Compound units** combine these with `/`, `*`, parentheses, and integer `^`. `*` and `/` associate left to right. `1` is a dimensionless numerator: `km/h`, `kg/m^3`, `kW*h`, `mol/L`, `1/s`, `m/s/s`, `kg/(m*s^2)`.
 - **Case**: symbols are matched exactly first (`MW` is a megawatt, `mW` a milliwatt). Another casing is accepted only when it is unambiguous (`gbps` → `Gbps`). Spellings that could mean bits or bytes (`kb`, `Mb`, `gb`, …) and other ambiguous ones (`mw`) are rejected with the valid choices listed.
 - **`unit` declarations** (`unit velocity_unit : knots, mach`) add units of a new dimension that convert only among themselves.
 

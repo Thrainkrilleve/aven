@@ -77,17 +77,25 @@ impl DebuggerSession {
     /// Renders a base-unit value in `name`'s own unit, with its label.
     pub fn show(&self, name: &str, base: f64) -> String {
         let label = self.units.label(name, self.dims.get(name));
-        let v = self.units.from_base(name, base);
-        if label.is_empty() { format!("{:.4}", v) } else { format!("{:.4} {}", v, label) }
+        let v = self.units.to_declared(name, base);
+        if label.is_empty() {
+            format!("{:.4}", v)
+        } else {
+            format!("{:.4} {}", v, label)
+        }
     }
 
     /// Old value, new value and signed change of a diff, each in `d.name`'s own unit.
     pub fn show_diff(&self, d: &VarDiff) -> (String, String, String) {
-        let old_s = d.old_value.map_or("None".to_string(), |v| self.show(&d.name, v));
-        let new_s = d.new_value.map_or("None".to_string(), |v| self.show(&d.name, v));
+        let old_s = d
+            .old_value
+            .map_or("None".to_string(), |v| self.show(&d.name, v));
+        let new_s = d
+            .new_value
+            .map_or("None".to_string(), |v| self.show(&d.name, v));
         let delta_s = match (d.old_value, d.new_value) {
             (Some(o), Some(n)) => {
-                let delta = self.units.from_base(&d.name, n) - self.units.from_base(&d.name, o);
+                let delta = self.units.to_declared(&d.name, n) - self.units.to_declared(&d.name, o);
                 format!("{:+.4}", delta)
             }
             _ => "None".to_string(),
@@ -134,7 +142,11 @@ impl DebuggerSession {
     }
 
     /// Moves the cursor to a specific tick, validating bounds.
-    pub fn goto_tick(&mut self, tick: usize, allow_irreversible: bool) -> Result<TickState, String> {
+    pub fn goto_tick(
+        &mut self,
+        tick: usize,
+        allow_irreversible: bool,
+    ) -> Result<TickState, String> {
         if tick > self.max_tick {
             return Err(format!(
                 "target tick {} exceeds maximum timeline tick {}",
@@ -144,7 +156,9 @@ impl DebuggerSession {
 
         if tick < self.current_tick {
             // Check rewind against irreversible boundary
-            self.ledger.rewind(tick, allow_irreversible).map_err(|e| e.message)?;
+            self.ledger
+                .rewind(tick, allow_irreversible)
+                .map_err(|e| e.message)?;
         }
 
         self.current_tick = tick;
@@ -158,7 +172,11 @@ impl DebuggerSession {
     }
 
     /// Rewinds backward by N ticks with commit boundary enforcement.
-    pub fn step_backward(&mut self, n: usize, allow_irreversible: bool) -> Result<TickState, String> {
+    pub fn step_backward(
+        &mut self,
+        n: usize,
+        allow_irreversible: bool,
+    ) -> Result<TickState, String> {
         let target = self.current_tick.saturating_sub(n);
         self.goto_tick(target, allow_irreversible)
     }
@@ -207,7 +225,12 @@ impl DebuggerSession {
     /// Mutates specified input variables and re-solves downstream relations.
     pub fn what_if(&self, mutations: &[(String, f64)]) -> Result<WhatIfResult, String> {
         let baseline = self.current_state();
-        let target_block = if let Some(fb) = self.module.blocks.iter().find(|b| b.kind == BlockKind::Forward) {
+        let target_block = if let Some(fb) = self
+            .module
+            .blocks
+            .iter()
+            .find(|b| b.kind == BlockKind::Forward)
+        {
             fb
         } else if let Some(rb) = self.module.blocks.first() {
             rb
@@ -229,8 +252,7 @@ impl DebuggerSession {
         }
 
         // Topo order
-        let order = crate::codegen_c::CTranspiler::topo_sort(target_block)
-            .map_err(|e| e.0)?;
+        let order = crate::codegen_c::CTranspiler::topo_sort(target_block).map_err(|e| e.0)?;
 
         // Collect baseline outputs
         let mut baseline_outputs = HashMap::new();
@@ -289,26 +311,24 @@ impl DebuggerSession {
             writer,
             "============================================================"
         )?;
+        writeln!(writer, " Aven Time-Travel Debugger (Phase 6)")?;
         writeln!(
             writer,
-            " Aven Time-Travel Debugger (Phase 6)"
+            " Model: '{}' | Timeline: 0..{} ticks",
+            self.module_path, self.max_tick
         )?;
-        writeln!(
-            writer,
-            " Model: '{}' | Timeline: 0..{} ticks"
-            , self.module_path, self.max_tick
-        )?;
-        writeln!(
-            writer,
-            " Type 'help' for commands, 'exit' to quit."
-        )?;
+        writeln!(writer, " Type 'help' for commands, 'exit' to quit.")?;
         writeln!(
             writer,
             "============================================================"
         )?;
 
         loop {
-            write!(writer, "\naven-dbg [t={}/{}]> ", self.current_tick, self.max_tick)?;
+            write!(
+                writer,
+                "\naven-dbg [t={}/{}]> ",
+                self.current_tick, self.max_tick
+            )?;
             writer.flush()?;
 
             let mut line = String::new();
@@ -343,7 +363,11 @@ impl DebuggerSession {
                             writeln!(writer, "  Stale:       {}", vs.is_stale)?;
                             writeln!(writer, "  Causes:      {:?}", vs.causes)?;
                         } else {
-                            writeln!(writer, "Variable '{}' not found at tick {}.", var, self.current_tick)?;
+                            writeln!(
+                                writer,
+                                "Variable '{}' not found at tick {}.",
+                                var, self.current_tick
+                            )?;
                         }
                     } else {
                         let st = self.current_state();
@@ -353,14 +377,23 @@ impl DebuggerSession {
                         for k in keys {
                             let v = &st.vars[k];
                             let stale_tag = if v.is_stale { " [STALE]" } else { "" };
-                            writeln!(writer, "  {:<24} = {:>20}  ({:<8}){}", v.name, self.show(&v.name, v.value), v.kind, stale_tag)?;
+                            writeln!(
+                                writer,
+                                "  {:<24} = {:>20}  ({:<8}){}",
+                                v.name,
+                                self.show(&v.name, v.value),
+                                v.kind,
+                                stale_tag
+                            )?;
                         }
                     }
                 }
                 "step" => {
                     let n = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(1);
                     match self.step_forward(n) {
-                        Ok(_) => writeln!(writer, "Stepped forward to tick {}.", self.current_tick)?,
+                        Ok(_) => {
+                            writeln!(writer, "Stepped forward to tick {}.", self.current_tick)?
+                        }
                         Err(e) => writeln!(writer, "Error: {}", e)?,
                     }
                 }
@@ -392,7 +425,10 @@ impl DebuggerSession {
                         writeln!(writer, "Usage: why <var> [--depth N]")?;
                         continue;
                     };
-                    let depth = parts.windows(2).find(|w| w[0] == "--depth").and_then(|w| w[1].parse().ok());
+                    let depth = parts
+                        .windows(2)
+                        .find(|w| w[0] == "--depth")
+                        .and_then(|w| w[1].parse().ok());
                     let tree = self.why(var, depth);
                     writeln!(writer, "{}", tree)?;
                 }
@@ -414,8 +450,16 @@ impl DebuggerSession {
                     } else {
                         for d in diffs {
                             let (old_s, new_s, delta_s) = self.show_diff(&d);
-                            let delta_s = if delta_s == "None" { String::new() } else { format!(" (Δ {})", delta_s) };
-                            writeln!(writer, "  {:<24} : {} -> {}{}", d.name, old_s, new_s, delta_s)?;
+                            let delta_s = if delta_s == "None" {
+                                String::new()
+                            } else {
+                                format!(" (Δ {})", delta_s)
+                            };
+                            writeln!(
+                                writer,
+                                "  {:<24} : {} -> {}{}",
+                                d.name, old_s, new_s, delta_s
+                            )?;
                         }
                     }
                 }
@@ -441,12 +485,29 @@ impl DebuggerSession {
 
                     match self.what_if(&[(var.to_string(), val)]) {
                         Ok(res) => {
-                            writeln!(writer, "Counterfactual Branch Result (mutating '{}' = {} at t{}):", var, self.show(var, val), res.baseline_tick)?;
-                            writeln!(writer, "  {:<24} {:>14} {:>14} {:>14}", "Output Variable", "Nominal", "Branch", "Delta")?;
-                            writeln!(writer, "  --------------------------------------------------------------------")?;
+                            writeln!(
+                                writer,
+                                "Counterfactual Branch Result (mutating '{}' = {} at t{}):",
+                                var,
+                                self.show(var, val),
+                                res.baseline_tick
+                            )?;
+                            writeln!(
+                                writer,
+                                "  {:<24} {:>14} {:>14} {:>14}",
+                                "Output Variable", "Nominal", "Branch", "Delta"
+                            )?;
+                            writeln!(
+                                writer,
+                                "  --------------------------------------------------------------------"
+                            )?;
                             for d in res.diffs {
                                 let (old_s, new_s, delta_s) = self.show_diff(&d);
-                                writeln!(writer, "  {:<24} {:>14} {:>14} {:>14}", d.name, old_s, new_s, delta_s)?;
+                                writeln!(
+                                    writer,
+                                    "  {:<24} {:>14} {:>14} {:>14}",
+                                    d.name, old_s, new_s, delta_s
+                                )?;
                             }
                         }
                         Err(e) => writeln!(writer, "What-If Error: {}", e)?,
@@ -462,7 +523,11 @@ impl DebuggerSession {
                     }
                 }
                 other => {
-                    writeln!(writer, "Unknown command '{}'. Type 'help' for available commands.", other)?;
+                    writeln!(
+                        writer,
+                        "Unknown command '{}'. Type 'help' for available commands.",
+                        other
+                    )?;
                 }
             }
         }
@@ -472,15 +537,39 @@ impl DebuggerSession {
 
     fn print_help<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
         writeln!(writer, "Available Debugger Commands:")?;
-        writeln!(writer, "  step [N]             Advance forward N ticks (default 1)")?;
-        writeln!(writer, "  prev [N] [--force]   Rewind backward N ticks (guards committed effects)")?;
+        writeln!(
+            writer,
+            "  step [N]             Advance forward N ticks (default 1)"
+        )?;
+        writeln!(
+            writer,
+            "  prev [N] [--force]   Rewind backward N ticks (guards committed effects)"
+        )?;
         writeln!(writer, "  goto <tick> [--force]Jump to logical tick")?;
-        writeln!(writer, "  vars                 List all variables at current tick")?;
-        writeln!(writer, "  inspect <var>        Display details and metadata for variable")?;
-        writeln!(writer, "  why <var> [--depth N]Show causal provenance derivation tree")?;
-        writeln!(writer, "  diff [t1] [t2]       Diff variable values between two ticks")?;
-        writeln!(writer, "  what-if <var>=<val>  Counterfactual branch exploration and setpoint diff")?;
-        writeln!(writer, "  seal                 Inspect cryptographic hash chain integrity")?;
+        writeln!(
+            writer,
+            "  vars                 List all variables at current tick"
+        )?;
+        writeln!(
+            writer,
+            "  inspect <var>        Display details and metadata for variable"
+        )?;
+        writeln!(
+            writer,
+            "  why <var> [--depth N]Show causal provenance derivation tree"
+        )?;
+        writeln!(
+            writer,
+            "  diff [t1] [t2]       Diff variable values between two ticks"
+        )?;
+        writeln!(
+            writer,
+            "  what-if <var>=<val>  Counterfactual branch exploration and setpoint diff"
+        )?;
+        writeln!(
+            writer,
+            "  seal                 Inspect cryptographic hash chain integrity"
+        )?;
         writeln!(writer, "  quit / exit          Exit debugger")?;
         Ok(())
     }

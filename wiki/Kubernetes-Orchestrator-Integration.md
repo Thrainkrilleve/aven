@@ -38,6 +38,13 @@ solve WorkloadCapacity with {
 - **Backward capacity mode:** fix the limits and maximize the traffic instead. With at most 64 pods of 100 workers, 20 ms latency, 70% utilization, 64 KB payloads and a 40 Gbps link, `avenc run` proves the maximum is **75,120 req/s**, set by the network (22 pods suffice):
 
 ```aven
+signal reqs_per_second        : scalar
+signal avg_latency_ms         : scalar
+signal target_utilization     : scalar
+signal workers_per_pod        : scalar
+signal avg_payload_kb         : scalar
+signal framing_overhead_ratio : scalar
+
 relation ServerScaling {
     int allocated_workers
     int allocated_pods

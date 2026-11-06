@@ -18,15 +18,19 @@ jobs:
       - name: Install System Dependencies
         run: |
           SUDO=$(command -v sudo || true)
-          $SUDO apt-get update && $SUDO apt-get install -y --no-install-recommends curl ca-certificates build-essential gcc z3 python3
+          $SUDO apt-get update && $SUDO apt-get install -y --no-install-recommends curl ca-certificates build-essential gcc z3 python3 libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
 
       - name: Install Rust Toolchain
         run: |
           if ! command -v rustup >/dev/null 2>&1; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none --profile minimal
           fi
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
+          export PATH="$HOME/.cargo/bin:$PATH"
+          # rust-toolchain.toml in the repo root is the compiler pin.
+          rustup show active-toolchain
+          rustup component add rustfmt clippy
 
       - name: Execute Full Test Suite
         run: |
@@ -37,6 +41,11 @@ jobs:
         run: |
           export PATH="$HOME/.cargo/bin:$PATH"
           cargo build --release
+
+      - name: Check Desktop Shell (Tauri) Against the Compiler
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo check --manifest-path app/aven-orchestrator/src-tauri/Cargo.toml
 
       - name: Run Multi-Pillar Core Demo
         run: ./target/release/avenc demo

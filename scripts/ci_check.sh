@@ -16,7 +16,7 @@ echo -e "\033[1;32mClippy linter PASSED (zero warnings).\033[0m"
 
 echo -e "\n\033[1;33m[3/4] Running release test suite (cargo test)...\033[0m"
 cargo test --release
-echo -e "\033[1;32mAll 15 unit tests PASSED.\033[0m"
+echo -e "\033[1;32mRelease test suite PASSED.\033[0m"
 
 echo -e "\n\033[1;33m[4/4] Verifying avenc release binary & demo...\033[0m"
 cargo build --release

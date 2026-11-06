@@ -6,6 +6,14 @@
 //   minimize(drives)
 //   int drives
 
+// Capacities, efficiencies and power figures as abstract numbers (: scalar);
+// drives is the integer decision variable.
+signal target_capacity : scalar
+signal drive_tb        : scalar
+signal ec_efficiency   : scalar
+signal idle_power_w    : scalar
+signal drive_power_w   : scalar
+
 relation StorageCluster {
     int drives
     raw_tb = drives * drive_tb

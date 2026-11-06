@@ -8,6 +8,10 @@ Aven is a declarative systems modeling language combining continuous non-linear 
 ## 2. Syntax Conventions
 - **Relation Blocks:**
   ```aven
+  signal drives          : scalar
+  signal drive_tb        : scalar
+  signal raid_efficiency : scalar
+
   relation PhysicalSizing {
       int drives
       raw_tb = drives * drive_tb
@@ -26,6 +30,9 @@ Aven is a declarative systems modeling language combining continuous non-linear 
   ```
 - **Live IPC Telemetry:**
   ```aven
+  signal temp_c          : degC
+  signal observed_temp_c : degC
+
   relation OutsideWeather using ipc("127.0.0.1:9090") {
       temp_c = observed_temp_c
   }

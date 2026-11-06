@@ -3,7 +3,7 @@
 // output ordering, SHA-256 model-identity hashing, domain finiteness guards, and CLI emission.
 
 use avenc::ast::{AvenModule, BlockKind};
-use avenc::codegen_c::CTranspiler;
+use avenc::codegen_c::{CTranspiler, CodegenOptions};
 use avenc::diff;
 use avenc::lexer::Lexer;
 use avenc::parser::Parser;
@@ -61,8 +61,8 @@ fn test_aeric_shim_server_capacity_golden() {
         .find(|b| b.kind == BlockKind::Forward)
         .expect("forward block");
 
-    let bundle = CTranspiler::generate_aeric_shim(blk, "server_capacity")
-        .expect("generate_aeric_shim");
+    let bundle =
+        CTranspiler::generate_aeric_shim(blk, "server_capacity").expect("generate_aeric_shim");
 
     // 1. Check exact arities
     assert_eq!(bundle.n_in, 8);
@@ -93,48 +93,67 @@ fn test_aeric_shim_server_capacity_golden() {
 
     // 4. Model SHA-256 identity hash verification
     assert_eq!(bundle.model_hash.len(), 64);
-    assert!(bundle
-        .model_hash
-        .chars()
-        .all(|c| c.is_ascii_hexdigit()));
+    assert!(bundle.model_hash.chars().all(|c| c.is_ascii_hexdigit()));
 
     // 5. Header checks
-    assert!(bundle
-        .header_h
-        .contains("#define MODEL_SERVER_CAPACITY_N_IN   8"));
-    assert!(bundle
-        .header_h
-        .contains("#define MODEL_SERVER_CAPACITY_N_OUT  5"));
-    assert!(bundle
-        .header_h
-        .contains(&format!("\"{}\"", bundle.model_hash)));
-    assert!(bundle
-        .header_h
-        .contains("int aven_solve(const double *in, size_t n_in, double *out, size_t n_out);"));
-    assert!(bundle
-        .header_h
-        .contains("const char* aven_model_hash(void);"));
+    assert!(
+        bundle
+            .header_h
+            .contains("#define MODEL_SERVER_CAPACITY_N_IN   8")
+    );
+    assert!(
+        bundle
+            .header_h
+            .contains("#define MODEL_SERVER_CAPACITY_N_OUT  5")
+    );
+    assert!(
+        bundle
+            .header_h
+            .contains(&format!("\"{}\"", bundle.model_hash))
+    );
+    assert!(
+        bundle
+            .header_h
+            .contains("int aven_solve(const double *in, size_t n_in, double *out, size_t n_out);")
+    );
+    assert!(
+        bundle
+            .header_h
+            .contains("const char* aven_model_hash(void);")
+    );
 
     // 6. Shim checks
-    assert!(bundle
-        .shim_c
-        .contains("#include \"model_server_capacity.h\""));
-    assert!(bundle
-        .shim_c
-        .contains("int aven_solve(const double *in, size_t n_in, double *out, size_t n_out)"));
-    assert!(bundle.shim_c.contains("if (n_in != 8 || n_out != 5) return 1;"));
+    assert!(
+        bundle
+            .shim_c
+            .contains("#include \"model_server_capacity.h\"")
+    );
+    assert!(
+        bundle
+            .shim_c
+            .contains("int aven_solve(const double *in, size_t n_in, double *out, size_t n_out)")
+    );
+    assert!(
+        bundle
+            .shim_c
+            .contains("if (n_in != 8 || n_out != 5) return 1;")
+    );
     assert!(bundle.shim_c.contains("aven_ProductionProfile("));
     assert!(bundle.shim_c.contains("isfinite(r_allocated_workers)"));
     assert!(bundle.shim_c.contains("return 2;"));
 
     // 7. Single unit C checks
     assert!(bundle.single_unit_c.contains("aven_ceil"));
-    assert!(bundle
-        .single_unit_c
-        .contains("AVEN_EXPORT void aven_ProductionProfile"));
-    assert!(bundle
-        .single_unit_c
-        .contains("int aven_solve(const double *in, size_t n_in, double *out, size_t n_out)"));
+    assert!(
+        bundle
+            .single_unit_c
+            .contains("AVEN_EXPORT void aven_ProductionProfile")
+    );
+    assert!(
+        bundle
+            .single_unit_c
+            .contains("int aven_solve(const double *in, size_t n_in, double *out, size_t n_out)")
+    );
 }
 
 #[test]
@@ -143,25 +162,38 @@ fn test_aeric_shim_aerodynamics_golden() {
     let module = parse_module_from_str(&src, "aerodynamics");
     let blk = &module.blocks[0];
 
-    let bundle = CTranspiler::generate_aeric_shim(blk, "aerodynamics")
-        .expect("generate_aeric_shim");
+    let bundle =
+        CTranspiler::generate_aeric_shim(blk, "aerodynamics").expect("generate_aeric_shim");
 
-    assert_eq!(bundle.n_in, 4);
-    assert_eq!(bundle.n_out, 2);
+    assert_eq!(bundle.n_in, 6);
+    assert_eq!(bundle.n_out, 3);
 
-    let expected_inputs = ["air_density", "lift_coeff", "velocity", "wing_area"];
+    // air_density is now derived from the ideal gas law, so pressure,
+    // temperature and gas_constant are the inputs in its place.
+    let expected_inputs = [
+        "gas_constant",
+        "lift_coeff",
+        "pressure",
+        "temperature",
+        "velocity",
+        "wing_area",
+    ];
     assert_eq!(bundle.input_names, expected_inputs);
 
-    let expected_outputs = ["dynamic_pressure", "lift"];
+    let expected_outputs = ["air_density", "dynamic_pressure", "lift"];
     assert_eq!(bundle.output_names, expected_outputs);
 
     assert_eq!(bundle.model_hash.len(), 64);
-    assert!(bundle
-        .header_h
-        .contains("#define MODEL_AERODYNAMICS_N_IN   4"));
-    assert!(bundle
-        .header_h
-        .contains("#define MODEL_AERODYNAMICS_N_OUT  2"));
+    assert!(
+        bundle
+            .header_h
+            .contains("#define MODEL_AERODYNAMICS_N_IN   6")
+    );
+    assert!(
+        bundle
+            .header_h
+            .contains("#define MODEL_AERODYNAMICS_N_OUT  3")
+    );
 }
 
 #[test]
@@ -207,15 +239,20 @@ fn test_aeric_shim_randomized_1_polynomial_generation() {
     assert_eq!(bundle.model_hash, bundle2.model_hash);
 
     // Single unit C must contain correct definitions and arities
-    assert!(bundle
-        .single_unit_c
-        .contains(&format!("MODEL_DYNAMIC_POLY_N_IN   {}", bundle.n_in)));
-    assert!(bundle
-        .single_unit_c
-        .contains(&format!("MODEL_DYNAMIC_POLY_N_OUT  {}", bundle.n_out)));
-    assert!(bundle
-        .single_unit_c
-        .contains(&format!("if (n_in != {} || n_out != {}) return 1;", bundle.n_in, bundle.n_out)));
+    assert!(
+        bundle
+            .single_unit_c
+            .contains(&format!("MODEL_DYNAMIC_POLY_N_IN   {}", bundle.n_in))
+    );
+    assert!(
+        bundle
+            .single_unit_c
+            .contains(&format!("MODEL_DYNAMIC_POLY_N_OUT  {}", bundle.n_out))
+    );
+    assert!(bundle.single_unit_c.contains(&format!(
+        "if (n_in != {} || n_out != {}) return 1;",
+        bundle.n_in, bundle.n_out
+    )));
 }
 
 #[test]
@@ -243,9 +280,11 @@ fn test_aeric_shim_randomized_2_domain_fault_guards() {
     assert!(bundle.single_unit_c.contains("aven_ceil"));
 
     // Finiteness check must guard the actuator output
-    assert!(bundle
-        .single_unit_c
-        .contains(&format!("isfinite(r_{})", out_ratio)));
+    assert!(
+        bundle
+            .single_unit_c
+            .contains(&format!("isfinite(r_{})", out_ratio))
+    );
     assert!(bundle.single_unit_c.contains("return 2;"));
 
     // Verify differential math against diff::eval_expr
@@ -286,8 +325,8 @@ fn test_aeric_shim_randomized_3_rapid_model_cycling() {
         let module = parse_module_from_str(&model_src, &format!("rapid_{}", cycle));
         let blk = &module.blocks[0];
 
-        let bundle = CTranspiler::generate_aeric_shim(blk, &format!("rapid_{}", cycle))
-            .expect("rapid shim");
+        let bundle =
+            CTranspiler::generate_aeric_shim(blk, &format!("rapid_{}", cycle)).expect("rapid shim");
 
         assert_eq!(bundle.n_in, 3);
         assert_eq!(bundle.n_out, 2);
@@ -323,7 +362,10 @@ fn test_aeric_shim_cli_out_dir_emission() {
         .status()
         .expect("execute avenc");
 
-    assert!(status.success(), "avenc emit-c --aeric-shim --out-dir failed");
+    assert!(
+        status.success(),
+        "avenc emit-c --aeric-shim --out-dir failed"
+    );
 
     let model_c_path = temp_dir.join("model_server_capacity.c");
     let model_h_path = temp_dir.join("model_server_capacity.h");
@@ -338,7 +380,10 @@ fn test_aeric_shim_cli_out_dir_emission() {
     let shim_content = fs::read_to_string(&shim_c_path).expect("read shim");
 
     assert!(c_content.contains("aven_ProductionProfile"));
-    assert!(!c_content.contains("int main(void)"), "library C file must not contain main()");
+    assert!(
+        !c_content.contains("int main(void)"),
+        "library C file must not contain main()"
+    );
 
     assert!(h_content.contains("MODEL_SERVER_CAPACITY_N_IN"));
     assert!(h_content.contains("MODEL_SERVER_CAPACITY_N_OUT"));
@@ -349,4 +394,55 @@ fn test_aeric_shim_cli_out_dir_emission() {
 
     // Clean up temporary test directory
     let _ = fs::remove_dir_all(&temp_dir);
+}
+
+// ---------------------------------------------------------------------------
+// Drift gate: a `forward` block must not diverge from the `relation` it mirrors.
+//
+// examples/server_capacity.aven ships BOTH an omnidirectional `relation
+// WorkerScaling` and a direction-pinned `forward ProductionProfile` with the
+// same equations. The forward block is what `emit-c` compiles, but the solver
+// runs the relation — and nothing stops the two hand-kept copies drifting apart.
+// This gate makes drift a build failure: the C the compiler DERIVES from the
+// relation (topo-sorting the equations itself) must be byte-identical to the C
+// it emits from the forward block, once the block's own name is normalized away.
+// ---------------------------------------------------------------------------
+#[test]
+fn forward_block_does_not_drift_from_relation() {
+    let src = fs::read_to_string("examples/server_capacity.aven").expect("read server_capacity");
+    let module = parse_module_from_str(&src, "server_capacity");
+    let relation = module
+        .blocks
+        .iter()
+        .find(|b| b.kind == BlockKind::Relation)
+        .expect("server_capacity has a relation block");
+    let forward = module
+        .blocks
+        .iter()
+        .find(|b| b.kind == BlockKind::Forward)
+        .expect("server_capacity has a forward block");
+
+    // Emit each as a bare library function (no demo main → no dependence on the
+    // solve bindings). topo_sort derives the firing order from the equations, so
+    // the comparison is purely about equation content, not source ordering.
+    let opts = CodegenOptions {
+        no_main: true,
+        ..Default::default()
+    };
+    let empty = HashMap::new();
+    let c_from_relation = CTranspiler::transpile_block_with_options(relation, &empty, &opts)
+        .expect("compiler derives C from the relation");
+    let c_from_forward = CTranspiler::transpile_block_with_options(forward, &empty, &opts)
+        .expect("compiler emits C from the forward block");
+
+    // The only legitimate difference is the function name carrying the block name.
+    let norm_relation = c_from_relation.replace(relation.name.as_str(), "BLOCK");
+    let norm_forward = c_from_forward.replace(forward.name.as_str(), "BLOCK");
+    assert_eq!(
+        norm_relation, norm_forward,
+        "forward block '{}' has drifted from relation '{}': emit-c derives different C \
+         from each. Re-sync the forward block with the relation, or delete it and let \
+         emit-c derive the direction from the relation.",
+        forward.name, relation.name
+    );
 }

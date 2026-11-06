@@ -7,11 +7,11 @@ use avenc::ast::AvenModule;
 use avenc::codegen_wasm::WasmTranspiler;
 use avenc::evaluator::Evaluator;
 use avenc::lexer::Lexer;
-use avenc::package::{DeclaredUnitSpec, DependencySpec, PackageManifest, PackageManager};
+use avenc::package::{DeclaredUnitSpec, DependencySpec, PackageManager, PackageManifest};
 use avenc::parser::Parser;
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -101,7 +101,8 @@ fn test_package_manifest_and_pack_golden() {
     // 5. Test import resolution
     let test_model = "import thermodynamics;\n\
                       solve HeatPump with { voltage_v = 240, current_a = 15, operating_hours = 8 }\n";
-    let inlined = PackageManager::resolve_imports(test_model, &[dir.clone()]).expect("resolve imports");
+    let inlined = PackageManager::resolve_imports(test_model, std::slice::from_ref(&dir))
+        .expect("resolve imports");
     assert!(inlined.contains("relation thermodynamicsRelations"));
     assert!(inlined.contains("energy_kwh"));
 
@@ -123,7 +124,11 @@ fn test_wasm_wat_emission_golden() {
     // Check WAT contents
     assert!(bundle.wat.contains("(module"));
     assert!(bundle.wat.contains("(memory (export \"memory\") 1)"));
-    assert!(bundle.wat.contains("(func $ProductionProfile (export \"ProductionProfile\")"));
+    assert!(
+        bundle
+            .wat
+            .contains("(func $ProductionProfile (export \"ProductionProfile\")")
+    );
     assert!(bundle.wat.contains("(func (export \"aven_solve\")"));
     assert!(bundle.wat.contains("f64.load"));
     assert!(bundle.wat.contains("f64.store"));
@@ -186,7 +191,7 @@ fn test_wasm_binary_emission_and_node_execution() {
         );
 
         let output = Command::new("node")
-            .args(&["-e", &node_script])
+            .args(["-e", &node_script])
             .output()
             .expect("run node wasm");
 
@@ -205,7 +210,8 @@ fn test_wasm_binary_emission_and_node_execution() {
 // ---------------------------------------------------------------------------
 #[test]
 fn test_kill_switch_financial_model_golden() {
-    let src = fs::read_to_string("examples/portfolio_rebalancing.aven").expect("read portfolio_rebalancing");
+    let src = fs::read_to_string("examples/portfolio_rebalancing.aven")
+        .expect("read portfolio_rebalancing");
     let module = parse_module_from_str(&src, "portfolio_rebalancing");
 
     let mut inputs = avenc::evaluator::VarMap::new();
@@ -219,13 +225,25 @@ fn test_kill_switch_financial_model_golden() {
 
     assert_eq!(*result.values.get("total_weight").unwrap(), 1.0);
     let ret = *result.values.get("expected_return_pct").unwrap();
-    assert!((ret - 8.025).abs() < 1e-3, "expected return 8.025, got {}", ret);
+    assert!(
+        (ret - 8.025).abs() < 1e-3,
+        "expected return 8.025, got {}",
+        ret
+    );
 
     let vol = *result.values.get("portfolio_vol_pct").unwrap();
-    assert!((vol - 7.9971).abs() < 1e-2, "expected vol ~8.0, got {}", vol);
+    assert!(
+        (vol - 7.9971).abs() < 1e-2,
+        "expected vol ~8.0, got {}",
+        vol
+    );
 
     let sharpe = *result.values.get("sharpe_ratio").unwrap();
-    assert!((sharpe - 0.5658).abs() < 1e-3, "expected sharpe 0.5658, got {}", sharpe);
+    assert!(
+        (sharpe - 0.5658).abs() < 1e-3,
+        "expected sharpe 0.5658, got {}",
+        sharpe
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -233,7 +251,8 @@ fn test_kill_switch_financial_model_golden() {
 // ---------------------------------------------------------------------------
 #[test]
 fn test_kill_switch_quadcopter_avionics_golden() {
-    let src = fs::read_to_string("examples/quadcopter_avionics.aven").expect("read quadcopter_avionics");
+    let src =
+        fs::read_to_string("examples/quadcopter_avionics.aven").expect("read quadcopter_avionics");
     let module = parse_module_from_str(&src, "quadcopter_avionics");
 
     let mut inputs = avenc::evaluator::VarMap::new();
@@ -249,10 +268,18 @@ fn test_kill_switch_quadcopter_avionics_golden() {
     assert!(twr > 5.0 && twr < 6.0, "expected TWR ~5.5, got {}", twr);
 
     let accel = *result.values.get("climb_accel_mps2").unwrap();
-    assert!(accel > 40.0 && accel < 50.0, "expected climb accel ~44.2, got {}", accel);
+    assert!(
+        accel > 40.0 && accel < 50.0,
+        "expected climb accel ~44.2, got {}",
+        accel
+    );
 
     let power = *result.values.get("delivered_power_w").unwrap();
-    assert!(power > 3000.0 && power < 3500.0, "expected power ~3223W, got {}", power);
+    assert!(
+        power > 3000.0 && power < 3500.0,
+        "expected power ~3223W, got {}",
+        power
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -281,13 +308,11 @@ fn test_randomized_1_package_manifest_and_dependency_graph() {
             license: "MIT".to_string(),
             entry: "lib.aven".to_string(),
             dependencies: HashMap::new(),
-            units: vec![
-                DeclaredUnitSpec {
-                    name: format!("unit_{}", i),
-                    dimension: "Pressure".to_string(),
-                    scale: prng.next_f64_range(10.0, 1000.0),
-                },
-            ],
+            units: vec![DeclaredUnitSpec {
+                name: format!("unit_{}", i),
+                dimension: "Pressure".to_string(),
+                scale: prng.next_f64_range(10.0, 1000.0),
+            }],
         };
 
         if i > 0 {
@@ -313,7 +338,10 @@ fn test_randomized_1_package_manifest_and_dependency_graph() {
         fs::write(pkg_dir.join("Aven.toml"), &toml_str).unwrap();
         fs::write(
             pkg_dir.join("lib.aven"),
-            format!("relation Rel{} {{ out_val = in_val * 2 }}\n", i),
+            format!(
+                "signal in_val : scalar\nrelation Rel{} {{ out_val = in_val * 2 }}\n",
+                i
+            ),
         )
         .unwrap();
 
@@ -378,7 +406,10 @@ fn test_randomized_2_wasm_bytecode_generation_and_opcodes() {
                 x = test_x
             );
 
-            let out = Command::new("node").args(&["-e", &node_code]).output().unwrap();
+            let out = Command::new("node")
+                .args(["-e", &node_code])
+                .output()
+                .unwrap();
             assert!(out.status.success());
             let out_str = String::from_utf8_lossy(&out.stdout);
             assert!(out_str.contains("COMPUTED="));
@@ -441,7 +472,10 @@ fn test_randomized_3_portfolio_rebalancing_counterfactual_stress() {
         assert!((ret - expected_ret).abs() < 1e-4);
 
         let sharpe = *result.values.get("sharpe_ratio").unwrap();
-        assert!(sharpe > 0.0, "sharpe ratio must remain positive in normal market");
+        assert!(
+            sharpe > 0.0,
+            "sharpe ratio must remain positive in normal market"
+        );
     }
 }
 
@@ -455,7 +489,7 @@ fn test_cli_pkg_and_wasm_subprocesses() {
 
     // 1. avenc emit-wasm --wat
     let wat_output = Command::new(cargo)
-        .args(&["emit-wasm", "examples/server_capacity.aven", "--wat"])
+        .args(["emit-wasm", "examples/server_capacity.aven", "--wat"])
         .output()
         .expect("run avenc emit-wasm --wat");
 
@@ -467,7 +501,7 @@ fn test_cli_pkg_and_wasm_subprocesses() {
     // 2. avenc emit-wasm -o <out.wasm>
     let out_wasm = dir.join("test_model.wasm");
     let wasm_output = Command::new(cargo)
-        .args(&[
+        .args([
             "emit-wasm",
             "examples/portfolio_rebalancing.aven",
             "-o",
@@ -486,7 +520,7 @@ fn test_cli_pkg_and_wasm_subprocesses() {
     fs::create_dir_all(&pkg_dir).unwrap();
     let init_output = Command::new(cargo)
         .current_dir(&pkg_dir)
-        .args(&["pkg", "init", "aerodynamics"])
+        .args(["pkg", "init", "aerodynamics"])
         .output()
         .expect("run avenc pkg init");
 
@@ -497,7 +531,7 @@ fn test_cli_pkg_and_wasm_subprocesses() {
     // 4. avenc pkg pack
     let pack_output = Command::new(cargo)
         .current_dir(&pkg_dir)
-        .args(&["pkg", "pack"])
+        .args(["pkg", "pack"])
         .output()
         .expect("run avenc pkg pack");
 
@@ -524,11 +558,18 @@ fn test_wasm_pow_matches_native_evaluation() {
     let bundle = WasmTranspiler::transpile(&module).expect("integer and 0.5 exponents compile");
     assert!(!bundle.wat.contains("approximation"));
 
-    assert!(!bundle.wat.contains("(import"), "integer and 0.5 exponents need no host math");
+    assert!(
+        !bundle.wat.contains("(import"),
+        "integer and 0.5 exponents need no host math"
+    );
 
     let fractional = parse_module_from_str("forward Frac {\n y = x ^ 1.5\n}\n", "frac");
     let frac = WasmTranspiler::transpile(&fractional).expect("other exponents call the host's pow");
-    assert!(frac.wat.contains("(import \"math\" \"pow\""), "{}", frac.wat);
+    assert!(
+        frac.wat.contains("(import \"math\" \"pow\""),
+        "{}",
+        frac.wat
+    );
 
     if Command::new("node").arg("--version").output().is_err() {
         return;
@@ -546,7 +587,10 @@ fn test_wasm_pow_matches_native_evaluation() {
          }}).catch(e => {{ console.error(e); process.exit(1); }});",
         file = wasm_path.to_str().unwrap().replace('\\', "/")
     );
-    let out = Command::new("node").args(["-e", &node_code]).output().unwrap();
+    let out = Command::new("node")
+        .args(["-e", &node_code])
+        .output()
+        .unwrap();
     assert!(out.status.success(), "node wasm execution failed");
     let got: Vec<f64> = String::from_utf8_lossy(&out.stdout)
         .trim()
@@ -561,7 +605,13 @@ fn test_wasm_pow_matches_native_evaluation() {
     expected.insert("nested", 36.0);
     for (i, name) in bundle.output_names.iter().enumerate() {
         let want = expected[name.as_str()];
-        assert!((got[i] - want).abs() < 1e-12, "{}: wasm {} != {}", name, got[i], want);
+        assert!(
+            (got[i] - want).abs() < 1e-12,
+            "{}: wasm {} != {}",
+            name,
+            got[i],
+            want
+        );
     }
     let _ = fs::remove_dir_all(&dir);
 }
@@ -575,16 +625,28 @@ fn test_pkg_install_then_import_from_another_project() {
     let lib_dir = create_temp_dir("pkg_lib");
     let app_dir = create_temp_dir("pkg_app");
 
-    let run = |args: &[&str], dir: &PathBuf| {
-        let out = Command::new(avenc).args(args).current_dir(dir).output().unwrap();
-        assert!(out.status.success(), "avenc {:?} failed: {}", args, String::from_utf8_lossy(&out.stderr));
+    let run = |args: &[&str], dir: &Path| {
+        let out = Command::new(avenc)
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "avenc {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        );
         String::from_utf8_lossy(&out.stdout).into_owned()
     };
 
     run(&["pkg", "init", "power_lib"], &lib_dir);
     run(&["pkg", "pack"], &lib_dir);
     let archive = lib_dir.join("power_lib-0.1.0.avenpkg");
-    assert!(archive.exists(), "pkg pack must write <name>-<version>.avenpkg");
+    assert!(
+        archive.exists(),
+        "pkg pack must write <name>-<version>.avenpkg"
+    );
     run(&["pkg", "install", archive.to_str().unwrap()], &app_dir);
 
     // The app directory holds no package source; the import must come from .aven/packages
@@ -609,7 +671,7 @@ fn test_wasm_builtins_match_avenc_run() {
     if Command::new("node").arg("--version").output().is_err() {
         return;
     }
-    let src = "forward Fns {\n\
+    let src = "signal x : scalar\nforward Fns {\n\
                    f = floor(x)\n\
                    c = ceil(x)\n\
                    r = round(x)\n\
@@ -625,7 +687,19 @@ fn test_wasm_builtins_match_avenc_run() {
     let dir = create_temp_dir("wasm_builtins");
     let wasm_path = dir.join("fns.wasm");
     fs::write(&wasm_path, &bundle.wasm_bytes).unwrap();
-    let inputs = [2.5, -2.5, 0.5, -0.5, 1.0000000000000002, 2.9999999999, -0.0, 0.49999999999999994, 4.5, -3.7, 123.456];
+    let inputs = [
+        2.5,
+        -2.5,
+        0.5,
+        -0.5,
+        1.0000000000000002,
+        2.9999999999,
+        -0.0,
+        0.49999999999999994,
+        4.5,
+        -3.7,
+        123.456,
+    ];
     let node_code = format!(
         "const bytes = require('fs').readFileSync('{file}');\n\
          const math = {{ exp: Math.exp, ln: Math.log, sin: Math.sin, cos: Math.cos, tan: Math.tan, pow: Math.pow }};\n\
@@ -640,31 +714,59 @@ fn test_wasm_builtins_match_avenc_run() {
              console.log(rows.join(';'));\n\
          }}).catch(e => {{ console.error(e); process.exit(1); }});",
         file = wasm_path.to_str().unwrap().replace('\\', "/"),
-        xs = inputs.iter().map(|x| format!("{:?}", x)).collect::<Vec<_>>().join(","),
+        xs = inputs
+            .iter()
+            .map(|x| format!("{:?}", x))
+            .collect::<Vec<_>>()
+            .join(","),
         n = bundle.output_names.len()
     );
-    let out = Command::new("node").args(["-e", &node_code]).output().unwrap();
-    assert!(out.status.success(), "node wasm execution failed: {}", String::from_utf8_lossy(&out.stderr));
+    let out = Command::new("node")
+        .args(["-e", &node_code])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "node wasm execution failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     for (row, &x) in stdout.trim().split(';').zip(inputs.iter()) {
         let got: Vec<f64> = row.split(',').map(|v| v.parse().unwrap()).collect();
         let model = format!("{}\nsolve Fns with {{\n    x = {:?}\n}}\n", src, x);
         let path = dir.join("run.aven");
         fs::write(&path, model).unwrap();
-        let native = Command::new(env!("CARGO_BIN_EXE_avenc")).args(["run", path.to_str().unwrap(), "--json"]).output().unwrap();
+        let native = Command::new(env!("CARGO_BIN_EXE_avenc"))
+            .args(["run", path.to_str().unwrap(), "--json"])
+            .output()
+            .unwrap();
         let text = String::from_utf8_lossy(&native.stdout);
         let line = text.trim().lines().last().unwrap().to_string();
         for (i, name) in bundle.output_names.iter().enumerate() {
             let key = format!("\"{}\":", name);
-            let start = line.find(&key).unwrap_or_else(|| panic!("{} missing in {}", name, line)) + key.len();
+            let start = line
+                .find(&key)
+                .unwrap_or_else(|| panic!("{} missing in {}", name, line))
+                + key.len();
             let rest = &line[start..];
-            let end = rest.find(|c| c == ',' || c == '}').unwrap();
+            let end = rest.find([',', '}']).unwrap();
             let want: f64 = rest[..end].trim().parse().unwrap();
             if ["f", "c", "r", "s", "snapped"].contains(&name.as_str()) {
-                assert_eq!(got[i], want, "{}({}): wasm {} vs avenc run {}", name, x, got[i], want);
+                assert_eq!(
+                    got[i], want,
+                    "{}({}): wasm {} vs avenc run {}",
+                    name, x, got[i], want
+                );
             } else {
                 let rel = (got[i] - want).abs() / want.abs().max(1e-300);
-                assert!(rel < 1e-14, "{}({}): wasm {} vs avenc run {}", name, x, got[i], want);
+                assert!(
+                    rel < 1e-14,
+                    "{}({}): wasm {} vs avenc run {}",
+                    name,
+                    x,
+                    got[i],
+                    want
+                );
             }
         }
     }

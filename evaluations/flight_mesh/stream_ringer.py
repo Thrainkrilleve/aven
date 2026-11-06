@@ -408,7 +408,7 @@ def main():
     parser = argparse.ArgumentParser(description="Aven Multi-Stream Physical Stress Benchmark")
     parser.add_argument("--count", type=int, default=100, help="Number of flight vectors to evaluate (default: 100)")
     parser.add_argument("--concurrency", type=int, default=4, help="Parallel worker threads (default: 4)")
-    parser.add_argument("--ledger", type=str, default="evaluations/flight_mesh/flight_mesh_audit_ledger.jsonl", help="Output ledger")
+    parser.add_argument("--ledger", type=str, default="evaluations/flight_mesh/flight_mesh_cycle_log.jsonl", help="Output ledger")
     parser.add_argument("--report", type=str, default="evaluations/flight_mesh/flight_mesh_summary_report.md", help="Output report")
     parser.add_argument("--summary-only", action="store_true", help="Compile report from existing ledger")
     parser.add_argument("--clean", action="store_true", help="Truncate ledger before benchmark run to ensure pure sample")

@@ -1,0 +1,25 @@
+// thermostat.aven — one control step of a cooling thermostat.
+//
+// A relation, so it solves in any direction: give it a temperature and it
+// sizes the compressor draw, or give it a power budget and it tells you the
+// temperature that budget holds. Sign convention: temp_delta_c is how far the
+// room is ABOVE the setpoint, so cooling power and compressor current are
+// positive when cooling is needed.
+
+signal current_temp_c               : degC
+signal target_temp_c                : degC
+signal thermal_conductivity_w_per_c : W/degC
+signal line_voltage_v               : V
+
+relation Thermostat {
+    temp_delta_c    = current_temp_c - target_temp_c
+    cooling_power_w = temp_delta_c * thermal_conductivity_w_per_c
+    compressor_amps = cooling_power_w / line_voltage_v
+}
+
+solve Thermostat with {
+    current_temp_c               = 29.5
+    target_temp_c                = 22.0
+    thermal_conductivity_w_per_c = 120.0
+    line_voltage_v               = 240.0
+}

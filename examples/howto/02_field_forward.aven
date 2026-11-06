@@ -1,0 +1,13 @@
+// You know the length and the width. Area is the blank, so it is computed.
+signal area   : m^2
+signal length : m
+signal width  : m
+
+relation Field {
+    area = length * width
+}
+
+solve Field with {
+    length = 8
+    width = 5
+}

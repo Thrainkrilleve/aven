@@ -1,94 +1,61 @@
-# Aven Website & Edge Services (`avenc.dev`)
+# Aven website (`avenc.dev`)
 
-Website, in-browser WebAssembly playground, live weather nowcast, and D1-backed package index for **Aven**.
+Static pages and an in-browser solver demo for **Aven**. The homepage demo loads `public/wasm/solver.wasm`, the Newton solver compiled from `solver-wasm/`, and solves `examples/server_capacity.aven` in the browser. Nothing from that demo is sent to a server.
 
 ---
 
 ## Architecture
 
-- **Static site:** Plain HTML, CSS and ES modules in `public/`, served by the platform's static-assets layer. Assets are served *without* running the worker, so response headers for them live in `public/_headers`.
-- **Edge worker (TypeScript):** `src/index.ts` handles paths with no matching file (the `/api/v1/*` routes, `/p/:id` share redirects, the 404 page) and the scheduled job.
-- **Scheduled job:** three cron triggers (`wrangler.jsonc`) run the live weather nowcast (`src/weather/`): a site at minutes 0 and 2 of every 5, and scoring at minute 4, so each invocation stays small. Described below.
-- **Database:** D1 (`env.DB`): the package index, legacy shared-model links, and the nowcast's runs, forecasts and cached source data.
-- **Models:** WebAssembly modules emitted by `avenc emit-wasm` from `forward` blocks in `examples/`. The playground runs them in the browser; the scheduled job runs the weather model in the worker. `scripts/build-models.mjs` regenerates them and checks every output against `avenc run`.
+- **Static site:** HTML, CSS and ES modules in `public/`, served by the platform's static-assets layer. Response headers for those files live in `public/_headers`.
+- **Edge worker (TypeScript):** `src/index.ts` runs only for paths with no matching file: `/api/v1/*`, `/p/:id`, and the 404 page.
+- **Database:** D1 (`env.DB`) holds package rows and legacy shared-model rows. The pages do not call the API. Installing a package by name is not implemented; `POST /api/v1/packages` answers 503 until `REGISTRY_PUBLISH_TOKEN` is set.
+- **Browser solver:** `solver-wasm/` is a cdylib over `avenc`. `solver-wasm/build.sh` writes `public/wasm/solver.wasm`. `public/solver-demo.js` copies the `WorkerScaling` relation. The repository's `scripts/check_docs.py` fails if those assignments drift from `examples/server_capacity.aven`.
 
 ---
 
-## Directory Structure
+## Directory structure
 
 ```text
 web/
-├── wrangler.jsonc               # Worker, static assets, D1 binding, cron trigger, vars
-├── package.json                 # Scripts: dev, deploy, build:models, typecheck, db:migrate:*
-├── scripts/
-│   ├── build-models.mjs         # Rebuilds public/models/ from examples/ and verifies them
-│   └── weather-local.mjs        # Runs the nowcast cycle, its API and the site in Node
-├── migrations/                  # D1 schema, applied in order
+├── wrangler.jsonc          # Worker, static assets, D1 binding, vars
+├── package.json            # dev, deploy, typecheck, db:migrate:*
+├── migrations/             # D1 schema, applied in order
+├── solver-wasm/            # Browser solver (alloc / solve / dealloc)
+│   ├── build.sh            # Rebuilds public/wasm/solver.wasm
+│   └── src/lib.rs
 ├── src/
-│   ├── index.ts                 # API routes, share redirects, scheduled handler
-│   ├── types.ts, wasm.d.ts
-│   └── weather/
-│       ├── sources.ts           # One function per live data source
-│       ├── cycle.ts             # One scheduled run: sites, data, model, forecasts, scoring
-│       └── api.ts               # /api/v1/weather/* (read-only)
+│   ├── index.ts            # API routes and /p/:id redirect
+│   └── types.ts, wasm.d.ts
 └── public/
-    ├── index.html               # Home page and playground
-    ├── weather.html, weather.js # Live radar nowcast
-    ├── docs.html                # Documentation
-    ├── registry.html            # Package index
+    ├── index.html          # Home page and live demo
+    ├── docs.html           # Documentation
     ├── 404.html
-    ├── styles.css               # Shared design system
-    ├── site.js                  # Nav, copy buttons, syntax highlighting, docs TOC
-    ├── app.js                   # Playground UI (presentation only)
-    ├── wasm_engine.js           # Loads and runs the emitted WebAssembly
-    ├── aven_math.js             # Host math (exp, ln, trig, pow) for models that import it
-    ├── models/                  # *.wasm + manifest.json (generated; do not edit)
-    ├── install.sh, install.ps1  # Build-from-source installers (cargo install)
+    ├── solver-demo.js      # Demo UI
+    ├── site.js             # Nav, copy buttons, syntax highlighting
+    ├── styles.css
+    ├── wasm/solver.wasm    # Built by solver-wasm/build.sh
+    ├── install.sh, install.ps1
+    ├── robots.txt
+    ├── sitemap.xml
     ├── favicon.svg
-    └── _headers                 # Security and cache headers for static assets
+    └── _headers
 ```
 
 ---
 
-## Updating the models
+## Rebuilding the browser solver
 
-The playground and the weather job read input order, output order, source text, defaults and each module's SHA-256 from `public/models/manifest.json`, so nothing can drift out of step with the compiled modules. After changing a `forward` block in `examples/` or the WASM code generator:
+Requires the `wasm32-unknown-unknown` target. `wasm-opt` is optional.
 
 ```bash
-npm run build:models
+web/solver-wasm/build.sh
 ```
 
-The script fails if any WASM output differs from `avenc run --json` on the example's own solve block. Slider ranges and labels live in `public/app.js`.
+The script copies the release wasm to `public/wasm/solver.wasm`.
 
 ---
 
-## Live weather nowcast (`/weather`)
-
-Each task (`src/weather/cycle.ts`) first writes a row to `weather_cycles` and completes it when done, so a task the platform stopped (CPU or time limit) shows on the page as started and never finished. A site task:
-
-1. Reads the list of NOAA nowCOAST radar images and the NEXRAD storm cells being tracked (Iowa Environmental Mesonet).
-2. Picks a site: the strongest cell in the contiguous U.S. not visited in the last 20 minutes, else a fixed airport in rotation.
-3. For each site, gathers METAR stations in a box around it (AWC), the primary station's NWS observation, winds aloft (AWC, cached an hour), radar reflectivity at the site and upstream along the steering wind and the storm motion (all from one named image), the nearest USGS rain gauge, NWS alerts and the NWS hourly forecast.
-4. Runs `models/weather.wasm` (`examples/weather_nowcast.aven`) and applies the data-quality gate (the bounds of `evaluations/possible/weather-predict.aven`).
-5. Stores the inputs, outputs and every request in `weather_runs`, and the forecasts (+15, +30, +60 min; steering wind, storm motion, persistence, each with the NWS hourly forecast's chance of rain for that hour) in `weather_forecasts`.
-
-The scoring task scores due forecasts against the archived radar image nearest their valid time. A site task makes about 15 outbound requests and a scoring task a few (at most 45; Workers limit subrequests per invocation, 50 on the free plan). Replayed from recorded responses in Node, a whole two-site cycle takes 11–24 ms of CPU; split in three, each task is a fraction of that. Workers on the free plan get 10 ms of CPU per invocation, so if `weather_cycles` shows tasks that never finish, the account needs the paid plan or the work split further.
-
-To see what the scheduled tasks are doing on Cloudflare: `npx wrangler tail avenc-web`, or the worker's **Logs** tab (observability is enabled in `wrangler.jsonc`).
-
-To run it outside Cloudflare (for instance where `wrangler dev` has no internet access):
-
-```bash
-node scripts/weather-local.mjs cycle            # two sites and scoring into weather-local.sqlite
-node scripts/weather-local.mjs serve --every 5  # site + API on http://localhost:8790, a cycle every 5 min
-node scripts/weather-local.mjs api /api/v1/weather/skill
-```
-
-Behind an HTTP proxy, set `NODE_USE_ENV_PROXY=1`.
-
----
-
-## Local Development
+## Local development
 
 ```bash
 cd web
@@ -97,21 +64,19 @@ npm run db:migrate:local
 npm run dev                       # http://localhost:8787
 ```
 
-`npx wrangler dev --test-scheduled` also exposes `/__scheduled` to trigger the cron handler.
-
 ---
 
-## Production Deployment
+## Production deployment
 
-The worker is configured for the existing `avenc_db` D1 database (see `wrangler.jsonc`).
+The worker uses the existing `avenc_db` D1 database (`wrangler.jsonc`).
 
 ```bash
 npm run typecheck
-npm run db:migrate:prod   # applies pending migrations (0002–0007 as of this release)
+npm run db:migrate:prod
 npm run deploy
 ```
 
-Publishing packages through the API requires a secret; without it, `POST /api/v1/packages` returns 503:
+Publishing through the API requires a secret. Without it, `POST /api/v1/packages` returns 503:
 
 ```bash
 npx wrangler secret put REGISTRY_PUBLISH_TOKEN
@@ -121,21 +86,19 @@ The custom domain `avenc.dev` is set by `routes` in `wrangler.jsonc`.
 
 ---
 
-## API Endpoints
+## API endpoints
 
 | Endpoint | Method | Description |
 |:---|:---:|:---|
+| `/robots.txt` | `GET` | Crawl rules (`text/plain`). Allows `/`, disallows `/api/`, and declares Content-Signal preferences. |
+| `/sitemap.xml` | `GET` | Public page URLs. `scripts/check_docs.py` fails if these drift from the HTML pages. |
 | `/install.sh`, `/install.ps1` | `GET` | Static installers (build from source with `cargo install`). |
-| `/p/:id` | `GET` | Legacy share links; redirects to `/?model=:id#playground`. |
+| `/p/:id` | `GET` | Old share links. Redirects to `/#demo`. The id is not loaded. |
 | `/api/v1/stats` | `GET` | Row counts from D1. |
-| `/api/v1/packages` | `GET` | Searches the package index (`?q=`, `?limit=`). |
-| `/api/v1/packages/:name` | `GET` | Versions and SHA-256 digests for one package. |
+| `/api/v1/packages` | `GET` | Searches package rows (`?q=`, `?limit=`). |
+| `/api/v1/packages/:name` | `GET` | Versions and SHA-256 digests for one name. |
 | `/api/v1/packages` | `POST` | Adds a package record. Requires `Authorization: Bearer $REGISTRY_PUBLISH_TOKEN`. |
-| `/api/v1/models/:id` | `GET` | A legacy shared model (its category is the playground model). |
-| `/api/v1/models/share`, `/api/v1/telemetry` | `POST` | Removed; answer `410 Gone`. |
-| `/api/v1/weather/latest` | `GET` | Newest nowcast runs with inputs, outputs, sources and forecasts (`?limit=`, up to 40). |
-| `/api/v1/weather/runs/:id` | `GET` | One run in full. |
-| `/api/v1/weather/skill` | `GET` | Rain / no-rain calls that matched the radar, by lead and forecaster (Aven storm motion, Aven winds aloft, no change, NWS), with hits, misses, false alarms, echo error and Brier score (`?kind=storm_cell\|anchor\|all`). |
-| `/api/v1/weather/verifications` | `GET` | The latest outcomes: per place and time, every forecaster's call and what the radar showed (`?limit=`, up to 200). |
+| `/api/v1/models/:id` | `GET` | One legacy shared-model row. |
+| `/api/v1/models/share`, `/api/v1/telemetry` | `POST` | Removed. Answer `410 Gone`. |
 
 All `GET` routes also answer `HEAD`.

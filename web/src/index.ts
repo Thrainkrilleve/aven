@@ -1,32 +1,15 @@
 import { Env, PackageRecord, SharedModelRecord } from "./types";
-import { runCycle, TASKS_BY_CRON } from "./weather/cycle";
-import { handleWeatherApi } from "./weather/api";
 
 export default {
-  // Cron triggers (wrangler.jsonc): one task of the live weather nowcast behind /weather
-  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    const task = TASKS_BY_CRON[controller.cron];
-    if (!task) {
-      console.error(`no weather task for cron "${controller.cron}"`);
-      return;
-    }
-    ctx.waitUntil(
-      runCycle(env, task)
-        .then((r) => console.log(`weather (${controller.cron}): ${r.runs} site(s), ${r.verified} verified, ${r.requests} requests`))
-        .catch((e) => console.error(`weather (${controller.cron}) failed:`, e))
-    );
-  },
-
   // Files in public/ are served directly by the static-assets layer, so this worker only
   // runs for paths with no matching file: the API, share redirects, and the 404 page.
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const pathname = url.pathname;
 
-    // Shortlink redirects for shared models (/p/:id -> /?model=:id)
+    // Old share links (/p/:id) land on the live demo. The id is not loaded.
     if (pathname.startsWith("/p/") && pathname.length > 3) {
-      const modelId = pathname.slice(3).trim();
-      return Response.redirect(`${url.origin}/?model=${encodeURIComponent(modelId)}#playground`, 302);
+      return Response.redirect(`${url.origin}/#demo`, 302);
     }
 
     if (pathname.startsWith("/api/v1/")) {
@@ -54,15 +37,6 @@ async function handleApi(request: Request, env: Env, pathname: string): Promise<
 
   if (method === "OPTIONS") {
     return new Response(null, { headers: jsonHeaders });
-  }
-
-  if (pathname.startsWith("/api/v1/weather/") && method === "GET") {
-    try {
-      const res = await handleWeatherApi(env, new URL(request.url), jsonHeaders);
-      if (res) return res;
-    } catch (err: any) {
-      return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: jsonHeaders });
-    }
   }
 
   // GET /api/v1/stats

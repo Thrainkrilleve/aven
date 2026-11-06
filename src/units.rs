@@ -309,7 +309,7 @@ impl Unit {
         v * self.to_base + self.offset
     }
 
-    pub fn from_base_value(&self, v: f64) -> f64 {
+    pub fn to_unit_value(&self, v: f64) -> f64 {
         (v - self.offset) / self.to_base
     }
 }
@@ -342,6 +342,24 @@ impl Default for UnitRegistry {
         reg.register("ft", Dim::LENGTH, 0.3048);
         reg.register("mi", Dim::LENGTH, 1609.344);
         reg.register("nmi", Dim::LENGTH, 1852.0);
+        // Miles per hour. The same quantity as mi/h. 1 mph = 0.44704 m/s.
+        reg.register("mph", Dim::LENGTH / Dim::TIME, 1609.344 / 3600.0);
+
+        // Area. acre is the international acre (exactly 4046.8564224 m^2), not the
+        // US survey acre. ha is the hectare, a square 100 m on a side.
+        reg.register("acre", Dim::LENGTH.pow(2), 4046.8564224);
+        reg.register("ha", Dim::LENGTH.pow(2), 10_000.0);
+
+        // Volume, base m^3. L is the litre (1 dm^3). gal is the US liquid gallon
+        // (231 cubic inches) and bu the US bushel (2150.42 cubic inches).
+        let litre = 1e-3;
+        let cubic_inch = 0.0254_f64.powi(3);
+        let volume = Dim::LENGTH.pow(3);
+        reg.register("L", volume.clone(), litre);
+        reg.register("mL", volume.clone(), litre / 1_000.0);
+        reg.register("uL", volume.clone(), litre / 1_000_000.0);
+        reg.register("gal", volume.clone(), 231.0 * cubic_inch);
+        reg.register("bu", volume, 2150.42 * cubic_inch);
 
         // Time (base: second)
         reg.register("s", Dim::TIME, 1.0);
@@ -358,6 +376,12 @@ impl Default for UnitRegistry {
         reg.register("g", Dim::MASS, 0.001);
         reg.register("mg", Dim::MASS, 1e-6);
         reg.register("lb", Dim::MASS, 0.45359237);
+        // Avoirdupois ounce, 1/16 pound. A fluid ounce is a volume and is not this unit.
+        reg.register("oz", Dim::MASS, 0.45359237 / 16.0);
+        // US short ton, 2,000 pounds. The metric tonne is `tonne` (1,000 kg).
+        // A lone `t` is not registered: it is too easy to read as time or as tesla.
+        reg.register("ton", Dim::MASS, 2_000.0 * 0.45359237);
+        reg.register("tonne", Dim::MASS, 1_000.0);
 
         // Electric current (base: ampere)
         reg.register("A", Dim::CURRENT, 1.0);
@@ -378,6 +402,20 @@ impl Default for UnitRegistry {
 
         // Amount of substance (base: mole)
         reg.register("mol", Dim::AMOUNT, 1.0);
+
+        // Dimensionless (ratios, coefficients): declares a quantity as a pure
+        // scalar so products carry the dimension of the other factors.
+        reg.register("scalar", Dim::SCALAR, 1.0);
+        reg.register("ratio", Dim::SCALAR, 1.0);
+        // Parts of a whole. percent is 0.01, ppm is 10^-6, ppb is 10^-9.
+        reg.register("percent", Dim::SCALAR, 0.01);
+        reg.register("ppm", Dim::SCALAR, 1e-6);
+        reg.register("ppb", Dim::SCALAR, 1e-9);
+        // Logarithmic labels. The number is kept as written: 35 dBZ stays 35.
+        // Nothing here converts dB to a power ratio or dBZ to linear reflectivity.
+        reg.register("dB", Dim::SCALAR, 1.0);
+        reg.register("dBm", Dim::SCALAR, 1.0);
+        reg.register("dBZ", Dim::SCALAR, 1.0);
 
         // Angle (base: radian)
         reg.register("rad", Dim::ANGLE, 1.0);
@@ -427,7 +465,10 @@ impl Default for UnitRegistry {
         reg.register("Hz", freq_dim.clone(), 1.0);
         reg.register("kHz", freq_dim.clone(), 1000.0);
         reg.register("MHz", freq_dim.clone(), 1_000_000.0);
-        reg.register("GHz", freq_dim, 1_000_000_000.0);
+        reg.register("GHz", freq_dim.clone(), 1_000_000_000.0);
+        // Tachometer turns per minute: 1 rpm = 1/60 Hz. A turn is a count.
+        // Radians per second are a separate multiply by 2*pi.
+        reg.register("rpm", freq_dim, 1.0 / 60.0);
 
         // Data (base: bit). b = bit, B = byte, per IEC 80000-13.
         reg.register("b", Dim::DATA, 1.0);
@@ -519,8 +560,17 @@ impl UnitRegistry {
     pub fn register_unit_decl(&mut self, decl: &UnitDecl) {
         let builtin = matches!(
             decl.dimension.to_lowercase().as_str(),
-            "length" | "time" | "mass" | "current" | "money" | "currency" | "temperature"
-                | "amount" | "angle" | "data" | "transaction"
+            "length"
+                | "time"
+                | "mass"
+                | "current"
+                | "money"
+                | "currency"
+                | "temperature"
+                | "amount"
+                | "angle"
+                | "data"
+                | "transaction"
         );
         for u in &decl.units {
             if builtin {
@@ -549,7 +599,7 @@ impl UnitRegistry {
             ));
         }
 
-        Ok(u_to.from_base_value(u_from.to_base_value(val)))
+        Ok(u_to.to_unit_value(u_from.to_base_value(val)))
     }
 
     /// Lookup simple or compound units like "km/h", "m/s^2", "req/s", or "kW*h"
@@ -582,66 +632,155 @@ impl UnitRegistry {
     }
 
     /// Looks up a unit by exact symbol, then case-insensitively when that is unambiguous
-    /// ("gbps" finds Gbps, but "mb" could be Mb or MB and finds nothing). Compound units
-    /// like "km/h", "kg/m^3" and "kW*h" are built from their parts.
+    /// ("gbps" finds Gbps, but "mb" could be Mb or MB and finds nothing).
+    ///
+    /// Compounds are products and quotients of those symbols. `*` and `/` associate
+    /// left to right, `^` binds tighter, and parentheses group. `1` is a dimensionless
+    /// numerator, so `1/s` is the same quantity as Hz. `m/s/s` is the same as `m/s^2`.
     pub fn lookup(&self, name: &str) -> Option<Unit> {
         let trimmed = name.trim();
-        if let Some(u) = self.units.get(trimmed) {
-            return Some(u.clone());
-        }
-        if self.reserved.contains_key(&trimmed.to_lowercase()) {
+        if trimmed.is_empty() {
             return None;
         }
-        if let Some([only]) = self.folded.get(&trimmed.to_lowercase()).map(Vec::as_slice) {
+        let mut i = 0;
+        let mut unit = self.parse_product(trimmed, &mut i)?;
+        self.skip_ws(trimmed, &mut i);
+        if i != trimmed.len() {
+            return None;
+        }
+        if trimmed.contains(['/', '*', '^', '·', '(', ')']) {
+            unit.name = trimmed.to_string();
+        }
+        Some(unit)
+    }
+
+    /// One registered symbol, including an unambiguous case fold. No compounds.
+    fn lookup_symbol(&self, name: &str) -> Option<Unit> {
+        if let Some(u) = self.units.get(name) {
+            return Some(u.clone());
+        }
+        if self.reserved.contains_key(&name.to_lowercase()) {
+            return None;
+        }
+        if let Some([only]) = self.folded.get(&name.to_lowercase()).map(Vec::as_slice) {
             return self.units.get(only).cloned();
         }
+        None
+    }
 
-        // Parse compound division: num / denom
-        if trimmed.contains('/') {
-            let parts: Vec<&str> = trimmed.split('/').collect();
-            if parts.len() == 2 {
-                let num = self.lookup(parts[0])?;
-                let den = self.lookup(parts[1])?;
+    fn skip_ws(&self, s: &str, i: &mut usize) {
+        while matches!(s[*i..].chars().next(), Some(' ' | '\t')) {
+            *i += 1;
+        }
+    }
+
+    /// `factor ((*|·|/) factor)*`, left to right.
+    fn parse_product(&self, s: &str, i: &mut usize) -> Option<Unit> {
+        let mut acc = self.parse_factor(s, i)?;
+        loop {
+            self.skip_ws(s, i);
+            let Some(op) = s[*i..].chars().next() else {
+                break;
+            };
+            if op != '*' && op != '/' && op != '·' {
+                break;
+            }
+            *i += op.len_utf8();
+            let rhs = self.parse_factor(s, i)?;
+            let (dimension, to_base) = if op == '/' {
+                (acc.dimension.div(&rhs.dimension), acc.to_base / rhs.to_base)
+            } else {
+                (acc.dimension.mul(&rhs.dimension), acc.to_base * rhs.to_base)
+            };
+            acc = Unit {
+                name: String::new(),
+                dimension,
+                to_base,
+                offset: 0.0,
+            };
+        }
+        Some(acc)
+    }
+
+    /// `primary (^ integer)?`. An exponent drops any temperature offset.
+    fn parse_factor(&self, s: &str, i: &mut usize) -> Option<Unit> {
+        let base = self.parse_primary(s, i)?;
+        self.skip_ws(s, i);
+        if !s[*i..].starts_with('^') {
+            return Some(base);
+        }
+        *i += 1;
+        self.skip_ws(s, i);
+        let neg = if s[*i..].starts_with('-') {
+            *i += 1;
+            true
+        } else {
+            false
+        };
+        let start = *i;
+        while s.as_bytes().get(*i).is_some_and(|b| b.is_ascii_digit()) {
+            *i += 1;
+        }
+        if start == *i {
+            return None;
+        }
+        let mut exp: i32 = s[start..*i].parse().ok()?;
+        if neg {
+            exp = -exp;
+        }
+        Some(Unit {
+            name: String::new(),
+            dimension: base.dimension.pow(exp),
+            to_base: base.to_base.powi(exp),
+            offset: 0.0,
+        })
+    }
+
+    /// A symbol, the dimensionless `1`, or a parenthesized product.
+    fn parse_primary(&self, s: &str, i: &mut usize) -> Option<Unit> {
+        self.skip_ws(s, i);
+        if *i >= s.len() {
+            return None;
+        }
+        if s[*i..].starts_with('(') {
+            *i += 1;
+            let inner = self.parse_product(s, i)?;
+            self.skip_ws(s, i);
+            if !s[*i..].starts_with(')') {
+                return None;
+            }
+            *i += 1;
+            return Some(inner);
+        }
+        let rest = &s[*i..];
+        let token_len = rest
+            .bytes()
+            .take_while(|b| b.is_ascii_alphanumeric() || *b == b'$' || *b == b'_')
+            .count();
+        if token_len > 0 {
+            for len in (1..=token_len).rev() {
+                if let Some(u) = self.lookup_symbol(&rest[..len]) {
+                    *i += len;
+                    return Some(u);
+                }
+            }
+        }
+        // "1" is a dimensionless factor so "1/s" can be written. "1s" is not a unit.
+        if rest.starts_with('1') {
+            let glued = rest
+                .as_bytes()
+                .get(1)
+                .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'$' || *b == b'_');
+            if !glued {
+                *i += 1;
                 return Some(Unit {
-                    name: name.to_string(),
-                    dimension: num.dimension / den.dimension,
-                    to_base: num.to_base / den.to_base,
+                    name: "1".to_string(),
+                    dimension: Dim::SCALAR,
+                    to_base: 1.0,
                     offset: 0.0,
                 });
             }
         }
-
-        // Parse compound multiplication: u1 * u2 or u1·u2
-        if trimmed.contains('*') || trimmed.contains('·') {
-            let sep = if trimmed.contains('*') { '*' } else { '·' };
-            let parts: Vec<&str> = trimmed.split(sep).collect();
-            if parts.len() == 2 {
-                let u1 = self.lookup(parts[0])?;
-                let u2 = self.lookup(parts[1])?;
-                return Some(Unit {
-                    name: name.to_string(),
-                    dimension: u1.dimension * u2.dimension,
-                    to_base: u1.to_base * u2.to_base,
-                    offset: 0.0,
-                });
-            }
-        }
-
-        // Parse exponents: e.g. s^2 or m^3
-        if trimmed.contains('^') {
-            let parts: Vec<&str> = trimmed.split('^').collect();
-            if parts.len() == 2 {
-                let base_u = self.lookup(parts[0])?;
-                let exp = parts[1].parse::<i32>().ok()?;
-                return Some(Unit {
-                    name: name.to_string(),
-                    dimension: base_u.dimension.pow(exp),
-                    to_base: base_u.to_base.powi(exp),
-                    offset: 0.0,
-                });
-            }
-        }
-
         None
     }
 }
@@ -683,9 +822,9 @@ impl UnitScale {
     }
 
     /// Converts a base-unit value to `name`'s declared unit.
-    pub fn from_base(&self, name: &str, v: f64) -> f64 {
+    pub fn to_declared(&self, name: &str, v: f64) -> f64 {
         match self.declared.get(name) {
-            Some((u, _)) => u.from_base_value(v),
+            Some((u, _)) => u.to_unit_value(v),
             None => v,
         }
     }
@@ -769,6 +908,19 @@ pub fn normalize_bindings(module: &mut AvenModule) -> Result<UnitScale, TypeErro
                 None => scale.to_base(&b.name, b.value),
             };
         }
+        // A numeric bound with a unit (`power <= 2000 W`) converts to base
+        // units too, so it compares against the variable's base-unit value.
+        for c in &mut solve.constraints {
+            if let Some(ref u_str) = c.unit {
+                if let crate::ast::Expr::Num(v) = c.rhs {
+                    let converted = registry
+                        .lookup(u_str)
+                        .ok_or_else(|| unknown_unit(&registry, u_str, c.line, c.col))?
+                        .to_base_value(v);
+                    c.rhs = crate::ast::Expr::Num(converted);
+                }
+            }
+        }
     }
     Ok(scale)
 }
@@ -801,6 +953,30 @@ pub enum TypeError {
         line: usize,
         col: usize,
     },
+    UnknownFunction {
+        name: String,
+        line: usize,
+        col: usize,
+    },
+    UndeclaredSignal {
+        name: String,
+        line: usize,
+        col: usize,
+    },
+}
+
+impl TypeError {
+    /// The (line, col) where the error was detected.
+    pub fn position(&self) -> (usize, usize) {
+        match self {
+            TypeError::DimensionalMismatch { line, col, .. }
+            | TypeError::InvalidFunctionArgument { line, col, .. }
+            | TypeError::UnknownUnit { line, col, .. }
+            | TypeError::AmbiguousUnit { line, col, .. }
+            | TypeError::UnknownFunction { line, col, .. }
+            | TypeError::UndeclaredSignal { line, col, .. } => (*line, *col),
+        }
+    }
 }
 
 impl fmt::Display for TypeError {
@@ -834,13 +1010,28 @@ impl fmt::Display for TypeError {
                 "Type Error at line {}, col {}: unrecognized unit '{}'",
                 line, col, unit
             ),
-            TypeError::AmbiguousUnit { unit, candidates, line, col } => write!(
+            TypeError::AmbiguousUnit {
+                unit,
+                candidates,
+                line,
+                col,
+            } => write!(
                 f,
                 "Type Error at line {}, col {}: ambiguous unit '{}' — write one of {} (unit symbols are case-sensitive)",
                 line,
                 col,
                 unit,
                 candidates.join(", ")
+            ),
+            TypeError::UnknownFunction { name, line, col } => write!(
+                f,
+                "Type Error at line {}, col {}: unknown function '{}'",
+                line, col, name
+            ),
+            TypeError::UndeclaredSignal { name, line, col } => write!(
+                f,
+                "Type Error at line {}, col {}: '{}' has no declared or inferable unit — declare it with 'signal {} : <unit>' (or ': scalar')",
+                line, col, name, name
             ),
         }
     }
@@ -903,7 +1094,10 @@ impl DimensionalChecker {
                         if let Some(declared) = var_dims.get(&b.name) {
                             if *declared != u.dimension {
                                 return Err(TypeError::DimensionalMismatch {
-                                    context: format!("binding '{} = {} {}'", b.name, b.value, u_str),
+                                    context: format!(
+                                        "binding '{} = {} {}'",
+                                        b.name, b.value, u_str
+                                    ),
                                     left_dim: declared.clone(),
                                     right_dim: u.dimension,
                                     op: "=".to_string(),
@@ -985,6 +1179,27 @@ impl DimensionalChecker {
             }
         }
 
+        // 5. Strict declaration rule: after propagation, every variable used in
+        // a relation must resolve to a unit (declared or inferred). A name with
+        // no determinable dimension is an undeclared signal.
+        for blk in &module.blocks {
+            for eq in &blk.equations {
+                let mut names: std::collections::BTreeSet<String> =
+                    std::collections::BTreeSet::new();
+                names.insert(eq.lhs.clone());
+                eq.rhs.collect_vars(&mut names);
+                for name in &names {
+                    if !var_dims.contains_key(name) {
+                        return Err(TypeError::UndeclaredSignal {
+                            name: name.clone(),
+                            line: eq.line,
+                            col: eq.col,
+                        });
+                    }
+                }
+            }
+        }
+
         Ok(TypeReport {
             variable_dimensions: var_dims,
             verified_equations: total_equations,
@@ -1001,6 +1216,11 @@ impl DimensionalChecker {
     ) -> Result<Option<Dim>, TypeError> {
         match expr {
             Expr::Num(_) => Ok(Some(Dim::SCALAR)),
+            // Built-in math constants (pi, e, tau) are dimensionless scalars.
+            // `collect_vars` already treats them as constants rather than free
+            // variables, so the inferred dimension must agree, otherwise a bare
+            // `x = 2 * pi` would have no inferable unit.
+            Expr::Var(name) if crate::ast::is_builtin_constant(name) => Ok(Some(Dim::SCALAR)),
             Expr::Var(name) => Ok(var_dims.get(name).cloned()),
             Expr::UnaryMinus(inner) => self.infer_expr(inner, var_dims, line, col),
             Expr::Bin(BinaryOp::Add | BinaryOp::Sub, left, right) => {
@@ -1078,13 +1298,21 @@ impl DimensionalChecker {
                         context: format!("power '({} ^ {})'", base, exp),
                         left_dim: db,
                         right_dim: Dim::SCALAR,
-                        op: "^ (exponent must be a constant giving whole-number dimensions)".to_string(),
+                        op: "^ (exponent must be a constant giving whole-number dimensions)"
+                            .to_string(),
                         line,
                         col,
                     }),
                 }
             }
             Expr::Call(fn_name, inner) => {
+                if !crate::ast::is_builtin_function(fn_name) {
+                    return Err(TypeError::UnknownFunction {
+                        name: fn_name.clone(),
+                        line,
+                        col,
+                    });
+                }
                 let d_inner = self.infer_expr(inner, var_dims, line, col)?;
                 if matches!(fn_name.as_str(), "sin" | "cos" | "tan") {
                     if let Some(ref d) = d_inner {
@@ -1114,7 +1342,7 @@ impl DimensionalChecker {
                         },
                         None => Ok(None),
                     }
-                } else if matches!(fn_name.as_str(), "exp" | "ln" | "log" | "log10") {
+                } else if matches!(fn_name.as_str(), "exp" | "ln" | "log") {
                     if let Some(ref d) = d_inner {
                         if !d.is_dimensionless() {
                             return Err(TypeError::InvalidFunctionArgument {

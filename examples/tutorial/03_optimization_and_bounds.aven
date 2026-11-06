@@ -1,6 +1,12 @@
 // 03_optimization_and_bounds.aven — Mixed-Integer Optimization & Bounds
 // Demonstrates discrete integer relaxation, inequality constraints, and objectives.
 
+signal cores_per_node     : scalar
+signal ram_per_node_gb    : scalar
+signal node_monthly_cost  : scalar
+signal required_cores     : scalar
+signal required_ram_gb    : scalar
+
 relation ServerProvisioning {
     int nodes
     total_cores = nodes * cores_per_node

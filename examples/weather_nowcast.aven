@@ -1,16 +1,55 @@
 // examples/weather_nowcast.aven — Live weather cell and radar nowcast, as a forward block
 //
 // The physics of evaluations/possible/weather-predict.aven written in evaluation order so it
-// compiles to C and WebAssembly. Station pressure comes from the current METAR here (the
-// relational model takes it from NWS), and the NWS humidity and pressure are a cross-check. avenc.dev/weather runs the WebAssembly build of this file
-// every few minutes on live U.S. government data. verify/weather_reference.py checks that
-// it agrees with the relational model, MetPy and NumPy.
+// compiles to C and WebAssembly. verify/weather_reference.py checks that this forward
+// block agrees with the relational model, MetPy and NumPy.
 //
-// The solve block below is one live reading, so the file runs on its own: the scheduled
-// job's run for MIA storm cell L0 near South Bay, FL at 18:22 UTC on 2026-10-27 (radar
-// image 18:15 UTC; METAR KFXE and the KFXE-KHWO-KFLL triangle; NWS check at 17:26 UTC;
-// winds aloft from MIA).
+// The solve block below is one live reading, so the file runs on its own: HGX storm cell
+// S5 near Freeport, TX at 17:30 UTC on 2026-10-27 (radar image 17:23:48 UTC; METAR KBQX
+// and the KBQX-KBYY-KGVW triangle; winds aloft from PSX).
 //   avenc run examples/weather_nowcast.aven
+
+// Every physical constant in this model (273.15, gas constants, g, ...) is a
+// bare numeric literal, so the quantities are carried as pure : scalar numbers.
+// Declaring the free inputs is enough; all derived fields infer.
+signal temp_c               : scalar
+signal dewpoint_c           : scalar
+signal rh_reported          : scalar
+signal pressure_hpa         : scalar
+signal nws_pressure_hpa     : scalar
+signal metar_altimeter_hpa  : scalar
+signal station_elev_m       : scalar
+signal layer_depth_m        : scalar
+signal wind_u               : scalar
+signal wind_v               : scalar
+signal x1                   : scalar
+signal y1                   : scalar
+signal u1                   : scalar
+signal v1                   : scalar
+signal x2                   : scalar
+signal y2                   : scalar
+signal u2                   : scalar
+signal v2                   : scalar
+signal x3                   : scalar
+signal y3                   : scalar
+signal u3                   : scalar
+signal v3                   : scalar
+signal aloft_u              : scalar
+signal aloft_v              : scalar
+signal aloft_height_m       : scalar
+signal steer_u              : scalar
+signal steer_v              : scalar
+signal cell_u               : scalar
+signal cell_v               : scalar
+signal radar_dbz            : scalar
+signal gauge_available      : scalar
+signal gauge_rate_mmh       : scalar
+signal upstream_dbz_15      : scalar
+signal upstream_dbz_30      : scalar
+signal upstream_dbz_60      : scalar
+signal cell_upstream_dbz_15 : scalar
+signal cell_upstream_dbz_30 : scalar
+signal cell_upstream_dbz_60 : scalar
 
 forward WeatherNowcast {
     // ----------------------------------------------------
@@ -23,10 +62,10 @@ forward WeatherNowcast {
     e_sat_hpa = 6.112 * (273.16 / temp_k) ^ ((4219.4 - 1860.078011865639) / 461.52311572606084) * exp((2500840.0 / 273.16 - latent_heat_t / temp_k) / 461.52311572606084)
     vapor_pressure_hpa = 6.112 * (273.16 / dewpoint_k) ^ ((4219.4 - 1860.078011865639) / 461.52311572606084) * exp((2500840.0 / 273.16 - latent_heat_td / dewpoint_k) / 461.52311572606084)
     relative_humidity = 100.0 * vapor_pressure_hpa / e_sat_hpa
-    dewpoint_depression_c = temp_c - dewpoint_c
 
-    // Station pressure from the METAR altimeter setting (standard-atmosphere reduction)
-    pressure_hpa = metar_altimeter_hpa * ((288.15 - 0.0065 * station_elev_m) / 288.15) ^ 5.2561
+    // Recomputed RH vs the RH the station reported
+    rh_residual = abs(relative_humidity - rh_reported)
+    dewpoint_depression_c = temp_c - dewpoint_c
     specific_humidity = 0.6219569100577033 * vapor_pressure_hpa / (pressure_hpa - (1.0 - 0.6219569100577033) * vapor_pressure_hpa)
 
     // ----------------------------------------------------
@@ -36,20 +75,10 @@ forward WeatherNowcast {
     air_density_kg_m3 = 100.0 * pressure_hpa / (287.04749097718457 * virtual_temp_k)
     dp_dz_pa_per_m = -air_density_kg_m3 * 9.80665
 
-    // Cross-check against the NWS observation pipeline. NWS publishes a station's reports
-    // later than the METAR feed, so the check_* inputs are the METAR from the same report
-    // time as the NWS observation: humidity recomputed from its temperature and dewpoint vs
-    // the humidity NWS reported, and its altimeter setting vs NWS's "barometricPressure"
-    // (which is the altimeter setting, not station pressure: equal to A-group to 0.1 hPa).
-    check_temp_k = check_temp_c + 273.15
-    check_dewpoint_k = check_dewpoint_c + 273.15
-    check_latent_t = 2500840.0 - (4219.4 - 1860.078011865639) * (check_temp_k - 273.16)
-    check_latent_td = 2500840.0 - (4219.4 - 1860.078011865639) * (check_dewpoint_k - 273.16)
-    check_e_sat_hpa = 6.112 * (273.16 / check_temp_k) ^ ((4219.4 - 1860.078011865639) / 461.52311572606084) * exp((2500840.0 / 273.16 - check_latent_t / check_temp_k) / 461.52311572606084)
-    check_vapor_hpa = 6.112 * (273.16 / check_dewpoint_k) ^ ((4219.4 - 1860.078011865639) / 461.52311572606084) * exp((2500840.0 / 273.16 - check_latent_td / check_dewpoint_k) / 461.52311572606084)
-    check_relative_humidity = 100.0 * check_vapor_hpa / check_e_sat_hpa
-    rh_residual = abs(check_relative_humidity - rh_reported)
-    altimeter_residual_hpa = abs(nws_altimeter_hpa - check_altimeter_hpa)
+    // Station pressure two ways: NWS's reported value and the METAR altimeter setting
+    // reduced to the station's elevation (standard atmosphere)
+    metar_station_pressure_hpa = metar_altimeter_hpa * ((288.15 - 0.0065 * station_elev_m) / 288.15) ^ 5.2561
+    pressure_residual_hpa = abs(nws_pressure_hpa - metar_station_pressure_hpa)
 
     // ----------------------------------------------------
     // 3. Surface kinematics: the plane through three stations' winds (Cramer's rule)
@@ -110,44 +139,42 @@ forward WeatherNowcast {
 }
 
 solve WeatherNowcast with {
-    aloft_height_m = 911.4000000000001
-    aloft_u = -4.574705475938788
-    aloft_v = -12.568899995797233
-    cell_u = -4.36182057550699
-    cell_upstream_dbz_15 = 0
-    cell_upstream_dbz_30 = 0
-    cell_upstream_dbz_60 = 0
-    cell_v = -6.980372076465542
-    check_altimeter_hpa = 1013.3
-    check_dewpoint_c = 22.8
-    check_temp_c = 26.7
-    dewpoint_c = 23.3
+    temp_c = 27
+    dewpoint_c = 19
+    rh_reported = 61.613746674378
+    pressure_hpa = 1022.7
+    nws_pressure_hpa = 1022.7
+    metar_altimeter_hpa = 1022.8
+    station_elev_m = 34
+    layer_depth_m = 1000
+    wind_u = 0
+    wind_v = 0
+    x1 = -42561.156011995816
+    y1 = -11165.39600000008
+    u1 = 0
+    v1 = 0
+    x2 = -65902.72397440573
+    y2 = 62049.76799999974
+    u2 = -2.900515383645515
+    v2 = -1.0557012636781822
+    x3 = 62534.64537580244
+    y3 = 79705.11999999972
+    u3 = 0
+    v3 = 0
+    aloft_u = -7.71666
+    aloft_v = -4.725091484554207e-16
+    aloft_height_m = 880.4000000000001
+    steer_u = -1.1352716725287442
+    steer_v = 9.600152245821814
+    cell_u = -1.002517667216751
+    cell_v = 0.2314494404017504
+    radar_dbz = 38
     gauge_available = 0
     gauge_rate_mmh = 0
-    layer_depth_m = 1000
-    metar_altimeter_hpa = 1013
-    nws_altimeter_hpa = 1013.2
-    radar_dbz = 23
-    rh_reported = 79.217487032673
-    station_elev_m = 3
-    steer_u = 0.7526337655785449
-    steer_v = -3.879656079861787
-    temp_c = 26.1
-    u1 = -0.7146581048934905
-    u2 = -6.9442428106292216
-    u3 = -1.7595021061303033
-    upstream_dbz_15 = 28
-    upstream_dbz_30 = 16
+    upstream_dbz_15 = 0
+    upstream_dbz_30 = 0
     upstream_dbz_60 = 0
-    v1 = -4.053027517524899
-    v2 = -8.27582631741389
-    v3 = -4.834192306075859
-    wind_u = -0.7146581048934905
-    wind_v = -4.053027517524899
-    x1 = 56066.22287557572
-    x2 = 49727.001942443145
-    x3 = 57601.19146630255
-    y1 = -27184.343999999925
-    y2 = -49381.551999999996
-    y3 = -40576.139999999956
+    cell_upstream_dbz_15 = 40
+    cell_upstream_dbz_30 = 43
+    cell_upstream_dbz_60 = 34
 }

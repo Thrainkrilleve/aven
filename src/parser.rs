@@ -21,6 +21,76 @@ impl std::fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
+struct NamedTwice<'a> {
+    name: &'a str,
+    line: usize,
+    col: usize,
+}
+
+fn duplicate_name(equations: &[Equation]) -> Option<NamedTwice<'_>> {
+    let mut seen: std::collections::BTreeMap<&str, (usize, usize)> =
+        std::collections::BTreeMap::new();
+    for eq in equations {
+        if seen.contains_key(eq.lhs.as_str()) {
+            return Some(NamedTwice {
+                name: eq.lhs.as_str(),
+                line: eq.line,
+                col: eq.col,
+            });
+        }
+        seen.insert(eq.lhs.as_str(), (eq.line, eq.col));
+    }
+    None
+}
+
+/// A name is defined when some other equation gives it a value. A name that
+/// appears only on a right-hand side, or only in its own equation, is unknown.
+fn undefined_names(equations: &[Equation]) -> Vec<String> {
+    let mut unknowns = std::collections::BTreeSet::new();
+    for (i, eq) in equations.iter().enumerate() {
+        for name in eq.rhs.vars() {
+            let defined_elsewhere = equations
+                .iter()
+                .enumerate()
+                .any(|(j, other)| j != i && other.lhs == name);
+            if !defined_elsewhere {
+                unknowns.insert(name);
+            }
+        }
+    }
+    unknowns.into_iter().collect()
+}
+
+fn join_and(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => one.clone(),
+        [a, b] => format!("{a} and {b}"),
+        [head @ .., last] => format!("{}, and {last}", head.join(", ")),
+    }
+}
+
+fn still_unknown(names: &[String]) -> String {
+    let listed = join_and(names);
+    let verb = if names.len() == 1 { "is" } else { "are" };
+    format!(
+        "{listed} {verb} still unknown. A calculation uses only numbers. Name unknowns in a relation and a solve block."
+    )
+}
+
+fn still_unknown_in_equations(names: &[String]) -> String {
+    let listed = join_and(names);
+    let verb = if names.len() == 1 { "is" } else { "are" };
+    let how = if names.len() == 1 {
+        format!("Give {listed} an equation")
+    } else {
+        "Give each one an equation".to_string()
+    };
+    format!(
+        "{listed} {verb} still unknown. {how}, or name unknowns in a relation and a solve block."
+    )
+}
+
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
@@ -92,11 +162,30 @@ impl Parser {
         }
     }
 
+    fn at_declaration(&self) -> bool {
+        matches!(
+            self.peek().kind,
+            TokenKind::KwRelation
+                | TokenKind::KwForward
+                | TokenKind::KwSolve
+                | TokenKind::KwUnit
+                | TokenKind::KwSignal
+        )
+    }
+
     pub fn parse_module(&mut self, name: &str) -> Result<AvenModule, ParseError> {
         let mut module = AvenModule {
             name: name.to_string(),
             ..Default::default()
         };
+
+        // A file that starts with arithmetic or `name = expression` is one
+        // calculation. It becomes a relation the existing solver
+        // forward-evaluates. A file that starts with a declaration stays a model.
+        if !self.at_declaration() && self.peek().kind != TokenKind::Eof {
+            module.blocks.push(self.parse_calculation()?);
+            return Ok(module);
+        }
 
         while self.peek().kind != TokenKind::Eof {
             match self.peek().kind {
@@ -135,6 +224,168 @@ impl Parser {
         }
 
         Ok(module)
+    }
+
+    fn at_named_equation(&self) -> bool {
+        matches!(self.peek().kind, TokenKind::Ident(_))
+            && matches!(
+                self.peek_at(1).kind,
+                TokenKind::Equal | TokenKind::DoubleEqual
+            )
+    }
+
+    /// A bare expression becomes `answer = expr`. Lines of `name = expr`
+    /// become the equations of one relation, so `x = 1 + 10` and
+    /// `y = x * 2` settle through the same solver.
+    fn parse_calculation(&mut self) -> Result<BlockDecl, ParseError> {
+        let start = self.peek().clone();
+        let equations = if self.at_named_equation() {
+            self.parse_named_equations()?
+        } else {
+            vec![self.parse_answer_equation()?]
+        };
+        Ok(BlockDecl {
+            kind: BlockKind::Relation,
+            name: "Calc".to_string(),
+            backend: BackendDecl::Native,
+            equations,
+            integer_vars: vec![],
+            line: start.line,
+            col: start.col,
+        })
+    }
+
+    fn parse_answer_equation(&mut self) -> Result<Equation, ParseError> {
+        let start = self.peek().clone();
+        let expr = self.parse_expr()?;
+
+        // Reversed form: `<expr> = <name>` means the same as `<name> = <expr>`,
+        // so `1 + 2 = x` settles x just like `x = 1 + 2`.
+        if matches!(self.peek().kind, TokenKind::Equal | TokenKind::DoubleEqual) {
+            self.take(); // '='
+            let (name, _line, _col) = self.expect_ident()?;
+            if self.peek().kind != TokenKind::Eof {
+                let tok = self.peek();
+                return Err(ParseError {
+                    message: format!(
+                        "after '{} = {}', a calculation ends; found '{}'",
+                        expr.to_string_prec(0),
+                        name,
+                        tok.text
+                    ),
+                    line: tok.line,
+                    col: tok.col,
+                });
+            }
+            return Ok(Equation {
+                lhs: name.clone(),
+                op: ConstraintOp::Equal,
+                rhs: expr.clone(),
+                original_text: format!("{name} = {}", expr.to_string_prec(0)),
+                line: start.line,
+                col: start.col,
+            });
+        }
+
+        if self.peek().kind != TokenKind::Eof {
+            let tok = self.peek();
+            return Err(ParseError {
+                message: format!(
+                    "a calculation is one expression; found '{}' after it",
+                    tok.text
+                ),
+                line: tok.line,
+                col: tok.col,
+            });
+        }
+        let unknowns: Vec<String> = expr.vars().into_iter().collect();
+        if !unknowns.is_empty() {
+            return Err(ParseError {
+                message: still_unknown(&unknowns),
+                line: start.line,
+                col: start.col,
+            });
+        }
+        Ok(Equation {
+            lhs: "answer".to_string(),
+            op: ConstraintOp::Equal,
+            rhs: expr.clone(),
+            original_text: format!("answer = {}", expr.to_string_prec(0)),
+            line: start.line,
+            col: start.col,
+        })
+    }
+
+    fn parse_named_equations(&mut self) -> Result<Vec<Equation>, ParseError> {
+        let mut equations = Vec::new();
+        loop {
+            equations.push(self.parse_named_equation()?);
+            if self.peek().kind == TokenKind::Eof {
+                break;
+            }
+            if !self.at_named_equation() {
+                let tok = self.peek();
+                return Err(ParseError {
+                    message: format!(
+                        "a calculation is one expression; found '{}' after it",
+                        tok.text
+                    ),
+                    line: tok.line,
+                    col: tok.col,
+                });
+            }
+        }
+        if let Some(dup) = duplicate_name(&equations) {
+            return Err(ParseError {
+                message: format!(
+                    "{} is named twice. A calculation gives each name one expression.",
+                    dup.name
+                ),
+                line: dup.line,
+                col: dup.col,
+            });
+        }
+        let unknowns = undefined_names(&equations);
+        if !unknowns.is_empty() {
+            let site = equations
+                .iter()
+                .find(|eq| {
+                    eq.rhs
+                        .vars()
+                        .iter()
+                        .any(|v| unknowns.iter().any(|u| u == v))
+                })
+                .unwrap_or(&equations[0]);
+            return Err(ParseError {
+                message: still_unknown_in_equations(&unknowns),
+                line: site.line,
+                col: site.col,
+            });
+        }
+        Ok(equations)
+    }
+
+    fn parse_named_equation(&mut self) -> Result<Equation, ParseError> {
+        let (lhs, line, col) = self.expect_ident()?;
+        let tok = self.peek().clone();
+        if matches!(tok.kind, TokenKind::Equal | TokenKind::DoubleEqual) {
+            self.take();
+        } else {
+            return Err(ParseError {
+                message: format!("expected '=', found '{}'", tok.text),
+                line: tok.line,
+                col: tok.col,
+            });
+        }
+        let rhs = self.parse_expr()?;
+        Ok(Equation {
+            lhs: lhs.clone(),
+            op: ConstraintOp::Equal,
+            rhs: rhs.clone(),
+            original_text: format!("{lhs} = {rhs}"),
+            line,
+            col,
+        })
     }
 
     fn parse_block(&mut self, kind: BlockKind) -> Result<BlockDecl, ParseError> {
@@ -473,11 +724,21 @@ impl Parser {
                     _ => unreachable!(),
                 };
                 let rhs = self.parse_expr()?;
-                let original_text = format!("{} {} {}", name, op, rhs);
+                // A numeric bound may carry a unit literal, e.g. `power <= 2000 W`.
+                let unit = if matches!(rhs, Expr::Num(_)) {
+                    self.parse_optional_unit(b_line)
+                } else {
+                    None
+                };
+                let original_text = match &unit {
+                    Some(u) => format!("{} {} {} {}", name, op, rhs, u),
+                    None => format!("{} {} {}", name, op, rhs),
+                };
                 constraints.push(Constraint {
                     lhs: name,
                     op,
                     rhs,
+                    unit,
                     original_text,
                     line: b_line,
                     col: b_col,
@@ -543,18 +804,18 @@ impl Parser {
 
     fn parse_optional_unit(&mut self, line: usize) -> Option<String> {
         let mut parts = String::new();
-        while matches!(
-            self.peek().kind,
-            TokenKind::Ident(_)
-                | TokenKind::Slash
-                | TokenKind::Star
-                | TokenKind::Caret
-                | TokenKind::Number(_)
-        ) {
+        let mut depth = 0i32;
+        loop {
             if self.peek().line != line {
                 break;
             }
-            if matches!(self.peek().kind, TokenKind::Ident(_))
+            // A minus is part of a unit only as the sign of an exponent: s^-1.
+            if matches!(self.peek().kind, TokenKind::Minus) && (depth == 0 && !parts.ends_with('^'))
+            {
+                break;
+            }
+            if depth == 0
+                && matches!(self.peek().kind, TokenKind::Ident(_))
                 && matches!(
                     self.peek_at(1).kind,
                     TokenKind::Equal
@@ -568,7 +829,26 @@ impl Parser {
             {
                 break;
             }
+            match self.peek().kind {
+                TokenKind::Ident(_)
+                | TokenKind::Slash
+                | TokenKind::Star
+                | TokenKind::Caret
+                | TokenKind::Number(_)
+                | TokenKind::Minus
+                | TokenKind::LeftParen
+                | TokenKind::RightParen => {}
+                _ => break,
+            }
+            if matches!(self.peek().kind, TokenKind::RightParen) && depth == 0 {
+                break;
+            }
             let tok = self.take();
+            match tok.kind {
+                TokenKind::LeftParen => depth += 1,
+                TokenKind::RightParen => depth -= 1,
+                _ => {}
+            }
             parts.push_str(&tok.text);
         }
         if parts.is_empty() { None } else { Some(parts) }
@@ -679,7 +959,8 @@ impl Parser {
         }
         let result = if self.peek().kind == TokenKind::Minus {
             self.take();
-            self.parse_unary().map(|operand| Expr::UnaryMinus(Box::new(operand)))
+            self.parse_unary()
+                .map(|operand| Expr::UnaryMinus(Box::new(operand)))
         } else {
             self.parse_power()
         };

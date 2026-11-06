@@ -1,0 +1,64 @@
+# Dependabot version updates. Keeps registry dependencies current by opening
+# grouped PRs weekly, which CI (ci.yml / linter.yml / security-scan.yml)
+# validates automatically. Grouping keeps each ecosystem to one PR, not a swarm.
+#
+# Scope notes:
+#   * The `avenc` core crate is zero-dependency, so there is nothing to update
+#     there — only the Tauri app and the web/editor front-ends have registry
+#     deps.
+#   * The Tauri `tauri` / `tauri-build` deps are pinned to a git rev, not a
+#     registry version, so Dependabot cannot bump them. Update those by hand
+#     by changing the rev in app/aven-orchestrator/src-tauri/Cargo.toml.
+#   * Security updates (which caught the zip/esbuild issues) are separate and
+#     enabled by default on the public repo; this file is for version updates.
+version: 2
+updates:
+  # --- Rust: the Tauri app (serde, serde_json, calamine, rust_xlsxwriter) ---
+  - package-ecosystem: "cargo"
+    directory: "/app/aven-orchestrator/src-tauri"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      cargo-app:
+        patterns: ["*"]
+
+  # --- npm: IDE front-end + build tooling (esbuild, CodeMirror, tauri CLI) ---
+  - package-ecosystem: "npm"
+    directory: "/app/aven-orchestrator"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      npm-app:
+        patterns: ["*"]
+
+  # --- npm: web demo ---
+  - package-ecosystem: "npm"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      npm-web:
+        patterns: ["*"]
+
+  # --- npm: VS Code extension ---
+  - package-ecosystem: "npm"
+    directory: "/editors/vscode"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      npm-vscode:
+        patterns: ["*"]
+
+  # --- GitHub Actions pinned in the workflows ---
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ["*"]

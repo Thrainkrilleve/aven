@@ -131,6 +131,7 @@ impl SolverEngine {
                 lhs: eq.lhs,
                 op: eq.op,
                 rhs: eq.rhs,
+                unit: None,
                 original_text: eq.original_text,
                 line: eq.line,
                 col: eq.col,
@@ -209,8 +210,8 @@ impl SolverEngine {
             let mut vs = eq.rhs.vars();
             vs.insert(eq.lhs.clone());
             if vs.iter().all(|v| env.contains_key(v)) {
-                let expected = eval_expr(&eq.rhs, &env)
-                    .map_err(|e| SolverError::MathError(e.to_string()))?;
+                let expected =
+                    eval_expr(&eq.rhs, &env).map_err(|e| SolverError::MathError(e.to_string()))?;
                 let given = env[&eq.lhs];
                 if (expected - given).abs() > 1e-6 * (1.0 + expected.abs()) {
                     return Err(SolverError::Inconsistency {
@@ -507,7 +508,7 @@ impl SolverEngine {
         let mut eqs = Vec::new();
         let sub = |a: Expr, b: Expr| Expr::Bin(BinaryOp::Sub, Box::new(a), Box::new(b));
         for c in &self.constraints {
-            let rhs_has_unknown = c.rhs.vars().iter().any(|v| is_unknown(v));
+            let rhs_has_unknown = c.rhs.vars().iter().any(&is_unknown);
             let rhs_const = if rhs_has_unknown {
                 None
             } else {
@@ -556,7 +557,7 @@ impl SolverEngine {
             }
         }
         for eq in &self.relations {
-            if is_unknown(&eq.lhs) || eq.rhs.vars().iter().any(|v| is_unknown(v)) {
+            if is_unknown(&eq.lhs) || eq.rhs.vars().iter().any(&is_unknown) {
                 eqs.push(sub(Expr::Var(eq.lhs.clone()), eq.rhs.clone()));
             }
         }
@@ -949,7 +950,6 @@ impl SolverEngine {
         res
     }
 }
-
 
 /// Gaussian elimination with partial pivoting: M * x = b
 fn solve_linear(mat: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {

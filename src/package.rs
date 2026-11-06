@@ -8,7 +8,7 @@ use crate::parser::Parser;
 use crate::units::DimensionalChecker;
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DependencySpec {
@@ -152,7 +152,9 @@ impl PackageManifest {
                                     }
                                 }
                             }
-                            manifest.dependencies.insert(dep_name, DependencySpec { version: ver, path });
+                            manifest
+                                .dependencies
+                                .insert(dep_name, DependencySpec { version: ver, path });
                         } else {
                             let ver = parse_str_val(val_str)?;
                             manifest.dependencies.insert(
@@ -169,7 +171,10 @@ impl PackageManifest {
                             match key {
                                 "name" => last.name = parse_str_val(val_str)?,
                                 "dimension" => last.dimension = parse_str_val(val_str)?,
-                                "scale" => last.scale = val_str.parse::<f64>().map_err(|e| e.to_string())?,
+                                "scale" => {
+                                    last.scale =
+                                        val_str.parse::<f64>().map_err(|e| e.to_string())?
+                                }
                                 _ => {}
                             }
                         }
@@ -225,7 +230,10 @@ impl PackageManager {
 
         let manifest_path = dir.join("Aven.toml");
         if manifest_path.exists() {
-            return Err(format!("package manifest already exists at '{:?}'", manifest_path));
+            return Err(format!(
+                "package manifest already exists at '{:?}'",
+                manifest_path
+            ));
         }
 
         let manifest = PackageManifest {
@@ -236,13 +244,11 @@ impl PackageManager {
             license: "MIT".to_string(),
             entry: "lib.aven".to_string(),
             dependencies: HashMap::new(),
-            units: vec![
-                DeclaredUnitSpec {
-                    name: "kilo_watt".to_string(),
-                    dimension: "Power".to_string(),
-                    scale: 1000.0,
-                },
-            ],
+            units: vec![DeclaredUnitSpec {
+                name: "kilo_watt".to_string(),
+                dimension: "Power".to_string(),
+                scale: 1000.0,
+            }],
         };
 
         fs::write(&manifest_path, manifest.to_toml())
@@ -252,6 +258,9 @@ impl PackageManager {
         if !entry_path.exists() {
             let sample_code = format!(
                 "// {} — Aven Unit-Verified Relation Library\n\
+                 signal voltage_v : scalar\n\
+                 signal current_a : scalar\n\
+                 signal operating_hours : scalar\n\
                  relation {}Relations {{\n\
                      power_kw = (voltage_v * current_a) / 1000\n\
                      energy_kwh = power_kw * operating_hours\n\
@@ -279,7 +288,10 @@ impl PackageManager {
         // Verify entry file exists and passes dimensional checking
         let entry_path = dir.join(&manifest.entry);
         if !entry_path.exists() {
-            return Err(format!("entry file '{:?}' does not exist in package", entry_path));
+            return Err(format!(
+                "entry file '{:?}' does not exist in package",
+                entry_path
+            ));
         }
         let entry_src = fs::read_to_string(&entry_path)
             .map_err(|e| format!("failed to read entry source: {}", e))?;
@@ -364,11 +376,14 @@ impl PackageManager {
             ));
         }
 
+        // Lengths describe the sealed payload. Reading `bytes` would treat the
+        // trailing digest as file content once a length runs past the payload.
         let mut offset = 9;
-        let m_len = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap()) as usize;
-        offset += 8;
-        let manifest_str = String::from_utf8_lossy(&bytes[offset..offset + m_len]).to_string();
-        offset += m_len;
+        let m_len = read_archive_len(payload, &mut offset)?;
+        let manifest_str = {
+            let manifest_bytes = read_archive_bytes(payload, &mut offset, m_len)?;
+            String::from_utf8_lossy(manifest_bytes).to_string()
+        };
 
         let manifest = PackageManifest::from_toml(&manifest_str)?;
         let install_dir = cache_dir.join(&manifest.name).join(&manifest.version);
@@ -378,21 +393,30 @@ impl PackageManager {
         fs::write(install_dir.join("Aven.toml"), &manifest_str)
             .map_err(|e| format!("failed to write manifest: {}", e))?;
 
-        let num_files = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap()) as usize;
-        offset += 8;
+        let num_files = read_archive_len(payload, &mut offset)?;
+        if num_files > 10_000 {
+            return Err("package archive lists too many files".to_string());
+        }
 
         for _ in 0..num_files {
-            let n_len = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap()) as usize;
-            offset += 8;
-            let fname = String::from_utf8_lossy(&bytes[offset..offset + n_len]).to_string();
-            offset += n_len;
+            let n_len = read_archive_len(payload, &mut offset)?;
+            let fname = {
+                let name_bytes = read_archive_bytes(payload, &mut offset, n_len)?;
+                String::from_utf8_lossy(name_bytes).to_string()
+            };
+            archive_file_name(&fname)?;
 
-            let c_len = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap()) as usize;
-            offset += 8;
-            let content = &bytes[offset..offset + c_len];
-            offset += c_len;
+            let c_len = read_archive_len(payload, &mut offset)?;
+            let content = read_archive_bytes(payload, &mut offset, c_len)?;
 
-            fs::write(install_dir.join(&fname), content)
+            let dest = install_dir.join(&fname);
+            if !dest.starts_with(&install_dir) {
+                return Err(format!(
+                    "package file '{}' escapes the install directory",
+                    fname
+                ));
+            }
+            fs::write(&dest, content)
                 .map_err(|e| format!("failed to extract file '{}': {}", fname, e))?;
         }
 
@@ -507,6 +531,43 @@ impl PackageManager {
     }
 }
 
+fn read_archive_len(payload: &[u8], offset: &mut usize) -> Result<usize, String> {
+    let bytes = read_archive_bytes(payload, offset, 8)?;
+    let mut buf = [0u8; 8];
+    buf.copy_from_slice(bytes);
+    let len = u64::from_le_bytes(buf);
+    usize::try_from(len).map_err(|_| "package archive field is too large".to_string())
+}
+
+fn read_archive_bytes<'a>(
+    payload: &'a [u8],
+    offset: &mut usize,
+    len: usize,
+) -> Result<&'a [u8], String> {
+    let end = offset
+        .checked_add(len)
+        .filter(|end| *end <= payload.len())
+        .ok_or_else(|| "truncated package archive".to_string())?;
+    let slice = &payload[*offset..end];
+    *offset = end;
+    Ok(slice)
+}
+
+/// Archive members are a single file name. A path, `..`, or `Aven.toml`
+/// would write outside the install directory or replace the sealed manifest.
+fn archive_file_name(name: &str) -> Result<(), String> {
+    let path = Path::new(name);
+    let mut components = path.components();
+    let one_file =
+        matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none();
+    if !one_file || name.contains('\0') || name == "Aven.toml" {
+        return Err(format!(
+            "package file '{name}' must be a single file name inside the install directory"
+        ));
+    }
+    Ok(())
+}
+
 /// Version directories under an installed package's directory, highest version first.
 fn installed_versions(pkg_dir: &std::path::Path) -> Vec<PathBuf> {
     let parse = |name: &str| -> Option<Vec<u64>> {
@@ -525,4 +586,97 @@ fn installed_versions(pkg_dir: &std::path::Path) -> Vec<PathBuf> {
     };
     versions.sort_by(|a, b| b.0.cmp(&a.0));
     versions.into_iter().map(|(_, p)| p).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn push_u64(buf: &mut Vec<u8>, n: u64) {
+        buf.extend_from_slice(&n.to_le_bytes());
+    }
+
+    fn sealed_archive(manifest: &str, files: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut payload = b"AVENPKG1\n".to_vec();
+        push_u64(&mut payload, manifest.len() as u64);
+        payload.extend_from_slice(manifest.as_bytes());
+        push_u64(&mut payload, files.len() as u64);
+        for (name, content) in files {
+            push_u64(&mut payload, name.len() as u64);
+            payload.extend_from_slice(name.as_bytes());
+            push_u64(&mut payload, content.len() as u64);
+            payload.extend_from_slice(content);
+        }
+        let digest = sha256_hex(&payload);
+        payload.extend_from_slice(digest.as_bytes());
+        payload
+    }
+
+    fn write_archive(label: &str, bytes: &[u8]) -> (PathBuf, PathBuf) {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "aven-pkg-{}-{}-{}",
+            label,
+            std::process::id(),
+            nanos
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let archive = dir.join("sample.avenpkg");
+        fs::write(&archive, bytes).unwrap();
+        let cache = dir.join("cache");
+        (archive, cache)
+    }
+
+    #[test]
+    fn install_extracts_a_single_file_name() {
+        let manifest = PackageManifest {
+            name: "demo".to_string(),
+            version: "0.1.0".to_string(),
+            entry: "lib.aven".to_string(),
+            ..PackageManifest::default()
+        };
+        let bytes = sealed_archive(&manifest.to_toml(), &[("lib.aven", b"relation Demo {}\n")]);
+        let (archive, cache) = write_archive("ok", &bytes);
+        let installed = PackageManager::install(&archive, &cache).expect("install");
+        assert_eq!(installed.name, "demo");
+        let extracted = cache.join("demo").join("0.1.0").join("lib.aven");
+        assert_eq!(fs::read(&extracted).unwrap(), b"relation Demo {}\n");
+        let _ = fs::remove_dir_all(archive.parent().unwrap());
+    }
+
+    #[test]
+    fn install_refuses_a_path_that_escapes_the_cache() {
+        let manifest = PackageManifest {
+            name: "demo".to_string(),
+            version: "0.1.0".to_string(),
+            ..PackageManifest::default()
+        };
+        let bytes = sealed_archive(&manifest.to_toml(), &[("../pwned.aven", b"owned\n")]);
+        let (archive, cache) = write_archive("escape", &bytes);
+        let err = PackageManager::install(&archive, &cache).expect_err("escape");
+        assert!(err.contains("single file name"), "{err}");
+        // install_dir is cache/demo/0.1.0, so `../pwned.aven` would land here.
+        let escaped = cache.join("demo").join("pwned.aven");
+        assert!(
+            !escaped.exists(),
+            "archive wrote outside the install directory"
+        );
+        let _ = fs::remove_dir_all(archive.parent().unwrap());
+    }
+
+    #[test]
+    fn install_refuses_a_truncated_archive_instead_of_panicking() {
+        let mut payload = b"AVENPKG1\n".to_vec();
+        push_u64(&mut payload, 1_000_000);
+        let digest = sha256_hex(&payload);
+        payload.extend_from_slice(digest.as_bytes());
+        let (archive, cache) = write_archive("truncated", &payload);
+        let err = PackageManager::install(&archive, &cache).expect_err("truncated");
+        assert!(err.contains("truncated"), "{err}");
+        let _ = fs::remove_dir_all(archive.parent().unwrap());
+    }
 }

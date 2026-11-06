@@ -514,9 +514,10 @@ fn test_pareto_frontier_and_knee_point_detection() {
     // At 50k: raw_workers = (50000 * 20)/1000 = 1000
     assert_eq!(frontier[4].vars.get("raw_workers"), Some(1000.0));
 
-    // Knee point detection
+    // Both objectives are linear in the swept input, so the balanced
+    // compromise is the midpoint (index 2 of 5), not the second sample.
     let knee = Orchestrator::find_knee_point(&frontier);
-    assert!(knee.is_some());
+    assert_eq!(knee, Some(2));
 }
 
 #[test]
@@ -1442,7 +1443,7 @@ fn test_diagnostics_scale_invariance_across_disparate_physical_units() {
 
 #[test]
 fn test_randomized_ledger_key_generation_and_cli_verification() {
-    use avenc::ledger::{generate_random_key, verify_jsonl, Fact, Ledger};
+    use avenc::ledger::{Fact, Ledger, generate_random_key, verify_jsonl};
 
     // 1. Generate two independent keys from OS entropy and system clocks
     let k1 = generate_random_key();
@@ -1482,7 +1483,8 @@ fn test_randomized_ledger_key_generation_and_cli_verification() {
     let jsonl = ledger.to_jsonl();
 
     // 5. Verification with the correct key k1 must succeed and confirm every signature valid
-    let verified = verify_jsonl(&jsonl, Some(k1.as_bytes())).expect("valid key must verify signatures");
+    let verified =
+        verify_jsonl(&jsonl, Some(k1.as_bytes())).expect("valid key must verify signatures");
     assert_eq!(verified.facts, 2);
     assert!(verified.signed);
 
@@ -1881,9 +1883,10 @@ fn test_kubernetes_multi_objective_pareto_convergence_and_knee_point() {
         first.vars.get("mem_headroom_pct").unwrap() > last.vars.get("mem_headroom_pct").unwrap()
     );
 
-    // Verify Knee Point detection
+    // cpu_utilization and mem_headroom_pct are both linear in target_pods,
+    // so the knee is the midpoint of the six solved samples.
     let knee_idx = Orchestrator::find_knee_point(&frontier);
-    assert!(knee_idx.is_some());
+    assert_eq!(knee_idx, Some(3));
 }
 
 #[test]

@@ -482,6 +482,14 @@ impl Evaluator for ExternalEvaluator {
                     self.command, e
                 ))
             })?;
+            stdin.flush().map_err(|e| {
+                EvalError::DomainError(format!(
+                    "Failed to flush stdin of '{}': {}",
+                    self.command, e
+                ))
+            })?;
+            // Dropping the pipe is EOF. The adapter reads stdin to completion.
+            drop(stdin);
         }
 
         // Wait for output and check exit status
@@ -636,13 +644,14 @@ impl IpcEvaluator {
             EvalError::DomainError(format!("Invalid IPC socket address '{}': {}", addr_str, e))
         })?;
 
-        let mut stream = TcpStream::connect_timeout(&socket_addr, std::time::Duration::from_millis(500))
-            .map_err(|e| {
-                EvalError::BlackBoxFailure(format!(
-                    "Failed to connect to IPC daemon at '{}' for actuation: {}",
-                    addr_str, e
-                ))
-            })?;
+        let mut stream =
+            TcpStream::connect_timeout(&socket_addr, std::time::Duration::from_millis(500))
+                .map_err(|e| {
+                    EvalError::BlackBoxFailure(format!(
+                        "Failed to connect to IPC daemon at '{}' for actuation: {}",
+                        addr_str, e
+                    ))
+                })?;
         let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(1)));
 
         let mut json_str = String::from("{\"action\": \"actuate\", \"commands\": {");
@@ -846,7 +855,11 @@ impl ShmRingBuffer {
     /// Resolves an SHM name or path to an absolute path.
     pub fn resolve_path(path_str: &str) -> PathBuf {
         let p = Path::new(path_str);
-        if p.is_absolute() || path_str.contains('/') || path_str.contains('\\') || path_str.contains(':') {
+        if p.is_absolute()
+            || path_str.contains('/')
+            || path_str.contains('\\')
+            || path_str.contains(':')
+        {
             p.to_path_buf()
         } else {
             std::env::temp_dir().join(format!("{}.shm", path_str))
@@ -883,10 +896,16 @@ impl ShmRingBuffer {
             init_buf[24..28].copy_from_slice(&slot_size.to_le_bytes());
 
             file.seek(SeekFrom::Start(0)).map_err(|e| {
-                EvalError::BlackBoxFailure(format!("Failed to seek in SHM file '{:?}': {}", path, e))
+                EvalError::BlackBoxFailure(format!(
+                    "Failed to seek in SHM file '{:?}': {}",
+                    path, e
+                ))
             })?;
             file.write_all(&init_buf).map_err(|e| {
-                EvalError::BlackBoxFailure(format!("Failed to initialize SHM file '{:?}': {}", path, e))
+                EvalError::BlackBoxFailure(format!(
+                    "Failed to initialize SHM file '{:?}': {}",
+                    path, e
+                ))
             })?;
             file.flush().map_err(|e| {
                 EvalError::BlackBoxFailure(format!("Failed to flush SHM file '{:?}': {}", path, e))
@@ -920,7 +939,10 @@ impl ShmRingBuffer {
             EvalError::BlackBoxFailure(format!("Failed to seek header in SHM '{:?}': {}", path, e))
         })?;
         file.read_exact(&mut header).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to read header from SHM '{:?}': {}", path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to read header from SHM '{:?}': {}",
+                path, e
+            ))
         })?;
 
         if &header[0..16] != Self::MAGIC {
@@ -952,7 +974,11 @@ impl ShmRingBuffer {
     }
 
     /// Producer writes a new telemetry frame into the next circular slot.
-    pub fn write_telemetry(&mut self, json_payload: &str, timestamp_ns: u64) -> Result<u64, EvalError> {
+    pub fn write_telemetry(
+        &mut self,
+        json_payload: &str,
+        timestamp_ns: u64,
+    ) -> Result<u64, EvalError> {
         let payload_bytes = json_payload.as_bytes();
         if payload_bytes.len() + 20 > self.slot_size {
             return Err(EvalError::DomainError(format!(
@@ -964,11 +990,17 @@ impl ShmRingBuffer {
 
         // Read current write_seq
         self.file.seek(SeekFrom::Start(28)).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to seek write_seq in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to seek write_seq in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         let mut seq_buf = [0u8; 8];
         self.file.read_exact(&mut seq_buf).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to read write_seq in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to read write_seq in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         let next_seq = u64::from_le_bytes(seq_buf).wrapping_add(1);
 
@@ -976,31 +1008,61 @@ impl ShmRingBuffer {
         let slot_offset = Self::SLOTS_OFFSET + slot_idx * self.slot_size;
 
         // Write slot payload: slot_seq (8), timestamp_ns (8), payload_len (4), payload_bytes
-        self.file.seek(SeekFrom::Start(slot_offset as u64)).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to seek slot in '{:?}': {}", self.file_path, e))
-        })?;
+        self.file
+            .seek(SeekFrom::Start(slot_offset as u64))
+            .map_err(|e| {
+                EvalError::BlackBoxFailure(format!(
+                    "Failed to seek slot in '{:?}': {}",
+                    self.file_path, e
+                ))
+            })?;
         self.file.write_all(&next_seq.to_le_bytes()).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to write slot seq in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to write slot seq in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
-        self.file.write_all(&timestamp_ns.to_le_bytes()).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to write slot timestamp in '{:?}': {}", self.file_path, e))
-        })?;
-        self.file.write_all(&(payload_bytes.len() as u32).to_le_bytes()).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to write slot payload length in '{:?}': {}", self.file_path, e))
-        })?;
+        self.file
+            .write_all(&timestamp_ns.to_le_bytes())
+            .map_err(|e| {
+                EvalError::BlackBoxFailure(format!(
+                    "Failed to write slot timestamp in '{:?}': {}",
+                    self.file_path, e
+                ))
+            })?;
+        self.file
+            .write_all(&(payload_bytes.len() as u32).to_le_bytes())
+            .map_err(|e| {
+                EvalError::BlackBoxFailure(format!(
+                    "Failed to write slot payload length in '{:?}': {}",
+                    self.file_path, e
+                ))
+            })?;
         self.file.write_all(payload_bytes).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to write slot payload in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to write slot payload in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
 
         // Update header write_seq
         self.file.seek(SeekFrom::Start(28)).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to seek write_seq header in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to seek write_seq header in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         self.file.write_all(&next_seq.to_le_bytes()).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to commit write_seq in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to commit write_seq in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         self.file.flush().map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to flush SHM write in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to flush SHM write in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
 
         Ok(next_seq)
@@ -1009,15 +1071,24 @@ impl ShmRingBuffer {
     /// Consumer reads the latest telemetry frame from the circular slot buffer.
     pub fn read_latest(&self) -> Result<(u64, u64, String), EvalError> {
         let mut file = self.file.try_clone().map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to clone file handle for SHM '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to clone file handle for SHM '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
 
         file.seek(SeekFrom::Start(28)).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to seek write_seq in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to seek write_seq in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         let mut seq_buf = [0u8; 8];
         file.read_exact(&mut seq_buf).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to read write_seq in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to read write_seq in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         let write_seq = u64::from_le_bytes(seq_buf);
 
@@ -1031,25 +1102,38 @@ impl ShmRingBuffer {
         let slot_idx = (write_seq % (self.slot_count as u64)) as usize;
         let slot_offset = Self::SLOTS_OFFSET + slot_idx * self.slot_size;
 
-        file.seek(SeekFrom::Start(slot_offset as u64)).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to seek slot in '{:?}': {}", self.file_path, e))
-        })?;
+        file.seek(SeekFrom::Start(slot_offset as u64))
+            .map_err(|e| {
+                EvalError::BlackBoxFailure(format!(
+                    "Failed to seek slot in '{:?}': {}",
+                    self.file_path, e
+                ))
+            })?;
 
         let mut slot_seq_buf = [0u8; 8];
         file.read_exact(&mut slot_seq_buf).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to read slot_seq in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to read slot_seq in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         let slot_seq = u64::from_le_bytes(slot_seq_buf);
 
         let mut ts_buf = [0u8; 8];
         file.read_exact(&mut ts_buf).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to read slot timestamp in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to read slot timestamp in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         let timestamp_ns = u64::from_le_bytes(ts_buf);
 
         let mut len_buf = [0u8; 4];
         file.read_exact(&mut len_buf).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to read slot len in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to read slot len in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         let payload_len = u32::from_le_bytes(len_buf) as usize;
 
@@ -1062,11 +1146,17 @@ impl ShmRingBuffer {
 
         let mut payload_buf = vec![0u8; payload_len];
         file.read_exact(&mut payload_buf).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to read slot payload in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to read slot payload in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
 
         let payload_str = String::from_utf8(payload_buf).map_err(|e| {
-            EvalError::MalformedOutput(format!("Invalid UTF-8 in SHM telemetry frame {}: {}", slot_seq, e))
+            EvalError::MalformedOutput(format!(
+                "Invalid UTF-8 in SHM telemetry frame {}: {}",
+                slot_seq, e
+            ))
         })?;
 
         Ok((slot_seq, timestamp_ns, payload_str))
@@ -1085,34 +1175,64 @@ impl ShmRingBuffer {
 
         // Read current actuation_seq
         self.file.seek(SeekFrom::Start(36)).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to seek actuation_seq in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to seek actuation_seq in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         let mut seq_buf = [0u8; 8];
         self.file.read_exact(&mut seq_buf).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to read actuation_seq in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to read actuation_seq in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         let next_act_seq = u64::from_le_bytes(seq_buf).wrapping_add(1);
 
         // Write actuation payload into offset 64..512
-        self.file.seek(SeekFrom::Start(Self::HEADER_SIZE as u64)).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to seek actuation zone in '{:?}': {}", self.file_path, e))
-        })?;
+        self.file
+            .seek(SeekFrom::Start(Self::HEADER_SIZE as u64))
+            .map_err(|e| {
+                EvalError::BlackBoxFailure(format!(
+                    "Failed to seek actuation zone in '{:?}': {}",
+                    self.file_path, e
+                ))
+            })?;
         self.file.write_all(payload_bytes).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to write actuation payload in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to write actuation payload in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
 
         // Update actuation_seq and actuation_len
         self.file.seek(SeekFrom::Start(36)).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to seek actuation_seq header in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to seek actuation_seq header in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
-        self.file.write_all(&next_act_seq.to_le_bytes()).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to commit actuation_seq in '{:?}': {}", self.file_path, e))
-        })?;
-        self.file.write_all(&(payload_bytes.len() as u32).to_le_bytes()).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to commit actuation_len in '{:?}': {}", self.file_path, e))
-        })?;
+        self.file
+            .write_all(&next_act_seq.to_le_bytes())
+            .map_err(|e| {
+                EvalError::BlackBoxFailure(format!(
+                    "Failed to commit actuation_seq in '{:?}': {}",
+                    self.file_path, e
+                ))
+            })?;
+        self.file
+            .write_all(&(payload_bytes.len() as u32).to_le_bytes())
+            .map_err(|e| {
+                EvalError::BlackBoxFailure(format!(
+                    "Failed to commit actuation_len in '{:?}': {}",
+                    self.file_path, e
+                ))
+            })?;
         self.file.flush().map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to flush actuation in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to flush actuation in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
 
         Ok(next_act_seq)
@@ -1121,21 +1241,33 @@ impl ShmRingBuffer {
     /// Reads the latest reverse actuation commands from the SHM actuation zone.
     pub fn read_latest_actuation(&self) -> Result<(u64, String), EvalError> {
         let mut file = self.file.try_clone().map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to clone file for SHM '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to clone file for SHM '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
 
         file.seek(SeekFrom::Start(36)).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to seek actuation_seq in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to seek actuation_seq in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         let mut seq_buf = [0u8; 8];
         file.read_exact(&mut seq_buf).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to read actuation_seq in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to read actuation_seq in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         let act_seq = u64::from_le_bytes(seq_buf);
 
         let mut len_buf = [0u8; 4];
         file.read_exact(&mut len_buf).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to read actuation_len in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to read actuation_len in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
         let act_len = u32::from_le_bytes(len_buf) as usize;
 
@@ -1150,12 +1282,19 @@ impl ShmRingBuffer {
             )));
         }
 
-        file.seek(SeekFrom::Start(Self::HEADER_SIZE as u64)).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to seek actuation zone in '{:?}': {}", self.file_path, e))
-        })?;
+        file.seek(SeekFrom::Start(Self::HEADER_SIZE as u64))
+            .map_err(|e| {
+                EvalError::BlackBoxFailure(format!(
+                    "Failed to seek actuation zone in '{:?}': {}",
+                    self.file_path, e
+                ))
+            })?;
         let mut payload_buf = vec![0u8; act_len];
         file.read_exact(&mut payload_buf).map_err(|e| {
-            EvalError::BlackBoxFailure(format!("Failed to read actuation payload in '{:?}': {}", self.file_path, e))
+            EvalError::BlackBoxFailure(format!(
+                "Failed to read actuation payload in '{:?}': {}",
+                self.file_path, e
+            ))
         })?;
 
         let payload_str = String::from_utf8(payload_buf).map_err(|e| {
@@ -1209,7 +1348,7 @@ impl ShmEvaluator {
             let _ = write!(json_str, "\"{}\": {}", k, commands[k]);
             first = false;
         }
-        json_str.push_str("}");
+        json_str.push('}');
 
         let mut guard = self.ring.lock().map_err(|e| {
             EvalError::BlackBoxFailure(format!("Failed to lock SHM ring buffer mutex: {}", e))
@@ -1270,7 +1409,7 @@ impl Evaluator for ShmEvaluator {
 
         let timestamp_ms = parse_json_u64(trimmed, "timestamp_ms")
             .or_else(|| parse_json_u64(trimmed, "timestamp"))
-            .or_else(|| if ts_ns > 0 { Some(ts_ns / 1_000_000) } else { None });
+            .or((ts_ns > 0).then_some(ts_ns / 1_000_000));
         let ttl_ms = parse_json_u64(trimmed, "ttl_ms")
             .or_else(|| parse_json_float(trimmed, "ttl").map(|s| (s * 1000.0) as u64));
         let warnings = parse_json_string_array(trimmed, "warnings");
@@ -1298,6 +1437,7 @@ impl Evaluator for ShmEvaluator {
 }
 
 #[cfg(windows)]
+#[allow(clippy::upper_case_acronyms)] // HMODULE / FARPROC are the Win32 type names
 mod os_ffi {
     use std::ffi::c_void;
     pub type HMODULE = *mut c_void;
@@ -1340,7 +1480,11 @@ impl DynamicLibrary {
         #[cfg(windows)]
         {
             use std::os::windows::ffi::OsStrExt;
-            let wide: Vec<u16> = p.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+            let wide: Vec<u16> = p
+                .as_os_str()
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect();
             let handle = unsafe { os_ffi::LoadLibraryW(wide.as_ptr()) };
             if handle.is_null() {
                 let err_code = unsafe { os_ffi::GetLastError() };
@@ -1363,7 +1507,9 @@ impl DynamicLibrary {
                     if err_ptr.is_null() {
                         "Unknown dlopen error".to_string()
                     } else {
-                        std::ffi::CStr::from_ptr(err_ptr).to_string_lossy().into_owned()
+                        std::ffi::CStr::from_ptr(err_ptr)
+                            .to_string_lossy()
+                            .into_owned()
                     }
                 };
                 return Err(EvalError::BlackBoxFailure(format!(
@@ -1373,8 +1519,23 @@ impl DynamicLibrary {
             }
             Ok(Self { handle })
         }
+        #[cfg(not(any(windows, unix)))]
+        {
+            Err(EvalError::BlackBoxFailure(format!(
+                "dynamic external libraries are not supported on this target (cannot load '{:?}')",
+                p
+            )))
+        }
     }
 
+    /// Copy the named symbol out of this library as a `T`.
+    ///
+    /// # Safety
+    ///
+    /// `symbol_name` must name a symbol whose stored value is a valid `T`.
+    /// `T` is the symbol's real type, usually a function pointer, and the
+    /// caller must not use the value after this library is dropped. A
+    /// mismatched `T` is undefined behavior.
     pub unsafe fn get_symbol<T: Copy>(&self, symbol_name: &str) -> Result<T, EvalError> {
         #[cfg(windows)]
         {
@@ -1401,7 +1562,9 @@ impl DynamicLibrary {
                     if err_ptr.is_null() {
                         "Symbol not found".to_string()
                     } else {
-                        std::ffi::CStr::from_ptr(err_ptr).to_string_lossy().into_owned()
+                        std::ffi::CStr::from_ptr(err_ptr)
+                            .to_string_lossy()
+                            .into_owned()
                     }
                 };
                 return Err(EvalError::BlackBoxFailure(format!(
@@ -1410,6 +1573,13 @@ impl DynamicLibrary {
                 )));
             }
             Ok(unsafe { std::mem::transmute_copy(&proc) })
+        }
+        #[cfg(not(any(windows, unix)))]
+        {
+            let _ = symbol_name;
+            Err(EvalError::BlackBoxFailure(
+                "dynamic external libraries are not supported on this target".to_string(),
+            ))
         }
     }
 }
@@ -1973,82 +2143,146 @@ impl Orchestrator {
         if n_objs < 2 {
             return Some(0);
         }
-
-        // Find the pair of objectives with the strongest trade-off (negative correlation)
-        let mut best_pair = (0, 1);
-        let mut best_tradeoff_score = f64::NEG_INFINITY;
-
-        for j1 in 0..n_objs {
-            for j2 in (j1 + 1)..n_objs {
-                let vals1: Vec<f64> = frontier.iter().map(|p| p.objectives[j1].1).collect();
-                let vals2: Vec<f64> = frontier.iter().map(|p| p.objectives[j2].1).collect();
-
-                let min1 = vals1.iter().cloned().fold(f64::INFINITY, f64::min);
-                let max1 = vals1.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-                let min2 = vals2.iter().cloned().fold(f64::INFINITY, f64::min);
-                let max2 = vals2.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-
-                let span1 = max1 - min1;
-                let span2 = max2 - min2;
-
-                if span1 < 1e-9 || span2 < 1e-9 {
-                    continue;
-                }
-
-                let d1 = vals1.last().unwrap() - vals1.first().unwrap();
-                let d2 = vals2.last().unwrap() - vals2.first().unwrap();
-
-                let is_conflicting = (d1 * d2) < 0.0;
-                let score = if is_conflicting {
-                    1.0 + (span1.abs() * span2.abs())
-                } else {
-                    span1.abs() + span2.abs()
-                };
-
-                if score > best_tradeoff_score {
-                    best_tradeoff_score = score;
-                    best_pair = (j1, j2);
-                }
-            }
-        }
-
-        let (j1, j2) = best_pair;
-
-        let vals1: Vec<f64> = frontier.iter().map(|p| p.objectives[j1].1).collect();
-        let vals2: Vec<f64> = frontier.iter().map(|p| p.objectives[j2].1).collect();
-
-        let min1 = vals1.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max1 = vals1.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        let min2 = vals2.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max2 = vals2.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-
-        let span1 = (max1 - min1).max(1e-12);
-        let span2 = (max2 - min2).max(1e-12);
-
-        let x1 = (vals1[0] - min1) / span1;
-        let y1 = (vals2[0] - min2) / span2;
-        let x2 = (vals1[vals1.len() - 1] - min1) / span1;
-        let y2 = (vals2[vals2.len() - 1] - min2) / span2;
-
-        let denom = ((y2 - y1).powi(2) + (x2 - x1).powi(2)).sqrt();
-        if denom < 1e-12 {
+        // A ragged frontier has no single objective axis to measure.
+        if frontier.iter().any(|p| p.objectives.len() != n_objs) {
             return Some(frontier.len() / 2);
         }
 
-        let mut max_dist = -1.0;
-        let mut knee_idx = frontier.len() / 2;
+        let series: Vec<Vec<f64>> = (0..n_objs)
+            .map(|j| frontier.iter().map(|p| p.objectives[j].1).collect())
+            .collect();
+        // A flat or empty trade-off still yields a point, matching earlier callers
+        // that only check `is_some`. The balanced sample on a straight front is
+        // the midpoint.
+        Some(knee_of_series(&series).unwrap_or(frontier.len() / 2))
+    }
+}
 
-        // Scan interior points (indices 1 to n-2) to pick the true balanced trade-off
-        for i in 1..(frontier.len() - 1) {
-            let x0 = (frontier[i].objectives[j1].1 - min1) / span1;
-            let y0 = (frontier[i].objectives[j2].1 - min2) / span2;
-            let dist = ((y2 - y1) * x0 - (x2 - x1) * y0 + x2 * y1 - y2 * x1).abs() / denom;
-            if dist > max_dist {
-                max_dist = dist;
-                knee_idx = i;
+/// Below this normalized chord distance the curve is straight, and the
+/// balanced compromise is the midpoint rather than a noisy interior sample.
+const KNEE_FLAT: f64 = 1e-6;
+
+/// Index of the balanced compromise across parallel series.
+///
+/// Each series is one objective sampled at the same parameter values. The pair
+/// whose normalized curve bows farthest from the chord between its endpoints
+/// supplies the index, so a large-unit straight objective cannot hide a smaller
+/// curved trade-off. A straight pair stays at the midpoint. A pair whose
+/// endpoints meet is measured by distance from that point, so a spike is not
+/// reported as the middle sample. `None` when fewer than two series move or
+/// fewer than three samples exist.
+pub fn knee_of_series(series: &[Vec<f64>]) -> Option<usize> {
+    if series.len() < 2 {
+        return None;
+    }
+    let n = series[0].len();
+    if n <= 2 || series.iter().any(|s| s.len() != n) {
+        return None;
+    }
+    let mut best: Option<(usize, f64)> = None;
+    for a in 0..series.len() {
+        for b in (a + 1)..series.len() {
+            let Some((idx, dev)) = chord_knee(&series[a], &series[b]) else {
+                continue;
+            };
+            let replace = match best {
+                None => true,
+                Some((_, best_dev)) => dev > best_dev,
+            };
+            if replace {
+                best = Some((idx, dev));
             }
         }
+    }
+    best.map(|(idx, _)| idx)
+}
 
-        Some(knee_idx)
+/// Knee index and its normalized deviation for one pair. `None` when either
+/// series is non-finite or does not move.
+fn chord_knee(a: &[f64], b: &[f64]) -> Option<(usize, f64)> {
+    if a.iter().chain(b.iter()).any(|v| !v.is_finite()) {
+        return None;
+    }
+    let extent = |s: &[f64]| {
+        let lo = s.iter().copied().fold(f64::INFINITY, f64::min);
+        let hi = s.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        (lo, hi - lo)
+    };
+    let (lo_a, span_a) = extent(a);
+    let (lo_b, span_b) = extent(b);
+    if span_a < 1e-9 || span_b < 1e-9 {
+        return None;
+    }
+    let norm = |v: f64, lo: f64, span: f64| (v - lo) / span;
+    let last = a.len() - 1;
+    let x1 = norm(a[0], lo_a, span_a);
+    let y1 = norm(b[0], lo_b, span_b);
+    let x2 = norm(a[last], lo_a, span_a);
+    let y2 = norm(b[last], lo_b, span_b);
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    let denom = (dx * dx + dy * dy).sqrt();
+    let mid = a.len() / 2;
+    let mut best_i = mid;
+    let mut best_d = 0.0;
+    for i in 1..last {
+        let x0 = norm(a[i], lo_a, span_a);
+        let y0 = norm(b[i], lo_b, span_b);
+        let dist = if denom < 1e-12 {
+            ((x0 - x1).powi(2) + (y0 - y1).powi(2)).sqrt()
+        } else {
+            (dy * x0 - dx * y0 + x2 * y1 - y2 * x1).abs() / denom
+        };
+        if dist > KNEE_FLAT && dist > best_d {
+            best_d = dist;
+            best_i = i;
+        }
+    }
+    Some((best_i, best_d))
+}
+
+#[cfg(test)]
+mod knee_tests {
+    use super::knee_of_series;
+
+    #[test]
+    fn straight_tradeoff_knee_is_the_midpoint() {
+        let a: Vec<f64> = (0..21).map(|i| i as f64).collect();
+        let b: Vec<f64> = a.iter().map(|v| v * 3.0).collect();
+        assert_eq!(knee_of_series(&[a, b]), Some(10));
+    }
+
+    #[test]
+    fn bowed_pair_beats_a_larger_straight_pair() {
+        let mut quality = Vec::new();
+        let mut cost = Vec::new();
+        let mut noise = Vec::new();
+        for i in 0..=20 {
+            let effort = 1.0 + (i as f64 / 20.0) * 99.0;
+            quality.push(effort.sqrt());
+            cost.push(effort * 2.0);
+            noise.push(effort * 1000.0);
+        }
+        assert_eq!(knee_of_series(&[quality, cost, noise]), Some(6));
+    }
+
+    #[test]
+    fn spike_off_the_midpoint_when_endpoints_meet() {
+        let a = vec![0.0, 5.0, 0.0, 0.0, 0.0];
+        let b = vec![0.0, 1.0, 0.0, 0.0, 0.0];
+        assert_eq!(knee_of_series(&[a, b]), Some(1));
+    }
+
+    #[test]
+    fn a_non_finite_series_does_not_erase_the_other_pair() {
+        let mut quality = Vec::new();
+        let mut cost = Vec::new();
+        let ghost = vec![f64::NAN; 21];
+        for i in 0..=20 {
+            let effort = 1.0 + (i as f64 / 20.0) * 99.0;
+            quality.push(effort.sqrt());
+            cost.push(effort * 2.0);
+        }
+        assert_eq!(knee_of_series(&[quality, cost, ghost]), Some(6));
     }
 }

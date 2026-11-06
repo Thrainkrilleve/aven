@@ -55,3 +55,6 @@ verify/nowcast_results.jsonl
 
 # Per-run model copies written by verify/nowcast_skill.py
 evaluations/possible/_nowcast_*.aven
+
+# Local report/export artifacts from the IDE (HTML/PDF/CSV test output)
+app/aven-orchestrator/reports-test/

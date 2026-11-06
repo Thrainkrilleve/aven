@@ -56,6 +56,10 @@ Undefined operations (division by zero, `sqrt` of a negative, `ln` of a non-posi
 A `relation` defines a system of mathematical equations that hold true simultaneously:
 
 ```aven
+signal velocity       : m/s
+signal speed_of_sound : m/s
+signal air_density    : kg/m^3
+
 relation CompressibleAero {
     mach = velocity / speed_of_sound
     dynamic_pressure = 0.5 * air_density * (velocity ^ 2)
@@ -66,6 +70,9 @@ relation CompressibleAero {
 A `forward` block specifies an explicit forward evaluation order without solver relaxation:
 
 ```aven
+signal total_workers    : scalar
+signal cores_per_worker : scalar
+
 forward WorkloadCalculation {
     total_cpu_cores = ceil(total_workers * cores_per_worker)
 }
@@ -76,12 +83,18 @@ Relations may delegate telemetry ingestion or evaluation to external or persiste
 
 1. **Subprocess External Evaluator:**
    ```aven
+   signal max_operating_temp_c : degC
+   signal ambient_temp_c       : degC
+
    relation WeatherMesh using external("python", "evaluations/weather/nws_adapter.py") {
        free_cooling_margin = max_operating_temp_c - ambient_temp_c
    }
    ```
 2. **Persistent Socket IPC Daemon:**
    ```aven
+   signal baro_altitude_m   : m
+   signal gauge_elevation_m : m
+
    relation FlightMesh using ipc("127.0.0.1:9090") {
        terrain_clearance_m = baro_altitude_m - gauge_elevation_m
    }
@@ -133,6 +146,9 @@ Without a `minimize` or `maximize` objective, bounds check values; they never ch
 To enforce discrete solutions (e.g. server instances, pods, workers), declare integer constraints.
 Integer variables represent counts: **without an explicit lower bound they are constrained to be `>= 0`**. Declare a bound (e.g. `offset >= -10`) for an integer that may be negative.
 ```aven
+signal workers : scalar
+signal pods    : scalar
+
 relation ClusterAllocation {
     int workers
     int pods

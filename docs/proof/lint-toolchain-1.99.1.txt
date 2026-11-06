@@ -1,0 +1,27 @@
+channel: 1.99.1
+rustc: rustc 1.99.1 (58cf8f9c3 2026-10-13)
+rustfmt: rustfmt 1.10.0-stable (58cf8f9c35 2026-10-13)
+active-toolchain: 1.99.1-x86_64-unknown-linux-gnu (overridden by rust-toolchain.toml)
+recorded: 2026-10-27 16:24 America/Denver (22:24 UTC)
+
+command: cargo fmt --check
+exit: 0
+
+command: cargo clippy --all-targets -- -D warnings
+exit: 0
+
+command: cargo test --release
+exit: 0
+passed: 152
+failed: 0
+
+Full compiler output:
+- docs/proof/cargo-fmt-check-1.99.1.txt
+- docs/proof/cargo-clippy-1.99.1.txt
+- docs/proof/cargo-test-release-1.99.1.txt
+
+command: python3 scripts/check_docs.py
+exit: 0
+examples: 45
+documented-outputs: 2
+problems: 0

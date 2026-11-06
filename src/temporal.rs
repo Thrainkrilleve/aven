@@ -33,17 +33,14 @@ impl TemporalSample {
 }
 
 /// Staleness decay models that calculate confidence/freshness score in [0.0, 1.0].
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum StalenessDecay {
     Step,
+    #[default]
     Linear,
-    Exponential { half_life_ms: f64 },
-}
-
-impl Default for StalenessDecay {
-    fn default() -> Self {
-        Self::Linear
-    }
+    Exponential {
+        half_life_ms: f64,
+    },
 }
 
 impl StalenessDecay {
@@ -206,11 +203,7 @@ impl RetentionWindow {
             return Some(0.0);
         }
         let avg = self.moving_average()?;
-        let sq_diff_sum: f64 = self
-            .samples
-            .iter()
-            .map(|s| (s.value - avg).powi(2))
-            .sum();
+        let sq_diff_sum: f64 = self.samples.iter().map(|s| (s.value - avg).powi(2)).sum();
         Some(sq_diff_sum / (self.samples.len() - 1) as f64)
     }
 

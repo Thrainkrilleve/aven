@@ -1,0 +1,44 @@
+// One afternoon's quantities, in the units a field and a lab bench already use.
+// An inch of rain on two acres, fifty pounds of seed on that ground, a half-litre
+// dose at 2 mol/L, and four events per second for three seconds.
+//   avenc run examples/catalog_units.aven
+
+signal field : acre
+signal rain : in
+signal caught : gal
+signal seed : lb
+signal seeding : lb/acre
+
+signal conc : mol/L
+signal volume : L
+signal amount : mol
+
+signal rate : 1/s
+signal duration : s
+signal count : scalar
+
+relation Rainfall {
+    caught = rain * field
+}
+
+relation Seeding {
+    seeding = seed / field
+}
+
+relation Dose {
+    amount = conc * volume
+}
+
+relation Ticks {
+    count = rate * duration
+}
+
+solve Rainfall with {
+    rain = 1 in
+    field = 2 acre
+    seed = 50 lb
+    conc = 2 mol/L
+    volume = 0.5 L
+    rate = 4 1/s
+    duration = 3 s
+}
