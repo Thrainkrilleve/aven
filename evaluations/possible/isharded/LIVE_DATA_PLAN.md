@@ -1,6 +1,6 @@
 # Live data from iSharded into Aven: review and options
 
-A review of what it would take for Aven to read live numbers from an [iSharded](https://github.com/AuXFire/iSharded) mesh, to discuss with iSharded's developer. Nothing here is built yet. It goes with the draft model in this folder ([`isharded_route.aven`](isharded_route.aven), explained in [README.md](README.md)).
+A review of what it would take for Aven to read live numbers from an [iSharded](https://github.com/AuXFire/iSharded) mesh, to discuss with iSharded's developer. A first poller ([`isharded_poller.py`](isharded_poller.py)) is now included for options A and B below; the IDE-live (C) and adapter (D) paths are not built. It goes with the draft model in this folder ([`isharded_route.aven`](isharded_route.aven), explained in [README.md](README.md)).
 
 iSharded was reviewed against its `main` on 2026-11-06. The project moves quickly, so exact file positions drift — references below are to functions, and its Python modules live under `isharded/`. Aven was reviewed on `main` at `014981e`.
 
@@ -84,8 +84,8 @@ What Aven supports today:
 
 | Option | Works today? | What it gives | Work needed |
 |---|---|---|---|
-| **A. Snapshot into the IDE** | Yes | Real numbers in the IDE, refreshed by hand: run the poller, then "import sheet" | A small poller that writes the CSV |
-| **B. Live monitor** | Yes, command line | A reading every 10–30 s into `avenc stream`: alarms when measured speed falls well below plan, a stage runs slower than its estimate, or a link exceeds its budget | The same poller, printing JSON lines |
+| **A. Snapshot into the IDE** | Yes | Real numbers in the IDE, refreshed by hand: run the poller, then "import sheet" | Built: `isharded_poller.py --out csv` |
+| **B. Live monitor** | Yes, command line | A reading every 10–30 s into `avenc stream`; it re-solves the per-link round trip each tick and alarms on the model's provisional thresholds (speed floor, per-link and compute ceilings, network-share ceiling). Refining those margins, and adding per-stage "within the planner's estimate" checks, is a choice to make with the developer | Built: `isharded_poller.py` (stream) + provisional thresholds |
 | **C. Live inside the IDE** | No | The IDE re-solves as new readings arrive | IDE feature. Safest form: "watch this CSV and re-import when it changes", rather than letting the editor run programs |
 | **D. Adapter for `avenc run`** | Yes, command line | Each run records a hash of what the mesh reported, and refuses stale data | The poller packaged as an adapter |
 
@@ -96,7 +96,7 @@ What Aven supports today:
 - **Measurements instead of estimates.** Each stage's measured compute time becomes an input. The model then reports each stage's effective memory bandwidth (solved backward from its bytes per token) and its gap from the planner's `estimated_ms_per_token`.
 - **Per-link hop times** instead of one average, once iSharded publishes them (gap 1), and real per-hop transfer times derived from each worker's telemetry (gap 2).
 - **Bytes per token from the plan**, if iSharded exposes it (see the developer questions): per-stage bytes read per token — dense weights, active experts, embedding, head — would replace the draft's even split over 94 layers.
-- **Limits for monitoring:** for example, measured speed at least some share of the planned speed; each stage within some margin of its estimate; no link over a set time. The margins are a choice to make with the developer.
+- **Limits for monitoring:** for example, measured speed at least some share of the planned speed; each stage within some margin of its estimate; no link over a set time. The margins are a choice to make with the developer. Provisional versions — a usable-speed floor and per-link, compute and network-share ceilings, as the signals `min_rate`, `max_hop_ms`, `max_compute_ms`, `max_network_share` — are now in the solve block, marked as placeholders.
 - **Route shape.** The number of stages changes when the mesh rebalances, and Aven has no lists. Two ways:
   - **Fixed slots** (say 12 stages; unused ones set to zero): one stable file, simple for the IDE.
   - **Generated per route:** the poller writes a model that matches the current route exactly; a new file whenever the route changes.
@@ -112,7 +112,7 @@ What Aven supports today:
 ## 8. Suggested order of work
 
 1. Agree with the developer on gaps 1–3 (section 4) and on the monitoring limits.
-2. Write the poller: read `/admin/status` (a user key is enough — it carries the route, the plan estimate, measured speed, and per-worker compute), convert to the model's units, and write a CSV snapshot or JSON lines.
+2. Run the poller (`isharded_poller.py`): it reads `/admin/status` (a user key is enough — it carries the route, the plan estimate, measured speed, and per-worker compute), converts to the model's units, and writes a CSV snapshot or JSON lines. `--raw` confirms the field names against your build.
 3. Update the model for measured inputs and the chosen route shape (section 6).
 4. Try option A: import a snapshot in the IDE and compare measured against planned stage by stage.
 5. Run option B on a live mesh during a test like the 7-machine run.
