@@ -1,0 +1,32 @@
+# Stage 1 mesh simulator: 4 stub workers + coordinator, all local.
+# No models yet (stage 2 swaps the worker image for real inference).
+#
+#   docker compose up --build
+# then, on the host:
+#   python gen_route.py --from-url http://localhost:8080 --key dev-user-key -o route.aven
+#   ISHARDED_URL=http://localhost:8080 ISHARDED_KEY=dev-user-key \
+#     python ../isharded_poller.py --interval 2 | avenc stream route.aven
+# fault injection:
+#   docker compose stop worker-3     # observed_rate collapses -> ALARM
+services:
+  worker-1:
+    build: ./worker
+    environment: { WORKER_ID: worker-1, LAYERS: "23", COMPUTE_MS: "15", HOP_MS: "5" }
+  worker-2:
+    build: ./worker
+    environment: { WORKER_ID: worker-2, LAYERS: "24", COMPUTE_MS: "15", HOP_MS: "5" }
+  worker-3:
+    build: ./worker
+    environment: { WORKER_ID: worker-3, LAYERS: "24", COMPUTE_MS: "15", HOP_MS: "5" }
+  worker-4:
+    build: ./worker
+    environment: { WORKER_ID: worker-4, LAYERS: "23", COMPUTE_MS: "15", HOP_MS: "5" }
+  coordinator:
+    build: ./coordinator
+    environment:
+      ROUTE: "http://worker-1:8000,http://worker-2:8000,http://worker-3:8000,http://worker-4:8000"
+      USER_KEY: dev-user-key
+      PLANNED_TPS: "4.9"
+      POLL_EVERY: "1.0"
+    ports: ["8080:8080"]
+    depends_on: [worker-1, worker-2, worker-3, worker-4]
