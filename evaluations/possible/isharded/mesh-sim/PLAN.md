@@ -90,9 +90,28 @@ endpoint URL and key — nothing else.**
   for an adapter → Aven → action loop in a cluster — the monitor follows the same shape.
 - **`isharded_poller.py`** is the monitor's data tap, unchanged.
 
+## Deployment & Nova integration (non-disruptive)
+
+Nova runs live on the server, so integration must not interrupt her.
+
+- **Files to the server:** at stage 3, copy `mesh-sim/` to the server (scp/rsync over Tailscale)
+  and bring the mesh up there as its **own compose stack**, separate from Nova's.
+- **Connecting Nova:** join the two stacks on a shared **external Docker network** (or the monitor
+  reaches Nova at her host address `127.0.0.1:8740` / `host.docker.internal:8740`). Do **not** loosen
+  Nova's sandbox (`read_only`, `cap_drop: ALL`, `no-new-privileges`).
+- **Picking up the API link without downtime for the rest:** set Nova's env/config for the link, then
+  restart **only** her service — `docker compose -f deploy/docker-compose.yml up -d --no-deps nova`
+  (Nova's own documented single-service update). Her supporting services (nllb, whisper, tts, searxng)
+  and the co-hosted Alliance Auth / Forgejo stacks keep running; only Nova blips for a few seconds.
+- **Alarm path:** the monitor posts each `avenc stream` `ALARM` to Nova's `:8740` API (API-key auth)
+  so she announces it; or, with zero Nova change, straight to a Discord webhook. A small `/notify`
+  endpoint in Nova's repo is the cleanest, but that's a change on her side.
+
 ## Open items
 
-- Model runtime for stage 2 (Ollama / llama.cpp-GGUF / transformers) — picks the worker image.
+- Model runtime for stage 2: **llama.cpp / GGUF `llama-server`** — matches Nova's host LLM
+  (`127.0.0.1:8780` via `host.docker.internal`) and real iSharded (Qwen Q6_K via llama.cpp).
+  Decided; just needs the `.gguf` files uploaded.
 - Whether Nova drives runs (triggers token loops) or only reports (`ALARM` → Discord), or both.
 - Aeric option: each worker can additionally run the AERIC C99 tick (HOLD on a bad input) as a
   per-worker self-governor — a second control layer on top of the mesh monitor.
