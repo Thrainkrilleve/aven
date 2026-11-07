@@ -85,7 +85,7 @@ What Aven supports today:
 | Option | Works today? | What it gives | Work needed |
 |---|---|---|---|
 | **A. Snapshot into the IDE** | Yes | Real numbers in the IDE, refreshed by hand: run the poller, then "import sheet" | Built: `isharded_poller.py --out csv` |
-| **B. Live monitor** | Yes, command line | A reading every 10–30 s into `avenc stream`; today it re-solves and reports the per-link round trip each tick. Alarms (measured speed well below plan, a stage slower than its estimate, a link over budget) need threshold constraints in the model — a choice still to make with the developer | Built: `isharded_poller.py` (stream); thresholds pending |
+| **B. Live monitor** | Yes, command line | A reading every 10–30 s into `avenc stream`; it re-solves the per-link round trip each tick and alarms on the model's provisional thresholds (speed floor, per-link and compute ceilings, network-share ceiling). Refining those margins, and adding per-stage "within the planner's estimate" checks, is a choice to make with the developer | Built: `isharded_poller.py` (stream) + provisional thresholds |
 | **C. Live inside the IDE** | No | The IDE re-solves as new readings arrive | IDE feature. Safest form: "watch this CSV and re-import when it changes", rather than letting the editor run programs |
 | **D. Adapter for `avenc run`** | Yes, command line | Each run records a hash of what the mesh reported, and refuses stale data | The poller packaged as an adapter |
 
@@ -96,7 +96,7 @@ What Aven supports today:
 - **Measurements instead of estimates.** Each stage's measured compute time becomes an input. The model then reports each stage's effective memory bandwidth (solved backward from its bytes per token) and its gap from the planner's `estimated_ms_per_token`.
 - **Per-link hop times** instead of one average, once iSharded publishes them (gap 1), and real per-hop transfer times derived from each worker's telemetry (gap 2).
 - **Bytes per token from the plan**, if iSharded exposes it (see the developer questions): per-stage bytes read per token — dense weights, active experts, embedding, head — would replace the draft's even split over 94 layers.
-- **Limits for monitoring:** for example, measured speed at least some share of the planned speed; each stage within some margin of its estimate; no link over a set time. The margins are a choice to make with the developer.
+- **Limits for monitoring:** for example, measured speed at least some share of the planned speed; each stage within some margin of its estimate; no link over a set time. The margins are a choice to make with the developer. Provisional versions — a usable-speed floor and per-link, compute and network-share ceilings, as the signals `min_rate`, `max_hop_ms`, `max_compute_ms`, `max_network_share` — are now in the solve block, marked as placeholders.
 - **Route shape.** The number of stages changes when the mesh rebalances, and Aven has no lists. Two ways:
   - **Fixed slots** (say 12 stages; unused ones set to zero): one stable file, simple for the IDE.
   - **Generated per route:** the poller writes a model that matches the current route exactly; a new file whenever the route changes.
