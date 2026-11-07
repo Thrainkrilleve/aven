@@ -72,6 +72,12 @@ signal compute_only_rate : token/s
 signal planned_rate : token/s
 signal planned_hop_ms : ms        // the round-trip per link the planner's estimate implies
 
+// ---- Provisional monitoring thresholds (tune with iSharded's developer) ----
+signal min_rate : token/s          // usable-speed floor
+signal max_hop_ms : ms             // per-link round-trip ceiling
+signal max_compute_ms : ms         // compute budget
+signal max_network_share : percent // network-domination ceiling
+
 relation TokenTrip {
     // A mixture-of-experts model reads only its active parameters for each token
     active_fraction = active_params / total_params
@@ -135,7 +141,26 @@ solve TokenTrip with {
     observed_rate = 1.01 token/s
     planned_rate = 4.9 token/s
 
+    // Provisional thresholds [assumption] — placeholders to tune with the developer
+    min_rate = 0.8 token/s
+    max_hop_ms = 200 ms
+    max_compute_ms = 150 ms
+    max_network_share = 95 percent
+
     // Checks: every layer placed exactly once; a sane efficiency
     layers_placed == 94
     efficiency <= 1
+
+    // --- Provisional monitoring thresholds (PLACEHOLDER margins) --------------
+    // These make `avenc stream` raise ALARM when a live reading degrades. The
+    // numbers are first guesses, chosen to pass this baseline run (1.01 token/s,
+    // 147 ms per link, 106 ms compute, 89% network) and to fire on clear
+    // degradation. Tune them with iSharded's developer. A plan-relative floor
+    // (observed_rate >= k * planned_rate) can replace the fixed floor once a
+    // target speed is agreed; a per-stage "within margin of the planner's
+    // estimate" check needs estimated_ms_per_token per stage, not yet modelled.
+    observed_rate >= min_rate         // usable-speed floor
+    avg_hop_ms <= max_hop_ms          // per-link round-trip ceiling
+    compute_ms <= max_compute_ms      // compute budget (catches a RAM spill or a slow stage)
+    network_share <= max_network_share // network-domination ceiling
 }

@@ -78,7 +78,7 @@ ISHARDED_URL=https://<node> ISHARDED_KEY=<user-key> python evaluations/possible/
 python evaluations/possible/isharded/isharded_poller.py --raw
 ```
 
-It runs wherever it can reach the mesh (same LAN, Tailscale, or the TLS endpoint); the key is sent only as a request header, never in the URL, the CSV or the repo. Two things to confirm against your iSharded build, both adjustable by flag (no code change): the auth header (default `Authorization: Bearer`) and the `/admin/status` field names — `--raw` prints the actual shape. It does not alarm on slow speed yet: the model carries only sanity checks so far, and monitoring thresholds are a choice to make with iSharded's developer (see the plan).
+It runs wherever it can reach the mesh (same LAN, Tailscale, or the TLS endpoint); the key is sent only as a request header, never in the URL, the CSV or the repo. Two things to confirm against your iSharded build, both adjustable by flag (no code change): the auth header (default `Authorization: Bearer`) and the `/admin/status` field names — `--raw` prints the actual shape. The model carries provisional monitoring thresholds (`min_rate`, `max_hop_ms`, `max_compute_ms`, `max_network_share`), so `avenc stream` raises `ALARM` when a reading degrades past them; the margins are placeholders to tune with iSharded's developer (see the plan).
 
 [LIVE_DATA_PLAN.md](LIVE_DATA_PLAN.md) reviews what iSharded already exposes, what is missing, and the options for feeding live readings into this model, the IDE and `avenc stream`.
 
