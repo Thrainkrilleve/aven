@@ -1,9 +1,11 @@
 // isharded_route.aven — DRAFT: where the time goes when iSharded serves one token
 //
 // Models one chat stream on a 7-stage iSharded route (github.com/AuXFire/iSharded):
-// each token passes through every stage in order, then the exit sends it back to the
-// entry. Decoding is limited by memory bandwidth, so a stage's compute time is the
-// bytes it reads per token divided by how fast its memory delivers them.
+// the entry worker runs the token loop, and each stage POSTs its activations to the
+// next and waits for the reply, so a sampled token unwinds back along the same links.
+// Every link is therefore a round trip, and there is no separate exit -> entry hop.
+// Decoding is limited by memory bandwidth, so a stage's compute time is the bytes it
+// reads per token divided by how fast its memory delivers them.
 //
 // Every number below says where it came from:
 //   [screenshot]  the dashboard and chat from the 7-machine run of
@@ -59,8 +61,8 @@ signal s7_ms : ms
 // ---- The token's trip ------------------------------------------------------
 signal layers_placed : scalar
 signal compute_ms : ms
-signal hops : scalar              // links a token crosses, including exit -> entry
-signal avg_hop_ms : ms            // one-way delay per link, all overhead included
+signal hops : scalar              // links between consecutive stages (stages - 1)
+signal avg_hop_ms : ms            // round-trip per link: activations out, reply back
 signal network_ms : ms
 signal token_ms : ms
 signal per_token : token
@@ -68,7 +70,7 @@ signal observed_rate : token/s
 signal network_share : percent
 signal compute_only_rate : token/s
 signal planned_rate : token/s
-signal planned_hop_ms : ms        // the per-hop delay the planner's estimate implies
+signal planned_hop_ms : ms        // the round-trip per link the planner's estimate implies
 
 relation TokenTrip {
     // A mixture-of-experts model reads only its active parameters for each token
@@ -126,7 +128,7 @@ solve TokenTrip with {
     // [assumption] replace with measurements
     efficiency = 0.6
     ram_bw = 40 GB/s
-    hops = 7                    // 6 links between stages + exit back to entry
+    hops = 6                    // 6 links, each traversed out and back (the reply unwinds), so a round trip
 
     // Measured and planned speeds [screenshot: chat "1.01 tokens/s", plan "about 4.9"]
     per_token = 1 token

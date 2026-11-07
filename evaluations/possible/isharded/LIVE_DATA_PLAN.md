@@ -46,8 +46,8 @@ From the 7-machine run of Qwen3-235B-A22B-Instruct-2507 Q6_K (172.52 GiB of weig
 |---|---|
 | Compute per token, all 7 stages | about 106 ms |
 | Network per token | about 884 ms, **89% of the time** |
-| Average delay per link that explains 1.01 tokens/s | **about 126 ms** |
-| Delay per link the planner's 4.9 tokens/s implies | about 14 ms |
+| Average round-trip per link that explains 1.01 tokens/s | **about 147 ms** |
+| Round-trip per link the planner's 4.9 tokens/s implies | about 16 ms |
 | Slowest stage | ro-pro4000-gpu: 66 ms of the 106, because 14.77 GiB of its weights are in system RAM |
 
 These rest on stand-ins: GPU spec-sheet memory speeds, an assumed 60% efficiency and 40 GB/s RAM speed, and one average hop time solved from the measured speed. Live data replaces all of them.
@@ -70,8 +70,8 @@ Crucially, per-worker `compute_ms_ema` is **already in `/admin/status` on a read
 ## 4. Gaps that need iSharded's developer
 
 1. **Link times between workers are not published.** iSharded measures worker-to-worker round trips — `measure_links` in `orchestrator.py` POSTs a 100-byte probe (3 rounds) to each worker's `/internal/diag/probe`, the worker returns the median, and the result is cached (`self.links`, refreshed about every 30 s, 600 s TTL) — and the planner routes by them, but they never appear in `/admin/status`. (`/admin/inventory` does give each queried node's round trip to its peers — a control-plane proxy — but not the planner's own per-link probe medians.) Asking for: the measured links in `/admin/status`, per pair of workers, with when each was measured.
-2. **No timing of real hops.** The link probe is 100 bytes. Nothing records how long real activations take from one stage to the next while tokens are generated, including serialization and request overhead. That is the number that explains 1.01 against 4.9 tokens/s. Asking for: per-hop transfer time in each worker's telemetry, next to `compute_ms_ema`.
-3. **The planner's estimate leaves out the ring-closing hop.** `describe_plan()` sums each stage's time and the links *between* consecutive stages (`zip(route, route[1:])`), but not the trip from the exit back to the entry for the next token; it also falls back to `HOP_MS = 25` ms (a constant in `planner.py`) for any link not yet measured. Both could make the estimate optimistic on a mesh that spans countries. (A nuance: iSharded charges each hop as a full round trip, since a stage waits for the next stage's reply — so the return path may already be inside each measured link.)
+2. **Real hop time can be derived, but it blends passes.** Each worker's telemetry already carries how long it waited after posting to the next stage (`downstream_ms_ema`), a phase breakdown (`phases_ms`: receive, handler, compute, encode, downstream) and `activation_bytes_sent` — all under `workers[].runtime.telemetry` on a user key. A hop's transfer time is close to that stage's `downstream` minus the next stage's `handler`. Caveats: these are separate moving averages (weight 0.2), they blend prompt, merged-parallel and draft passes, and encode is timed separately. Asking for: decode-only values of these, so a derived hop time reflects token generation rather than prompt ingest — and, if iSharded would rather publish a number than have Aven derive one, an explicit per-hop network timer during generation. This is the number that explains 1.01 against 4.9 tokens/s.
+3. **The planner's estimate can run optimistic on real activations.** `describe_plan()` sums each stage's time and a round trip over every link between consecutive stages (`zip(route, route[1:])`). That is the whole token path: a stage waits for the next stage's reply, so the return is already inside each measured link, and there is no separate exit-to-entry hop to add. What can still make it optimistic is that the link times come from the 100-byte probe — which misses the per-hop serialization and request overhead on real activations (on the order of 10 ms a hop) — and that it falls back to `HOP_MS = 25` ms (a constant in `planner.py`) for any link not yet measured. Gap 2's real hop times would quantify both.
 
 ## 5. Ways to get the data into Aven
 
@@ -94,7 +94,7 @@ What Aven supports today:
 ## 6. Changes to the Aven model
 
 - **Measurements instead of estimates.** Each stage's measured compute time becomes an input. The model then reports each stage's effective memory bandwidth (solved backward from its bytes per token) and its gap from the planner's `estimated_ms_per_token`.
-- **Per-link hop times** instead of one average, once iSharded publishes them (gap 1), and real per-hop transfer times if they become available (gap 2).
+- **Per-link hop times** instead of one average, once iSharded publishes them (gap 1), and real per-hop transfer times derived from each worker's telemetry (gap 2).
 - **Bytes per token from the plan**, if iSharded exposes it (see the developer questions): per-stage bytes read per token — dense weights, active experts, embedding, head — would replace the draft's even split over 94 layers.
 - **Limits for monitoring:** for example, measured speed at least some share of the planned speed; each stage within some margin of its estimate; no link over a set time. The margins are a choice to make with the developer.
 - **Route shape.** The number of stages changes when the mesh rebalances, and Aven has no lists. Two ways:
@@ -103,7 +103,7 @@ What Aven supports today:
 
 ## 7. Access and security
 
-- **Keys:** a read-only **user** key covers everything the monitor needs — `/admin/status` (route, plan estimate, measured tokens/s, and per-worker compute under `workers[].runtime.telemetry.compute_ms_ema`) and `/admin/inventory`. `/metrics` (admin key) duplicates some of these but is not required; `POST /admin/plan` is the only read we'd want that needs an admin key.
+- **Keys:** a read-only **user** key covers everything the monitor needs — `/admin/status` (route, plan estimate, measured tokens/s, and per-worker compute and downstream-wait under `workers[].runtime.telemetry`) and `/admin/inventory`. `/metrics` (admin key) duplicates some of these but is not required; `POST /admin/plan` is the only read we'd want that needs an admin key.
 - **Where the key lives:** an environment variable on the machine running the poller. Never in the `.aven` file, the CSV or the repository.
 - **Reaching the mesh:** the poller must reach a node: same LAN, Tailscale, or the mesh's TLS endpoint. Any node answers `/admin` requests (it passes them to the coordinator).
 - **Load:** polling every 10–30 s is light. Requests without credentials are rate-limited; authenticated reads are not described as limited.
@@ -130,7 +130,7 @@ What Aven supports today:
 **For iSharded's developer:**
 
 1. Can the measured worker-to-worker link times appear in `/admin/status` (per pair, with a timestamp)? They drive the whole route, and they're the one thing a read-only user key can't currently read.
-2. Could workers record real per-hop transfer time during generation, next to `compute_ms_ema`?
+2. Workers already expose `downstream_ms_ema`, `phases_ms` and `activation_bytes_sent` at `workers[].runtime.telemetry`. Could you publish decode-only values of those (so hop time reflects token generation, not a blend of prompt and draft passes), or add an explicit per-hop network timer?
 3. Does the plan expose per-stage bytes-read-per-token (dense weights, active experts, embedding, head), so the model can stop assuming an even split over 94 layers?
-4. Should the planner's estimate include the hop from the exit back to the entry, and is 25 ms the right fallback for unmeasured links?
+4. The estimate sums a round trip over each link between consecutive stages and falls back to `HOP_MS = 25` ms for unmeasured links. Is 25 ms right, and would you expect real activations to add roughly 10 ms a hop of overhead the 100-byte probe misses?
 5. Would a provably optimal layer split for a fixed order of machines be useful to the planner?
