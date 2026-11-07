@@ -58,6 +58,28 @@ python gen_route.py --from-url http://127.0.0.1:9080 --key dev -o /tmp/route.ave
 ISHARDED_URL=http://127.0.0.1:9080 ISHARDED_KEY=dev python ../isharded_poller.py --interval 2 | avenc stream /tmp/route.aven
 ```
 
+## Measured vs predicted (measured-input model)
+
+The default model solves `avg_hop_ms` *backward* from the observed rate. The measured-input
+variant does the opposite: it takes each stage's **measured** compute and hop time
+(`compute_ms_ema`, `downstream_ms_ema` from the workers' telemetry) and reports how much of
+the real token time they actually explain.
+
+```bash
+python gen_route.py --measured --from-url http://127.0.0.1:8080 --key dev-user-key -o measured.aven
+```
+
+```bash
+ISHARDED_URL=http://127.0.0.1:8080 ISHARDED_KEY=dev-user-key python ../isharded_poller.py --measured --interval 2 | avenc stream measured.aven
+```
+
+Each tick reports `model_rate` (what the measured parts predict), `observed_rate` (actual),
+`unexplained_ms` (real token time the measured compute + hops don't account for — serialization,
+queueing, coordinator overhead), `accounted_fraction`, and `plan_deficit` (observed minus plan).
+On the stub mesh `unexplained_ms` is the HTTP round-trip overhead; on a real mesh it's the
+per-hop overhead the planner's probe-based estimate misses. It alarms when the speed floor or
+the `max_unexplained_ms` budget is breached.
+
 ## What this proves / what's next
 
 - **Proves:** the poller → `avenc stream` → threshold-`ALARM` pipeline works against an
@@ -96,6 +118,6 @@ Notes:
 |---|---|
 | `worker/worker.py` | one route stage: `/infer` (sleeps modelled compute), `/telemetry`, `/internal/diag/probe` |
 | `coordinator/coordinator.py` | token loop + aggregated `/admin/status`, `/admin/inventory` (iSharded shape) |
-| `gen_route.py` | emit an N-stage Aven model; `--from-url` matches the live route |
+| `gen_route.py` | emit an N-stage Aven model; `--from-url` matches the live route; `--measured` emits the measured-input variant |
 | `docker-compose.yml` | 4 workers + coordinator |
 | `run-monitor.ps1` | host-side: generate the model + run the live monitor (Windows) |
