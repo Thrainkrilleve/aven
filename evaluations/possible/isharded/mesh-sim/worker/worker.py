@@ -18,6 +18,7 @@ import os
 import random
 import threading
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 WORKER_ID = os.environ.get("WORKER_ID", "worker")
@@ -27,6 +28,11 @@ HOP_MS = float(os.environ.get("HOP_MS", "5"))
 JITTER = float(os.environ.get("JITTER", "0.1"))
 PORT = int(os.environ.get("PORT", "8000"))
 ACT_BYTES = int(os.environ.get("ACT_BYTES", "65536"))
+# Stage 2: if set, /infer runs a real llama.cpp completion and times it (real compute).
+# If unset, /infer sleeps the modelled COMPUTE_MS (stage-1 stub behaviour).
+LLM_URL = os.environ.get("LLM_URL", "")
+PROMPT = os.environ.get("PROMPT", "In one sentence, describe a mesh network.")
+N_PREDICT = int(os.environ.get("N_PREDICT", "8"))
 
 _state = {"compute_ms_ema": COMPUTE_MS, "calls": 0}
 _lock = threading.Lock()
@@ -34,6 +40,18 @@ _lock = threading.Lock()
 
 def jittered(v):
     return max(0.0, v * (1 + random.uniform(-JITTER, JITTER)))
+
+
+def real_infer():
+    """Run a real llama.cpp completion and return its wall time in ms."""
+    payload = json.dumps({"prompt": PROMPT, "n_predict": N_PREDICT,
+                          "temperature": 0, "cache_prompt": True}).encode()
+    req = urllib.request.Request(LLM_URL.rstrip("/") + "/completion", data=payload, method="POST")
+    req.add_header("Content-Type", "application/json")
+    t0 = time.time()
+    with urllib.request.urlopen(req, timeout=120) as r:
+        r.read()
+    return (time.time() - t0) * 1000.0
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -47,8 +65,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.path == "/infer":
-            c = jittered(COMPUTE_MS)
-            time.sleep(c / 1000.0)
+            if LLM_URL:
+                c = real_infer()
+            else:
+                c = jittered(COMPUTE_MS)
+                time.sleep(c / 1000.0)
             with _lock:
                 _state["calls"] += 1
                 _state["compute_ms_ema"] = 0.8 * _state["compute_ms_ema"] + 0.2 * c
@@ -83,5 +104,6 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"[worker] {WORKER_ID} layers={LAYERS} compute={COMPUTE_MS}ms hop={HOP_MS}ms on :{PORT}", flush=True)
+    mode = f"llm={LLM_URL}" if LLM_URL else f"stub compute={COMPUTE_MS}ms"
+    print(f"[worker] {WORKER_ID} layers={LAYERS} {mode} hop={HOP_MS}ms on :{PORT}", flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

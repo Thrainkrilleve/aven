@@ -63,9 +63,32 @@ ISHARDED_URL=http://127.0.0.1:9080 ISHARDED_KEY=dev python ../isharded_poller.py
 - **Proves:** the poller → `avenc stream` → threshold-`ALARM` pipeline works against an
   iSharded-shaped API, with no code changes to the poller — so swapping in the real mesh is
   an endpoint change.
-- **Stage 2:** replace `worker/worker.py` with real inference (your 4 models) for real compute.
+- **Stage 2 (now in `docker-compose.models.yml`):** the worker proxies `/infer` to a `llama.cpp`
+  server per model — real inference, real compute. See "Stage 2" below.
 - **Stage 3:** move a worker + the coordinator + monitor to the Linux server over Tailscale,
   for real cross-host latency (and Nova posts the alarms to Discord).
+
+## Stage 2 — real models (llama.cpp)
+
+`docker-compose.models.yml` runs four `llama.cpp` servers (one GGUF each) behind the same worker
+adapters, so `/infer` runs a real completion and reports its wall time. Point `MODELS_DIR` at the
+folder holding `red/green/blue/gold/model.gguf`:
+
+```bash
+MODELS_DIR=C:/Users/attho/ai-hacking-arena/models docker compose -f docker-compose.models.yml up --build
+```
+
+The monitor is unchanged (coordinator still on `127.0.0.1:8080`): generate the route model with
+`gen_route.py --from-url`, then `isharded_poller.py | avenc stream route.aven`. Now
+`tokens_per_second_ema` reflects real inference.
+
+Notes:
+- CPU-only (Docker Desktop's VM has no GPU), so inference is real but slower than on the host. All
+  four models together need ~9 GB RAM — comment stages out of the compose (and the coordinator
+  `ROUTE`) to run fewer.
+- Same worker image as stage 1; setting `LLM_URL` switches `/infer` from the modelled sleep to a
+  real `llama.cpp` completion (`N_PREDICT` tokens per call, default 8). On the server with a GPU,
+  point `LLM_URL` at a host `llama-server` (like Nova does) instead of the CPU container.
 
 ## Files
 
