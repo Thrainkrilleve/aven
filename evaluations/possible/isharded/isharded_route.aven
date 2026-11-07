@@ -1,0 +1,141 @@
+// isharded_route.aven — DRAFT: where the time goes when iSharded serves one token
+//
+// Models one chat stream on a 7-stage iSharded route (github.com/AuXFire/iSharded):
+// the entry worker runs the token loop, and each stage POSTs its activations to the
+// next and waits for the reply, so a sampled token unwinds back along the same links.
+// Every link is therefore a round trip, and there is no separate exit -> entry hop.
+// Decoding is limited by memory bandwidth, so a stage's compute time is the bytes it
+// reads per token divided by how fast its memory delivers them.
+//
+// Every number below says where it came from:
+//   [screenshot]  the dashboard and chat from the 7-machine run of
+//                 Qwen3-235B-A22B-Instruct-2507 Q6_K
+//   [model card]  Qwen3-235B-A22B's published configuration
+//   [spec]        the GPU maker's published memory bandwidth; replace with the
+//                 bandwidth iSharded measures for each pool (POST /admin/plan)
+//   [assumption]  a placeholder to replace with a measurement
+//
+// As written, the solve block gives the measured speed (1.01 token/s) and Aven
+// solves backward for the network delay per hop that explains it. To predict
+// instead, give avg_hop_ms and remove observed_rate.
+
+unit tokens : token
+
+// ---- Model ---------------------------------------------------------------
+signal weights_total : GiB        // whole model as loaded
+signal active_params : scalar     // parameters each token uses (billions)
+signal total_params : scalar      // all parameters (billions)
+signal model_layers : scalar
+signal active_fraction : ratio
+signal active_per_layer : GiB     // bytes one token reads from one layer
+
+// ---- Hardware and efficiency -----------------------------------------------
+signal efficiency : ratio         // share of peak bandwidth llama.cpp achieves
+signal ram_bw : GB/s              // CPU reading weights held in system RAM
+
+// ---- One block per stage: layers, memory bandwidth, weights in RAM ---------
+signal s1_layers : scalar
+signal s1_bw : GB/s
+signal s1_ms : ms
+signal s2_layers : scalar
+signal s2_bw : GB/s
+signal s2_ram : GiB
+signal s2_ms : ms
+signal s3_layers : scalar
+signal s3_bw : GB/s
+signal s3_ram : GiB
+signal s3_ms : ms
+signal s4_layers : scalar
+signal s4_bw : GB/s
+signal s4_ms : ms
+signal s5_layers : scalar
+signal s5_bw : GB/s
+signal s5_ms : ms
+signal s6_layers : scalar
+signal s6_bw : GB/s
+signal s6_ms : ms
+signal s7_layers : scalar
+signal s7_bw : GB/s
+signal s7_ms : ms
+
+// ---- The token's trip ------------------------------------------------------
+signal layers_placed : scalar
+signal compute_ms : ms
+signal hops : scalar              // links between consecutive stages (stages - 1)
+signal avg_hop_ms : ms            // round-trip per link: activations out, reply back
+signal network_ms : ms
+signal token_ms : ms
+signal per_token : token
+signal observed_rate : token/s
+signal network_share : percent
+signal compute_only_rate : token/s
+signal planned_rate : token/s
+signal planned_hop_ms : ms        // the round-trip per link the planner's estimate implies
+
+relation TokenTrip {
+    // A mixture-of-experts model reads only its active parameters for each token
+    active_fraction = active_params / total_params
+    active_per_layer = weights_total * active_fraction / model_layers
+
+    // Stage time = bytes read from VRAM at that GPU's speed + bytes read from RAM at
+    // the CPU's. Weights in RAM are routed experts, read in the same active share.
+    s1_ms = s1_layers * active_per_layer / (s1_bw * efficiency)
+    s2_ms = (s2_layers * active_per_layer - s2_ram * active_fraction) / (s2_bw * efficiency) + s2_ram * active_fraction / (ram_bw * efficiency)
+    s3_ms = (s3_layers * active_per_layer - s3_ram * active_fraction) / (s3_bw * efficiency) + s3_ram * active_fraction / (ram_bw * efficiency)
+    s4_ms = s4_layers * active_per_layer / (s4_bw * efficiency)
+    s5_ms = s5_layers * active_per_layer / (s5_bw * efficiency)
+    s6_ms = s6_layers * active_per_layer / (s6_bw * efficiency)
+    s7_ms = s7_layers * active_per_layer / (s7_bw * efficiency)
+
+    layers_placed = s1_layers + s2_layers + s3_layers + s4_layers + s5_layers + s6_layers + s7_layers
+    compute_ms = s1_ms + s2_ms + s3_ms + s4_ms + s5_ms + s6_ms + s7_ms
+    network_ms = hops * avg_hop_ms
+    token_ms = compute_ms + network_ms
+    observed_rate = per_token / token_ms
+
+    network_share = network_ms / token_ms
+    compute_only_rate = per_token / compute_ms
+    planned_hop_ms = (per_token / planned_rate - compute_ms) / hops
+}
+
+solve TokenTrip with {
+    // Model [screenshot: "172.52 GiB" to load] [model card: 22B active of 235B, 94 layers]
+    weights_total = 172.52 GiB
+    active_params = 22
+    total_params = 235
+    model_layers = 94
+
+    // Stages, layers and RAM [screenshot: Workers table and "Where this model runs"]
+    // Bandwidth [spec] (pa-mig-gpu is a MIG slice of an RTX PRO 6000 Blackwell:
+    // assumed to get half of its 1792 GB/s)
+    s1_layers = 1               // laptop-gpu, RTX 3060 Laptop, entry
+    s1_bw = 336 GB/s
+    s2_layers = 10              // pa-mig-gpu, RTX PRO 6000 Blackwell (MIG slice)
+    s2_bw = 896 GB/s
+    s2_ram = 1.85 GiB
+    s3_layers = 17              // ro-pro4000-gpu, RTX PRO 4000 Blackwell
+    s3_bw = 672 GB/s
+    s3_ram = 14.77 GiB
+    s4_layers = 20              // mtl-a40-gpu, A40
+    s4_bw = 696 GB/s
+    s5_layers = 20              // se-a40-2-gpu, A40
+    s5_bw = 696 GB/s
+    s6_layers = 19              // se-a40-1-gpu, A40
+    s6_bw = 696 GB/s
+    s7_layers = 7               // desktop-gpu, RX 7900 XT, exit
+    s7_bw = 800 GB/s
+
+    // [assumption] replace with measurements
+    efficiency = 0.6
+    ram_bw = 40 GB/s
+    hops = 6                    // 6 links, each traversed out and back (the reply unwinds), so a round trip
+
+    // Measured and planned speeds [screenshot: chat "1.01 tokens/s", plan "about 4.9"]
+    per_token = 1 token
+    observed_rate = 1.01 token/s
+    planned_rate = 4.9 token/s
+
+    // Checks: every layer placed exactly once; a sane efficiency
+    layers_placed == 94
+    efficiency <= 1
+}
