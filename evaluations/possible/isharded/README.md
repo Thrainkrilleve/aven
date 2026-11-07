@@ -61,6 +61,25 @@ avenc check evaluations/possible/isharded/isharded_route.aven
 
 ## Live data
 
+A first poller, [`isharded_poller.py`](isharded_poller.py), is included (Python standard library only, separate from the zero-dependency `avenc` core). It reads a read-only **user** key from `$ISHARDED_KEY`, polls one mesh node's `/admin/status`, and feeds what that key exposes today — measured tokens/s, the planner's estimate, and each stage's layer count — into this model, which then solves `avg_hop_ms` (the round trip per link) for every reading.
+
+```bash
+# Live monitor (option B): JSON lines into the stream supervisor
+ISHARDED_URL=https://<node> ISHARDED_KEY=<user-key> python evaluations/possible/isharded/isharded_poller.py --interval 15 | avenc stream evaluations/possible/isharded/isharded_route.aven
+```
+
+```bash
+# Snapshot for the IDE (option A): a name,value,unit sheet to "import sheet"
+ISHARDED_URL=https://<node> ISHARDED_KEY=<user-key> python evaluations/possible/isharded/isharded_poller.py --out csv --csv live.csv
+```
+
+```bash
+# Inspect the raw status shape, or test offline against a saved response
+python evaluations/possible/isharded/isharded_poller.py --raw
+```
+
+It runs wherever it can reach the mesh (same LAN, Tailscale, or the TLS endpoint); the key is sent only as a request header, never in the URL, the CSV or the repo. Two things to confirm against your iSharded build, both adjustable by flag (no code change): the auth header (default `Authorization: Bearer`) and the `/admin/status` field names — `--raw` prints the actual shape. It does not alarm on slow speed yet: the model carries only sanity checks so far, and monitoring thresholds are a choice to make with iSharded's developer (see the plan).
+
 [LIVE_DATA_PLAN.md](LIVE_DATA_PLAN.md) reviews what iSharded already exposes, what is missing, and the options for feeding live readings into this model, the IDE and `avenc stream`.
 
 ## Questions for iSharded's developer
