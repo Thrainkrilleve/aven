@@ -1,0 +1,54 @@
+# 2-GPU chain: 4 models on the local RX 9070 XT (Vulkan) -> 1 model on Nova.
+#
+# The four local GGUFs run as native Vulkan llama-server.exe on the Windows host
+# (the 9070 XT, -ngl 99) instead of CPU containers, so each stage is GPU-fast and
+# BATCHES concurrent streams -- which is what lets aggregate throughput climb.
+#
+#   red(9070) -> green(9070) -> blue(9070) -> gold(9070) --tailnet--> nova(Nova GPU)
+#
+# Start the 4 native servers first (see NOVA.md "9070 GPU stages"):
+#   llama-server.exe -m <gguf> -ngl 99 --host 0.0.0.0 --port 8091..8094
+# Then (Nova stage also up):
+#   NOVA_IP=100.85.239.122 docker compose -f docker-compose.gpu.yml up -d --build
+#
+# Workers reach the host's GPU servers via host.docker.internal (Docker Desktop).
+name: mesh-sim-gpu
+
+x-worker: &worker
+  build: ./worker
+
+services:
+  worker-red:
+    <<: *worker
+    environment: { WORKER_ID: red, LAYERS: "23", N_PREDICT: "8", MODEL_NAME: "Qwen3.5-2B-Claude",
+                   LLM_URL: "http://host.docker.internal:8091", NEXT_URL: "http://worker-green:8000" }
+    extra_hosts: ["host.docker.internal:host-gateway"]
+  worker-green:
+    <<: *worker
+    environment: { WORKER_ID: green, LAYERS: "24", N_PREDICT: "8", MODEL_NAME: "gemma-3-4b-heretic",
+                   LLM_URL: "http://host.docker.internal:8092", NEXT_URL: "http://worker-blue:8000" }
+    extra_hosts: ["host.docker.internal:host-gateway"]
+  worker-blue:
+    <<: *worker
+    environment: { WORKER_ID: blue, LAYERS: "24", N_PREDICT: "8", MODEL_NAME: "LFM2.5-2.6B",
+                   LLM_URL: "http://host.docker.internal:8093", NEXT_URL: "http://worker-gold:8000" }
+    extra_hosts: ["host.docker.internal:host-gateway"]
+  worker-gold:
+    <<: *worker
+    environment: { WORKER_ID: gold, LAYERS: "23", N_PREDICT: "8", MODEL_NAME: "Qwen3-Horror-4B",
+                   LLM_URL: "http://host.docker.internal:8094",
+                   NEXT_URL: "http://${NOVA_IP:-100.85.239.122}:9303" }
+    extra_hosts: ["host.docker.internal:host-gateway"]
+
+  coordinator:
+    build: ./coordinator
+    environment:
+      CHAIN: "1"
+      STREAMS: "1"
+      TOKENS_PER_PASS: "3.0"
+      ROUTE: "http://worker-red:8000,http://worker-green:8000,http://worker-blue:8000,http://worker-gold:8000,http://${NOVA_IP:-100.85.239.122}:9303"
+      USER_KEY: dev-user-key
+      PLANNED_TPS: "4.9"
+    ports: ["8080:8080"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on: [worker-red, worker-green, worker-blue, worker-gold]

@@ -100,6 +100,34 @@ pulls telemetry from all four. In the dashboard the per-stage hop chart shows
 RTT -- the activation data crossing from the Windows box to Nova. Stop the Nova
 stages with `bash nova_chain_stages.sh stop`.
 
+## 9070 GPU stages — local models on the Radeon, not CPU
+
+CPU stages cap aggregate throughput (they don't batch). Run the four local GGUFs
+on a local Vulkan GPU (e.g. RX 9070 XT) with native `llama-server.exe`, so each
+stage is GPU-fast **and batches** concurrent streams. Measured: aggregate went
+from ~9 tok/s (CPU) to ~22 tok/s (9070 + Nova), 16 streams.
+
+Get the prebuilt Vulkan build (`llama-*-bin-win-vulkan-x64.zip` from llama.cpp
+releases), then run one server per model with batch slots, bound to `0.0.0.0` so
+Docker workers can reach them:
+
+```bash
+llama-server.exe -m .../red/model.gguf   -ngl 99 --host 0.0.0.0 --port 8091 -c 8192 --parallel 8 --cont-batching
+llama-server.exe -m .../green/model.gguf -ngl 99 --host 0.0.0.0 --port 8092 -c 8192 --parallel 8 --cont-batching
+llama-server.exe -m .../blue/model.gguf  -ngl 99 --host 0.0.0.0 --port 8093 -c 8192 --parallel 8 --cont-batching
+llama-server.exe -m .../gold/model.gguf  -ngl 99 --host 0.0.0.0 --port 8094 -c 8192 --parallel 8 --cont-batching
+```
+
+Then bring up the GPU mesh (workers reach the host via `host.docker.internal`):
+
+```bash
+NOVA_IP=100.85.239.122 docker compose -f docker-compose.gpu.yml up -d --build
+```
+
+Raise concurrency on the dashboard and watch aggregate climb. `--parallel N` sets
+how many streams each model batches; the slowest/heaviest model (and Nova's slot
+count) becomes the new ceiling.
+
 ## Stage 3 — the distributed milestone (runs on your side)
 
 To get *real* cross-host hop latency instead of localhost ~5 ms:
