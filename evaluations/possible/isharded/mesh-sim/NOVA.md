@@ -66,6 +66,40 @@ NOVA_LLM_URL=http://nova:8080 docker compose -f docker-compose.nova.yml up -d --
   `…_GOLD` (each falls back to `NOVA_LLM_URL`).
 - If containers can't resolve `nova`, use its `100.x` Tailscale IP.
 
+## Split-host chain — data crossing machine to machine
+
+To show the token physically flowing stage -> stage -> host -> host (not a star
+through the coordinator), run the stages as a **chain** split across two machines.
+Each worker's `NEXT_URL` points at the next stage; the coordinator (`CHAIN=1`)
+kicks stage 1 and the token propagates down and unwinds back. The per-stage hop
+is then the real RTT to the *next stage's machine*, so a cross-host link shows up
+as one big bar while co-located hops stay sub-ms.
+
+```
+ coordinator(Win) -> red(Win) -> green(Win) --tailnet--> blue(Nova) -> gold(Nova)
+                                             ^ the machine-to-machine crossing
+```
+
+**On Nova** (needs this repo checked out and the local llama-server on :8780):
+
+```bash
+cd <repo>/evaluations/possible/isharded/mesh-sim/worker
+bash ../nova_chain_stages.sh        # starts blue(:9303) + gold(:9304), bound 0.0.0.0
+```
+
+**On Windows** (after the Nova stages are listening):
+
+```bash
+NOVA_IP=100.85.239.122 NOVA_LLM_URL=http://100.85.239.122:8781 \
+  docker compose -f docker-compose.chain.yml up -d --build
+```
+
+`green` forwards to `blue` at `NOVA_IP:9303` over the tailnet; the coordinator
+pulls telemetry from all four. In the dashboard the per-stage hop chart shows
+`red->green` and `blue->gold` sub-ms (same host) and `green->blue` at the tailnet
+RTT -- the activation data crossing from the Windows box to Nova. Stop the Nova
+stages with `bash nova_chain_stages.sh stop`.
+
 ## Stage 3 — the distributed milestone (runs on your side)
 
 To get *real* cross-host hop latency instead of localhost ~5 ms:

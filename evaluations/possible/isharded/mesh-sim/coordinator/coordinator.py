@@ -21,6 +21,10 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROUTE = [u.strip() for u in os.environ.get("ROUTE", "").split(",") if u.strip()]
+# Chain mode: the stages forward stage->stage themselves (each worker's NEXT_URL),
+# so the coordinator only kicks stage 1 and times the whole pipeline. Star mode
+# (default): the coordinator POSTs each stage in turn.
+CHAIN = os.environ.get("CHAIN", "").lower() not in ("", "0", "false", "no")
 PORT = int(os.environ.get("PORT", "8080"))
 PLANNED_TPS = float(os.environ.get("PLANNED_TPS", "4.9"))
 USER_KEY = os.environ.get("USER_KEY", "")
@@ -53,8 +57,12 @@ def token_loop():
     while True:
         try:
             t0 = time.time()
-            for base in ROUTE:
-                http_json(base + "/infer", "POST", {"token": 1}, timeout=2)
+            if CHAIN:
+                # Kick stage 1; it forwards down the chain and unwinds back.
+                http_json(ROUTE[0] + "/infer", "POST", {"token": 1}, timeout=180)
+            else:
+                for base in ROUTE:
+                    http_json(base + "/infer", "POST", {"token": 1}, timeout=2)
             compute_ms = (time.time() - t0) * 1000.0
             # Apply the control throttle: actually slow the token loop by pace_ms,
             # so the reported rate reflects the setpoint the controller published.

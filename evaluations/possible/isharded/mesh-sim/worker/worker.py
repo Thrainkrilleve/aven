@@ -33,6 +33,11 @@ ACT_BYTES = int(os.environ.get("ACT_BYTES", "65536"))
 LLM_URL = os.environ.get("LLM_URL", "")
 PROMPT = os.environ.get("PROMPT", "In one sentence, describe a mesh network.")
 N_PREDICT = int(os.environ.get("N_PREDICT", "8"))
+# Chain mode: if set, after local compute this stage POSTs the activation to the
+# NEXT stage and waits (the token flows stage->stage and unwinds back). The hop
+# we report is then the real round-trip to the next stage's machine -- so a hop
+# between hosts shows the data physically crossing the network. Empty = last stage.
+NEXT_URL = os.environ.get("NEXT_URL", "")
 
 _state = {"compute_ms_ema": COMPUTE_MS, "hop_ms_ema": HOP_MS, "calls": 0, "model": None}
 _lock = threading.Lock()
@@ -43,10 +48,11 @@ def jittered(v):
 
 
 def rtt_prober():
-    """Background: measure the real network round-trip to the model backend
-    (a cheap GET /health) and EMA it. This is the per-stage hop time -- the
-    network cost of reaching this stage's model, separate from inference."""
-    url = LLM_URL.rstrip("/") + "/health"
+    """Background: measure the real network round-trip for this stage's hop and
+    EMA it. In chain mode that is the trip to the NEXT stage's machine (the
+    inter-stage, machine-to-machine link); otherwise it is the trip to the model
+    backend. Either way it is separate from this stage's inference compute."""
+    url = (NEXT_URL or LLM_URL).rstrip("/") + "/health"
     while True:
         try:
             t0 = time.time()
@@ -81,6 +87,20 @@ def real_infer():
     return dt
 
 
+def forward_next():
+    """Chain mode: pass the activation to the next stage and wait for it (the
+    token flows downstream and unwinds back up). Returns the next stage's body,
+    or an error marker, so the whole route's result returns to the coordinator."""
+    try:
+        payload = json.dumps({"token": 1}).encode()
+        req = urllib.request.Request(NEXT_URL.rstrip("/") + "/infer", data=payload, method="POST")
+        req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return json.loads(r.read().decode())
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send(self, obj, code=200):
         body = json.dumps(obj).encode()
@@ -94,16 +114,23 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/infer":
             if LLM_URL:
                 dt = real_infer()                 # completion wall time (incl. one RTT)
-                with _lock:
-                    hop = _state["hop_ms_ema"]
-                c = max(0.0, dt - hop)            # inference, net of the network leg
+                if NEXT_URL:
+                    c = dt                        # chain: hop is to the next stage, not the model
+                else:
+                    with _lock:
+                        hop = _state["hop_ms_ema"]
+                    c = max(0.0, dt - hop)        # star: inference, net of the model leg
             else:
                 c = jittered(COMPUTE_MS)
                 time.sleep(c / 1000.0)
             with _lock:
                 _state["calls"] += 1
                 _state["compute_ms_ema"] = 0.8 * _state["compute_ms_ema"] + 0.2 * c
-            self._send({"worker": WORKER_ID, "compute_ms": round(c, 3), "layers": LAYERS})
+            downstream = None
+            if NEXT_URL:
+                downstream = forward_next()       # real data flow to the next stage's machine
+            self._send({"worker": WORKER_ID, "compute_ms": round(c, 3),
+                        "layers": LAYERS, "next": downstream})
         elif self.path == "/internal/diag/probe":
             self._send({"worker": WORKER_ID, "probe_ms": round(jittered(2.0), 3)})
         else:
@@ -114,8 +141,10 @@ class Handler(BaseHTTPRequestHandler):
             with _lock:
                 comp = round(_state["compute_ms_ema"], 3)
                 model = _state["model"]
-                # Real measured RTT to the model in llm mode; modelled hop in stub mode.
-                hop = round(_state["hop_ms_ema"], 3) if LLM_URL else round(jittered(HOP_MS), 3)
+                # Measured RTT (to next stage in chain mode, else to the model);
+                # modelled hop only when neither a next stage nor a backend is set.
+                hop = (round(_state["hop_ms_ema"], 3) if (NEXT_URL or LLM_URL)
+                       else round(jittered(HOP_MS), 3))
             self._send({
                 "worker": WORKER_ID,
                 "layers": LAYERS,
@@ -144,7 +173,8 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     mode = f"llm={LLM_URL}" if LLM_URL else f"stub compute={COMPUTE_MS}ms"
-    print(f"[worker] {WORKER_ID} layers={LAYERS} {mode} hop={HOP_MS}ms on :{PORT}", flush=True)
-    if LLM_URL:
+    chain = f" -> next={NEXT_URL}" if NEXT_URL else " (last/exit)"
+    print(f"[worker] {WORKER_ID} layers={LAYERS} {mode}{chain} on :{PORT}", flush=True)
+    if NEXT_URL or LLM_URL:
         threading.Thread(target=rtt_prober, daemon=True).start()   # measure real hop
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
