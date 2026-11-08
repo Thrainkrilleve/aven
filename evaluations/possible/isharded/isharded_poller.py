@@ -106,11 +106,14 @@ def load_status(args):
     return fetch_status(args)
 
 
-def extract(status):
+def extract(status, measured=False):
     """Map /admin/status to {signal: number} the model understands.
 
-    Field paths are tolerant (first match wins). Run with --raw to confirm them
-    against your build. Returns (readings, notes)."""
+    Default: observed/planned rates and per-stage layer counts (for the backward-solve
+    model). With measured=True: observed/planned rates and each stage's measured compute
+    and hop time (for the measured-input model), mapped onto s{i}_compute_ms / s{i}_hop_ms
+    in route order. Field paths are tolerant (first match wins); use --raw to confirm them.
+    Returns (readings, notes)."""
     readings = {}
     notes = []
 
@@ -135,6 +138,37 @@ def extract(status):
         readings["planned_rate"] = float(planned)
 
     route = dig(status, "route", "active_plan.route")
+
+    if measured:
+        if isinstance(route, list) and route:
+            # Map each worker's telemetry by id, then walk the route in order.
+            wmap = {}
+            for w in (status.get("workers") or []):
+                wid = w.get("id") if isinstance(w, dict) else None
+                if wid is None and isinstance(w, dict):
+                    wid = w.get("worker")
+                if wid is not None:
+                    wmap[wid] = dig(w, "runtime.telemetry") or {}
+            got = False
+            for i, stage in enumerate(route, 1):
+                wid = stage.get("worker") or stage.get("id") if isinstance(stage, dict) else None
+                tel = wmap.get(wid, {})
+                comp = tel.get("compute_ms_ema")
+                hop = tel.get("downstream_ms_ema")
+                if comp is not None:
+                    readings[f"s{i}_compute_ms"] = float(comp)
+                    got = True
+                if hop is not None:
+                    readings[f"s{i}_hop_ms"] = float(hop)
+            if not got:
+                notes.append(
+                    "measured: no per-stage compute found "
+                    "(workers[].runtime.telemetry.compute_ms_ema)"
+                )
+        else:
+            notes.append("measured: no route to map telemetry onto")
+        return readings, notes
+
     if isinstance(route, list):
         if len(route) == len(STAGE_KEYS):
             layers = []
@@ -160,7 +194,8 @@ def extract(status):
 def write_csv(readings, path):
     lines = ["name,value,unit"]
     for name in sorted(readings):
-        lines.append(f"{name},{readings[name]:g},{UNITS.get(name, '')}")
+        unit = UNITS.get(name) or ("ms" if name.endswith("_ms") else "")
+        lines.append(f"{name},{readings[name]:g},{unit}")
     text = "\n".join(lines) + "\n"
     if path in ("-", "", None):
         sys.stdout.write(text)
@@ -188,6 +223,9 @@ def main():
                    help="read a saved /admin/status JSON instead of HTTP (offline testing)")
     p.add_argument("--raw", action="store_true",
                    help="fetch /admin/status, pretty-print it, and exit")
+    p.add_argument("--measured", action="store_true",
+                   help="emit per-stage measured compute + hop (for the measured-input "
+                        "model) instead of layer counts")
     p.add_argument("--timeout", type=float, default=10.0, metavar="SECONDS",
                    help="HTTP timeout (default 10)")
     p.add_argument("--insecure", action="store_true",
@@ -209,7 +247,7 @@ def main():
 
     def one_reading():
         status = load_status(args)
-        readings, notes = extract(status)
+        readings, notes = extract(status, args.measured)
         for note in notes:
             log(f"note: {note}")
         if not readings:
