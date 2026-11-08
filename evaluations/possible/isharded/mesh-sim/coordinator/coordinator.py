@@ -49,7 +49,9 @@ def http_json(url, method="GET", data=None, timeout=5):
         return json.loads(r.read().decode())
 
 
-def ema(prev, x, a=0.2):
+def ema(prev, x, a=0.4):
+    # a=0.4 (was 0.2): track pace changes ~2x faster so the measured rate keeps
+    # up with the controller's command and the loop winds up less under lag.
     return x if prev is None else (1 - a) * prev + a * x
 
 

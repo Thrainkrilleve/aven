@@ -31,5 +31,5 @@ solve MeshPace with {
     observed_rate = 0.50 token/s
     target_rate   = 0.40 token/s
     pace_prev     = 500 ms
-    gain          = 2000 ms*s/token
+    gain          = 500 ms*s/token
 }

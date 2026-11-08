@@ -45,8 +45,8 @@ STATE = {
     "daemon_port": 5556,
     # controller params (editable from the UI)
     "target": 0.40,
-    "gain": 2000.0,
-    "interval": 2.5,
+    "gain": 500.0,            # ms per tok/s; gentler than the initial 2000 to avoid
+    "interval": 2.5,          # overshoot under the (now faster) rate EMA
     # live snapshot
     "connected": False,
     "live": {},
