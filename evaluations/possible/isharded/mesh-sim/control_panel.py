@@ -139,11 +139,14 @@ def derive(status):
     }
     route = dig(status, "route") or []
     wmap = {}
+    bmap = {}
     backend = None
     for w in (status.get("workers") or []):
         wid = w.get("id") if isinstance(w, dict) else None
         if wid is not None:
             wmap[wid] = dig(w, "runtime.telemetry") or {}
+            if isinstance(w, dict) and w.get("backend"):
+                bmap[wid] = w["backend"]
         if backend is None and isinstance(w, dict) and w.get("backend"):
             backend = w["backend"]
     out["backend"] = backend
@@ -156,6 +159,7 @@ def derive(status):
         out["stages"].append({
             "worker": wid, "layers": stage.get("layers"),
             "compute_ms": c, "hop_ms": h,
+            "model": (bmap.get(wid) or {}).get("model"),
         })
         if c is not None:
             compute += float(c)

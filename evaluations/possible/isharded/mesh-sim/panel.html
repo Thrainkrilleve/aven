@@ -190,7 +190,9 @@ const hopChart=new Chart($('hopChart'),{type:'bar',
     scales:{x:{ticks:{color:'#8b949e'},grid:{display:false}},
             y:{ticks:{color:'#8b949e'},grid:{color:'#21262d'},beginAtZero:true}},
     plugins:{legend:{display:false},
-      tooltip:{callbacks:{label:c=>c.parsed.y.toFixed(2)+' ms'}}}}});
+      tooltip:{callbacks:{
+        label:c=>c.parsed.y.toFixed(2)+' ms',
+        afterLabel:c=>{const m=(c.chart._models||[])[c.dataIndex];return m?('model: '+m):'';}}}}}});
 
 const CARDS=[
   ['observed_rate','Observed','token/s',3],
@@ -278,7 +280,10 @@ async function tick(){
   paceChart.update();
 
   const stg=live.stages||[];
-  stageChart.data.labels=stg.map(s=>s.worker||'?');
+  const shortModel=m=>{if(!m)return '';m=(''+m).replace(/\.gguf$/i,'');return m.length>20?m.slice(0,20)+'…':m;};
+  // Two-line axis label: stage name + its model.
+  const stLabels=stg.map(s=>[s.worker||'?', shortModel(s.model)]);
+  stageChart.data.labels=stLabels;
   stageChart.data.datasets[0].data=stg.map(s=>s.compute_ms);
   stageChart.data.datasets[1].data=stg.map(s=>s.hop_ms);
   stageChart.update();
@@ -286,9 +291,10 @@ async function tick(){
   // Per-stage hop chart: color the clear outliers (cross-machine) hot.
   const hops=stg.map(s=>s.hop_ms||0);
   const hmax=Math.max(1,...hops);
-  hopChart.data.labels=stg.map(s=>s.worker||'?');
+  hopChart.data.labels=stLabels;
   hopChart.data.datasets[0].data=hops;
   hopChart.data.datasets[0].backgroundColor=hops.map(h=>h>=0.5*hmax&&h>5?'#f85149':'#58a6ff');
+  hopChart._models=stg.map(s=>s.model||'');
   hopChart.update();
 
   const tb=$('ticks').querySelector('tbody');

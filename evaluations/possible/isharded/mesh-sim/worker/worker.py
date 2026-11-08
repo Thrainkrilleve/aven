@@ -33,6 +33,10 @@ ACT_BYTES = int(os.environ.get("ACT_BYTES", "65536"))
 LLM_URL = os.environ.get("LLM_URL", "")
 PROMPT = os.environ.get("PROMPT", "In one sentence, describe a mesh network.")
 N_PREDICT = int(os.environ.get("N_PREDICT", "8"))
+# Optional friendly model label. Needed when several stages mount different GGUFs
+# all named model.gguf (llama.cpp then reports the same path for each). Overrides
+# the name auto-detected from the backend's /completion response.
+MODEL_NAME = os.environ.get("MODEL_NAME", "")
 # Chain mode: if set, after local compute this stage POSTs the activation to the
 # NEXT stage and waits (the token flows stage->stage and unwinds back). The hop
 # we report is then the real round-trip to the next stage's machine -- so a hop
@@ -152,7 +156,7 @@ class Handler(BaseHTTPRequestHandler):
                 "backend": {
                     "kind": "llm" if LLM_URL else "stub",
                     "endpoint": LLM_URL or None,
-                    "model": model,
+                    "model": MODEL_NAME or model,
                 },
                 "runtime": {"telemetry": {
                     "compute_ms_ema": comp,
