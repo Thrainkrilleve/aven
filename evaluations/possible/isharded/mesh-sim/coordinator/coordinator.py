@@ -26,8 +26,14 @@ PLANNED_TPS = float(os.environ.get("PLANNED_TPS", "4.9"))
 USER_KEY = os.environ.get("USER_KEY", "")
 POLL_EVERY = float(os.environ.get("POLL_EVERY", "1.0"))
 
-_state = {"tps_ema": None, "latency_ema": None, "workers": {}, "route": [], "up": False}
+_state = {"tps_ema": None, "latency_ema": None, "workers": {}, "route": [], "up": False,
+          "pace_ms": 0.0}
 _lock = threading.Lock()
+
+# Actuator bounds: a controller (e.g. AERIC) sets a per-token throttle via
+# POST /admin/control; clamp it here so a bad setpoint can never wedge the loop.
+PACE_MIN_MS = 0.0
+PACE_MAX_MS = 10000.0
 
 
 def http_json(url, method="GET", data=None, timeout=5):
@@ -49,7 +55,14 @@ def token_loop():
             t0 = time.time()
             for base in ROUTE:
                 http_json(base + "/infer", "POST", {"token": 1}, timeout=2)
-            latency_ms = (time.time() - t0) * 1000.0
+            compute_ms = (time.time() - t0) * 1000.0
+            # Apply the control throttle: actually slow the token loop by pace_ms,
+            # so the reported rate reflects the setpoint the controller published.
+            with _lock:
+                pace_ms = _state["pace_ms"]
+            if pace_ms > 0:
+                time.sleep(pace_ms / 1000.0)
+            latency_ms = compute_ms + pace_ms
             tps = 1000.0 / latency_ms if latency_ms > 0 else 0.0
             workers, route = {}, []
             for base in ROUTE:
@@ -81,6 +94,7 @@ def status_doc():
         lat = _state["latency_ema"]
         route = list(_state["route"])
         workers = dict(_state["workers"])
+        pace = _state["pace_ms"]
     return {
         "metrics": {
             "tokens_per_second_ema": round(tps, 4) if tps is not None else None,
@@ -89,6 +103,9 @@ def status_doc():
         "active_plan": {"estimated_tokens_per_second": PLANNED_TPS},
         "route": route,
         "workers": [dict(id=wid, **tel) for wid, tel in workers.items()],
+        # Live actuator state: the throttle currently applied per token. A
+        # controller reads this back as pace_prev (back-calculation anti-windup).
+        "control": {"pace_ms": round(pace, 3)},
     }
 
 
@@ -129,6 +146,28 @@ class Handler(BaseHTTPRequestHandler):
             self._send(inventory_doc())
         elif self.path == "/health":
             self._send({"ok": _state["up"], "stages": len(ROUTE)})
+        else:
+            self._send({"error": "not found"}, 404)
+
+    def do_POST(self):
+        if self.path.startswith("/admin/") and not self._authed():
+            self._send({"error": "unauthorized"}, 401)
+            return
+        if self.path == "/admin/control":
+            try:
+                n = int(self.headers.get("Content-Length", "0"))
+                body = json.loads(self.rfile.read(n).decode()) if n else {}
+                pace = float(body.get("pace_ms", 0.0))
+            except (ValueError, TypeError, json.JSONDecodeError):
+                self._send({"error": "bad request: expected {\"pace_ms\": <number>}"}, 400)
+                return
+            if pace != pace:  # NaN guard
+                self._send({"error": "pace_ms must be finite"}, 400)
+                return
+            pace = max(PACE_MIN_MS, min(PACE_MAX_MS, pace))
+            with _lock:
+                _state["pace_ms"] = pace
+            self._send({"pace_ms": round(pace, 3)})
         else:
             self._send({"error": "not found"}, 404)
 

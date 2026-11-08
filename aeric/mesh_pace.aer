@@ -1,0 +1,23 @@
+# AERIC runtime config -- iSharded mesh pace controller (mesh_pace.aven).
+# Loaded by aeric_daemon. key = value, '#' comments. See aeric/README.md.
+#
+# Sensors (peer -> daemon, 4 float64, avenc-alphabetical order):
+#   gain, observed_rate, pace_prev, target_rate
+# Setpoint (daemon -> peer, 1 float64):
+#   pace_cmd   (ms of per-token throttle the coordinator should apply)
+n_inputs      = 4
+n_outputs     = 1
+n_state       = 0
+recover_ticks = 3
+tick_hz       = 5          # caps daemon cadence; the loop is really frame-driven
+deadline_ms   = 3000       # wait up to 3 s for a sensor frame, else HOLD (peer gone)
+tcp_port      = 5556
+max_ticks     = 0          # run until stopped
+ledger        = mesh_pace_ledger.jsonl
+seal_key      = aven-aeric-mesh-demo-v1
+# Fail-safe setpoint on any fault: pace 0 ms = no throttle (mesh runs full speed).
+safe          = 0
+# Safety envelope on pace_cmd: clamp to [0, 5000] ms, max 1500 ms change per tick.
+out_min       = 0
+out_max       = 5000
+out_rate      = 1500

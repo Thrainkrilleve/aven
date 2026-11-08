@@ -34,12 +34,30 @@ LLM_URL = os.environ.get("LLM_URL", "")
 PROMPT = os.environ.get("PROMPT", "In one sentence, describe a mesh network.")
 N_PREDICT = int(os.environ.get("N_PREDICT", "8"))
 
-_state = {"compute_ms_ema": COMPUTE_MS, "calls": 0}
+_state = {"compute_ms_ema": COMPUTE_MS, "hop_ms_ema": HOP_MS, "calls": 0, "model": None}
 _lock = threading.Lock()
 
 
 def jittered(v):
     return max(0.0, v * (1 + random.uniform(-JITTER, JITTER)))
+
+
+def rtt_prober():
+    """Background: measure the real network round-trip to the model backend
+    (a cheap GET /health) and EMA it. This is the per-stage hop time -- the
+    network cost of reaching this stage's model, separate from inference."""
+    url = LLM_URL.rstrip("/") + "/health"
+    while True:
+        try:
+            t0 = time.time()
+            with urllib.request.urlopen(url, timeout=10) as r:
+                r.read()
+            rtt = (time.time() - t0) * 1000.0
+            with _lock:
+                _state["hop_ms_ema"] = 0.8 * _state["hop_ms_ema"] + 0.2 * rtt
+        except Exception:  # noqa: BLE001
+            pass
+        time.sleep(3.0)
 
 
 def real_infer():
@@ -50,8 +68,17 @@ def real_infer():
     req.add_header("Content-Type", "application/json")
     t0 = time.time()
     with urllib.request.urlopen(req, timeout=120) as r:
-        r.read()
-    return (time.time() - t0) * 1000.0
+        body = r.read()
+    dt = (time.time() - t0) * 1000.0
+    if _state["model"] is None:
+        try:
+            m = json.loads(body).get("model")
+            if m:
+                with _lock:
+                    _state["model"] = os.path.basename(m)   # file name only
+        except Exception:  # noqa: BLE001
+            pass
+    return dt
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -66,7 +93,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/infer":
             if LLM_URL:
-                c = real_infer()
+                dt = real_infer()                 # completion wall time (incl. one RTT)
+                with _lock:
+                    hop = _state["hop_ms_ema"]
+                c = max(0.0, dt - hop)            # inference, net of the network leg
             else:
                 c = jittered(COMPUTE_MS)
                 time.sleep(c / 1000.0)
@@ -83,14 +113,23 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/telemetry":
             with _lock:
                 comp = round(_state["compute_ms_ema"], 3)
+                model = _state["model"]
+                # Real measured RTT to the model in llm mode; modelled hop in stub mode.
+                hop = round(_state["hop_ms_ema"], 3) if LLM_URL else round(jittered(HOP_MS), 3)
             self._send({
                 "worker": WORKER_ID,
                 "layers": LAYERS,
+                # Which inference backend this stage is actually using.
+                "backend": {
+                    "kind": "llm" if LLM_URL else "stub",
+                    "endpoint": LLM_URL or None,
+                    "model": model,
+                },
                 "runtime": {"telemetry": {
                     "compute_ms_ema": comp,
-                    "downstream_ms_ema": round(jittered(HOP_MS), 3),
+                    "downstream_ms_ema": hop,
                     "phases_ms": {"receive": 0.5, "handler": 1.0, "compute": comp,
-                                  "encode": 0.5, "downstream": round(HOP_MS, 3)},
+                                  "encode": 0.5, "downstream": hop},
                     "activation_bytes_sent": ACT_BYTES,
                 }},
             })
@@ -106,4 +145,6 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     mode = f"llm={LLM_URL}" if LLM_URL else f"stub compute={COMPUTE_MS}ms"
     print(f"[worker] {WORKER_ID} layers={LAYERS} {mode} hop={HOP_MS}ms on :{PORT}", flush=True)
+    if LLM_URL:
+        threading.Thread(target=rtt_prober, daemon=True).start()   # measure real hop
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

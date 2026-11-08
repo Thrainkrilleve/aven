@@ -1,0 +1,35 @@
+// mesh_pace.aven -- throttle controller for the iSharded mesh simulator.
+//
+// A stateless integral control law. AERIC runs it each tick; the integrator
+// lives physically in the actuator (the coordinator's applied pace_ms, which is
+// clamped to [0, cap]), and the *currently applied* pace is fed back as a sensor
+// (pace_prev). That is back-calculation anti-windup: no unbounded internal state.
+//
+//   error     = observed_rate - target_rate      (> 0 means too fast)
+//   pace_cmd  = pace_prev + gain * error          (too fast -> add delay)
+//
+// Increasing pace adds latency, which lowers the token rate, so a positive
+// error raises pace and drives observed_rate down toward target_rate. gain maps
+// a rate error (token/s) to a pace step (ms): unit ms*s/token.
+//
+// Free inputs, avenc-alphabetical: gain, observed_rate, pace_prev, target_rate
+// Output (equation order):          pace_cmd
+unit tokens : token
+
+signal observed_rate : token/s
+signal target_rate   : token/s
+signal pace_prev     : ms
+signal gain          : ms*s/token
+signal pace_cmd      : ms
+
+forward MeshPace {
+    pace_cmd = pace_prev + gain * (observed_rate - target_rate)
+}
+
+// Demo bindings: too fast by 0.1 tok/s, so pace rises by gain*0.1 = 200 ms.
+solve MeshPace with {
+    observed_rate = 0.50 token/s
+    target_rate   = 0.40 token/s
+    pace_prev     = 500 ms
+    gain          = 2000 ms*s/token
+}
