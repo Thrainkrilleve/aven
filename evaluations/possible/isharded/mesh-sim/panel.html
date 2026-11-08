@@ -79,6 +79,11 @@
   <div class="grid">
     <div>
       <div class="box">
+        <h2>Aggregate throughput — all concurrent streams (tok/s)</h2>
+        <div class="chartwrap sm"><canvas id="aggChart"></canvas></div>
+        <div class="hint">Single-stream is latency-bound; aggregate = passes/s × tokens-per-pass and climbs with concurrency (like iSharded's slots + speculative draft).</div>
+      </div>
+      <div class="box">
         <h2>Throughput — observed vs target vs model</h2>
         <div class="chartwrap"><canvas id="rateChart"></canvas></div>
       </div>
@@ -112,6 +117,16 @@
           <button id="stopLoop" class="stop">■ Stop</button>
         </div>
         <div class="hint">Closed loop: Aeric solves <code>mesh_pace.aven</code> each tick and drives <code>/admin/control</code>.</div>
+      </div>
+
+      <div class="box">
+        <h2>Concurrency (aggregate)</h2>
+        <label>Streams <b id="streamsVal">—</b></label>
+        <input type="range" id="streams" min="1" max="32" step="1" value="1">
+        <label>Tokens per pass (speculative draft)</label>
+        <input type="number" id="tpp" step="0.5" min="1" max="16" value="3">
+        <button id="applyConc" class="sec">Apply concurrency</button>
+        <div class="hint">Raise streams to watch aggregate climb toward serving throughput.</div>
       </div>
 
       <div class="box">
@@ -175,6 +190,15 @@ const rateChart=mkLine($('rateChart'),[
 const paceChart=mkLine($('paceChart'),[
   {label:'pace_ms',data:[],borderColor:'#d29922',backgroundColor:'#d2992233',fill:true,tension:.25,pointRadius:0,borderWidth:2},
 ]);
+const aggChart=new Chart($('aggChart'),{type:'line',data:{labels:[],datasets:[
+  {label:'aggregate tok/s',data:[],borderColor:'#3fb950',backgroundColor:'#3fb95022',fill:true,tension:.25,pointRadius:0,borderWidth:2,yAxisID:'y'},
+  {label:'streams',data:[],borderColor:'#8b949e',borderDash:[4,3],pointRadius:0,borderWidth:1,stepped:true,yAxisID:'y1'},
+]},options:{responsive:true,maintainAspectRatio:false,animation:false,
+  interaction:{intersect:false,mode:'index'},
+  scales:{x:{ticks:{color:'#8b949e',maxTicksLimit:6},grid:{color:'#21262d'}},
+          y:{position:'left',ticks:{color:'#3fb950'},grid:{color:'#21262d'},beginAtZero:true},
+          y1:{position:'right',ticks:{color:'#8b949e'},grid:{display:false},beginAtZero:true}},
+  plugins:{legend:{labels:{color:'#e6edf3',boxWidth:12,font:{size:11}}}}}});
 const stageChart=new Chart($('stageChart'),{type:'bar',
   data:{labels:[],datasets:[
     {label:'compute_ms',data:[],backgroundColor:'#58a6ff'},
@@ -195,12 +219,12 @@ const hopChart=new Chart($('hopChart'),{type:'bar',
         afterLabel:c=>{const m=(c.chart._models||[])[c.dataIndex];return m?('model: '+m):'';}}}}}});
 
 const CARDS=[
-  ['observed_rate','Observed','token/s',3],
+  ['aggregate_rate','Aggregate','tok/s',1],
+  ['observed_rate','Per-stream','token/s',3],
   ['__target','Target','token/s',3],
   ['pace_ms','Pace','ms',0],
   ['model_rate','Model rate','token/s',3],
   ['unexplained_ms','Unexplained','ms',1],
-  ['accounted_fraction','Accounted','ratio',3],
 ];
 function renderCards(live,target){
   $('cards').innerHTML=CARDS.map(([k,label,unit,d])=>{
@@ -229,6 +253,10 @@ $('sealBtn').onclick=async()=>{
   $('sealOut').textContent='running sealed '+$('sealTicks').value+' ticks…';
   await post('/api/sealed',{ticks:+$('sealTicks').value});};
 $('novaTest').onclick=()=>post('/api/nova/test',{});
+let concDirty=false;
+$('streams').addEventListener('input',e=>{concDirty=true;$('streamsVal').textContent=e.target.value;});
+$('tpp').addEventListener('input',()=>concDirty=true);
+$('applyConc').onclick=async()=>{await post('/api/concurrency',{streams:+$('streams').value,tokens_per_pass:+$('tpp').value});concDirty=false;};
 
 function tsLabels(hist){
   if(!hist.length) return [];
@@ -278,6 +306,17 @@ async function tick(){
   paceChart.data.labels=labels;
   paceChart.data.datasets[0].data=h.map(p=>p.pace);
   paceChart.update();
+
+  aggChart.data.labels=labels;
+  aggChart.data.datasets[0].data=h.map(p=>p.aggregate);
+  aggChart.data.datasets[1].data=h.map(p=>p.streams);
+  aggChart.update();
+  // sync concurrency controls from live state unless the user is editing
+  if(!concDirty){
+    if(live.max_streams)$('streams').max=live.max_streams;
+    if(live.streams!=null){$('streams').value=live.streams;$('streamsVal').textContent=live.streams;}
+    if(live.tokens_per_pass!=null)$('tpp').value=live.tokens_per_pass;
+  }
 
   const stg=live.stages||[];
   const shortModel=m=>{if(!m)return '';m=(''+m).replace(/\.gguf$/i,'');return m.length>20?m.slice(0,20)+'…':m;};

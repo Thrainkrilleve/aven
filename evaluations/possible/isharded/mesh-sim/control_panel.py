@@ -133,8 +133,12 @@ def derive(status):
     mesh_pace / measured.aven; for display)."""
     out = {
         "observed_rate": dig(status, "metrics.tokens_per_second_ema"),
+        "aggregate_rate": dig(status, "metrics.aggregate_tokens_per_second_ema"),
         "planned_rate": dig(status, "active_plan.estimated_tokens_per_second"),
         "pace_ms": dig(status, "control.pace_ms") or 0.0,
+        "streams": dig(status, "control.streams"),
+        "tokens_per_pass": dig(status, "control.tokens_per_pass"),
+        "max_streams": dig(status, "control.max_streams"),
         "stages": [],
     }
     route = dig(status, "route") or []
@@ -268,6 +272,8 @@ def poller():
                     "target": STATE["target"],
                     "pace": d.get("pace_ms"),
                     "model_rate": d.get("model_rate"),
+                    "aggregate": d.get("aggregate_rate"),
+                    "streams": d.get("streams"),
                 })
                 target, mode = STATE["target"], STATE["mode"]
             nova_evaluate(True, d, mode, target)
@@ -486,6 +492,19 @@ class Handler(BaseHTTPRequestHandler):
                     STATE["interval"] = max(0.5, float(body["interval"]))
                 self._send({"target": STATE["target"], "gain": STATE["gain"],
                             "interval": STATE["interval"]})
+            return
+
+        if self.path == "/api/concurrency":
+            # Forward concurrency / speculative-draft settings to the coordinator.
+            payload = {}
+            if "streams" in body:
+                payload["streams"] = body["streams"]
+            if "tokens_per_pass" in body:
+                payload["tokens_per_pass"] = body["tokens_per_pass"]
+            try:
+                self._send(mesh_post("/admin/control", payload))
+            except Exception as e:  # noqa: BLE001
+                self._send({"error": str(e)}, 502)
             return
 
         if self.path == "/api/pace":
