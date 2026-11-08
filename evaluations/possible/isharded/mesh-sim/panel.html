@@ -90,6 +90,11 @@
         <h2>Per-stage compute (live, ms)</h2>
         <div class="chartwrap sm"><canvas id="stageChart"></canvas></div>
       </div>
+      <div class="box">
+        <h2>Per-stage hop — inter-stage network (ms)</h2>
+        <div class="chartwrap sm"><canvas id="hopChart"></canvas></div>
+        <div class="hint">A tall bar = the token crossing between machines; sub-ms bars are same-host hops.</div>
+      </div>
     </div>
 
     <div>
@@ -178,6 +183,14 @@ const stageChart=new Chart($('stageChart'),{type:'bar',
     scales:{x:{stacked:true,ticks:{color:'#8b949e'},grid:{display:false}},
             y:{stacked:true,ticks:{color:'#8b949e'},grid:{color:'#21262d'}}},
     plugins:{legend:{labels:{color:'#e6edf3',boxWidth:12,font:{size:11}}}}}});
+
+const hopChart=new Chart($('hopChart'),{type:'bar',
+  data:{labels:[],datasets:[{label:'hop_ms',data:[],backgroundColor:[]}]},
+  options:{responsive:true,maintainAspectRatio:false,animation:false,
+    scales:{x:{ticks:{color:'#8b949e'},grid:{display:false}},
+            y:{ticks:{color:'#8b949e'},grid:{color:'#21262d'},beginAtZero:true}},
+    plugins:{legend:{display:false},
+      tooltip:{callbacks:{label:c=>c.parsed.y.toFixed(2)+' ms'}}}}});
 
 const CARDS=[
   ['observed_rate','Observed','token/s',3],
@@ -269,6 +282,14 @@ async function tick(){
   stageChart.data.datasets[0].data=stg.map(s=>s.compute_ms);
   stageChart.data.datasets[1].data=stg.map(s=>s.hop_ms);
   stageChart.update();
+
+  // Per-stage hop chart: color the clear outliers (cross-machine) hot.
+  const hops=stg.map(s=>s.hop_ms||0);
+  const hmax=Math.max(1,...hops);
+  hopChart.data.labels=stg.map(s=>s.worker||'?');
+  hopChart.data.datasets[0].data=hops;
+  hopChart.data.datasets[0].backgroundColor=hops.map(h=>h>=0.5*hmax&&h>5?'#f85149':'#58a6ff');
+  hopChart.update();
 
   const tb=$('ticks').querySelector('tbody');
   tb.innerHTML=(st.ticks||[]).map(t=>{

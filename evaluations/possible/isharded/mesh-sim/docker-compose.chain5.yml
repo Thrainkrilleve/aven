@@ -1,0 +1,73 @@
+# Stage 3, full 5-model chain: 4 local CPU models (Windows) -> 1 GPU model (Nova).
+#
+# Each stage runs a DIFFERENT model on its own llama.cpp server, chained, so the
+# token passes model -> model and, at the last Windows link, host -> host:
+#
+#   red(CPU) -> green(CPU) -> blue(CPU) -> gold(CPU) --tailnet--> nova(GPU, Nova)
+#                                                     ^ the machine-to-machine crossing
+#
+# Windows side (this file): 4 local GGUF servers + 4 chained workers + coordinator.
+# Nova side: one stage, the GPU model -- see nova_chain_stages.sh (run: nova).
+#
+# Point MODELS_DIR at red/green/blue/gold/model.gguf, start the Nova stage first, then:
+#   MODELS_DIR=C:/Users/attho/ai-hacking-arena/models NOVA_IP=100.85.239.122 \
+#     docker compose -f docker-compose.chain5.yml up -d --build
+#
+# CPU-only inference on Windows: all four models together need ~9 GB RAM and are
+# slow (that's real heterogeneous compute). N_PREDICT kept small for responsiveness.
+name: mesh-sim-chain5
+
+x-llm: &llm
+  image: ghcr.io/ggml-org/llama.cpp:server
+  command: ["-m", "/model.gguf", "--host", "0.0.0.0", "--port", "8080", "-c", "1024", "-t", "2"]
+  restart: unless-stopped
+
+x-worker: &worker
+  build: ./worker
+
+services:
+  llm-red:
+    <<: *llm
+    volumes: ["${MODELS_DIR:-C:/Users/attho/ai-hacking-arena/models}/red/model.gguf:/model.gguf:ro"]
+  llm-green:
+    <<: *llm
+    volumes: ["${MODELS_DIR:-C:/Users/attho/ai-hacking-arena/models}/green/model.gguf:/model.gguf:ro"]
+  llm-blue:
+    <<: *llm
+    volumes: ["${MODELS_DIR:-C:/Users/attho/ai-hacking-arena/models}/blue/model.gguf:/model.gguf:ro"]
+  llm-gold:
+    <<: *llm
+    volumes: ["${MODELS_DIR:-C:/Users/attho/ai-hacking-arena/models}/gold/model.gguf:/model.gguf:ro"]
+
+  worker-red:
+    <<: *worker
+    environment: { WORKER_ID: red, LAYERS: "23", N_PREDICT: "4",
+                   LLM_URL: "http://llm-red:8080", NEXT_URL: "http://worker-green:8000" }
+    depends_on: [llm-red]
+  worker-green:
+    <<: *worker
+    environment: { WORKER_ID: green, LAYERS: "24", N_PREDICT: "4",
+                   LLM_URL: "http://llm-green:8080", NEXT_URL: "http://worker-blue:8000" }
+    depends_on: [llm-green]
+  worker-blue:
+    <<: *worker
+    environment: { WORKER_ID: blue, LAYERS: "24", N_PREDICT: "4",
+                   LLM_URL: "http://llm-blue:8080", NEXT_URL: "http://worker-gold:8000" }
+    depends_on: [llm-blue]
+  worker-gold:
+    <<: *worker
+    environment: { WORKER_ID: gold, LAYERS: "23", N_PREDICT: "4",
+                   LLM_URL: "http://llm-gold:8080",
+                   NEXT_URL: "http://${NOVA_IP:-100.85.239.122}:9303" }   # --> nova (crossing)
+    depends_on: [llm-gold]
+
+  coordinator:
+    build: ./coordinator
+    environment:
+      CHAIN: "1"
+      ROUTE: "http://worker-red:8000,http://worker-green:8000,http://worker-blue:8000,http://worker-gold:8000,http://${NOVA_IP:-100.85.239.122}:9303"
+      USER_KEY: dev-user-key
+      PLANNED_TPS: "4.9"
+      POLL_EVERY: "2.0"
+    ports: ["8080:8080"]
+    depends_on: [worker-red, worker-green, worker-blue, worker-gold]
