@@ -20,22 +20,22 @@ x-worker: &worker
 services:
   worker-red:
     <<: *worker
-    environment: { WORKER_ID: red, LAYERS: "23", N_PREDICT: "8", MODEL_NAME: "Qwen3.5-2B-Claude",
+    environment: { WORKER_ID: red, LAYERS: "23", N_PREDICT: "8", MODEL_NAME: "Qwen3.5-0.8B",
                    LLM_URL: "http://host.docker.internal:8091", NEXT_URL: "http://worker-green:8000" }
     extra_hosts: ["host.docker.internal:host-gateway"]
   worker-green:
     <<: *worker
-    environment: { WORKER_ID: green, LAYERS: "24", N_PREDICT: "8", MODEL_NAME: "gemma-3-4b-heretic",
+    environment: { WORKER_ID: green, LAYERS: "24", N_PREDICT: "8", MODEL_NAME: "Qwen3.5-2B",
                    LLM_URL: "http://host.docker.internal:8092", NEXT_URL: "http://worker-blue:8000" }
     extra_hosts: ["host.docker.internal:host-gateway"]
   worker-blue:
     <<: *worker
-    environment: { WORKER_ID: blue, LAYERS: "24", N_PREDICT: "8", MODEL_NAME: "LFM2.5-2.6B",
+    environment: { WORKER_ID: blue, LAYERS: "24", N_PREDICT: "8", MODEL_NAME: "Qwen3.5-0.8B",
                    LLM_URL: "http://host.docker.internal:8093", NEXT_URL: "http://worker-gold:8000" }
     extra_hosts: ["host.docker.internal:host-gateway"]
   worker-gold:
     <<: *worker
-    environment: { WORKER_ID: gold, LAYERS: "23", N_PREDICT: "8", MODEL_NAME: "Qwen3-Horror-4B",
+    environment: { WORKER_ID: gold, LAYERS: "23", N_PREDICT: "8", MODEL_NAME: "Qwen3.5-2B",
                    LLM_URL: "http://host.docker.internal:8094",
                    NEXT_URL: "http://${NOVA_IP:-100.85.239.122}:9303" }
     extra_hosts: ["host.docker.internal:host-gateway"]

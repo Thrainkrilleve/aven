@@ -33,6 +33,14 @@ ACT_BYTES = int(os.environ.get("ACT_BYTES", "65536"))
 LLM_URL = os.environ.get("LLM_URL", "")
 PROMPT = os.environ.get("PROMPT", "In one sentence, describe a mesh network.")
 N_PREDICT = int(os.environ.get("N_PREDICT", "8"))
+# Use the chat endpoint (applies each model's chat template) by default, so
+# instruct/chat models generate real output instead of emitting EOS at token 1 on
+# the raw /completion path. Sampling knobs tune output quality.
+CHAT_API = os.environ.get("CHAT_API", "1").lower() not in ("", "0", "false", "no")
+TEMP = float(os.environ.get("SAMPLE_TEMP", "0.7"))   # not TEMP: Windows reserves it
+TOP_P = float(os.environ.get("TOP_P", "0.9"))
+MIN_P = float(os.environ.get("MIN_P", "0.05"))
+REPEAT_PENALTY = float(os.environ.get("REPEAT_PENALTY", "1.1"))
 # Optional friendly model label. Needed when several stages mount different GGUFs
 # all named model.gguf (llama.cpp then reports the same path for each). Overrides
 # the name auto-detected from the backend's /completion response.
@@ -71,10 +79,21 @@ def rtt_prober():
 
 
 def real_infer():
-    """Run a real llama.cpp completion and return its wall time in ms."""
-    payload = json.dumps({"prompt": PROMPT, "n_predict": N_PREDICT,
-                          "temperature": 0, "cache_prompt": True}).encode()
-    req = urllib.request.Request(LLM_URL.rstrip("/") + "/completion", data=payload, method="POST")
+    """Run a real inference and return its wall time in ms. Chat endpoint by
+    default (applies the model's template, with sampling); raw /completion if
+    CHAT_API is off."""
+    if CHAT_API:
+        url = LLM_URL.rstrip("/") + "/v1/chat/completions"
+        payload = {"messages": [{"role": "user", "content": PROMPT}],
+                   "max_tokens": N_PREDICT, "temperature": TEMP, "top_p": TOP_P,
+                   "min_p": MIN_P, "repeat_penalty": REPEAT_PENALTY, "stream": False,
+                   # Qwen3-family: answer directly, don't spend tokens on <think>.
+                   "chat_template_kwargs": {"enable_thinking": False}}
+    else:
+        url = LLM_URL.rstrip("/") + "/completion"
+        payload = {"prompt": PROMPT, "n_predict": N_PREDICT, "temperature": TEMP,
+                   "top_p": TOP_P, "min_p": MIN_P, "cache_prompt": True}
+    req = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST")
     req.add_header("Content-Type", "application/json")
     t0 = time.time()
     with urllib.request.urlopen(req, timeout=120) as r:
@@ -82,7 +101,7 @@ def real_infer():
     dt = (time.time() - t0) * 1000.0
     if _state["model"] is None:
         try:
-            m = json.loads(body).get("model")
+            m = json.loads(body).get("model")      # both shapes carry "model"
             if m:
                 with _lock:
                     _state["model"] = os.path.basename(m)   # file name only
