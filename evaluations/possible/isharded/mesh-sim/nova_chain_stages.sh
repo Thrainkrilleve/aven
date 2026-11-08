@@ -15,7 +15,9 @@ PORT="${NOVA_PORT:-9303}"
 PY="$(command -v python3 || command -v python)"
 
 if [ "${1:-}" = "stop" ]; then
-    for id in nova blue gold; do pkill -f "WORKER_ID=$id" 2>/dev/null; done
+    # NOTE: WORKER_ID is an env prefix, not argv, so `pkill -f WORKER_ID=...`
+    # never matches. Kill by the script name (the only worker.py's here are ours).
+    pkill -f "[w]orker.py" 2>/dev/null
     [ -f /tmp/nova_chain.pids ] && kill $(cat /tmp/nova_chain.pids) 2>/dev/null
     rm -f /tmp/nova_chain.pids
     echo "stopped Nova stage(s)"
