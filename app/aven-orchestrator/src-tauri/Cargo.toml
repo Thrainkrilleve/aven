@@ -15,7 +15,7 @@ tauri-build = { git = "https://github.com/tauri-apps/tauri", rev = "899ca2105ffd
 tauri = { git = "https://github.com/tauri-apps/tauri", rev = "899ca2105ffd06293013b6d2bff4416987d99010", features = [] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-calamine = "0.37"
+calamine = "0.38"
 # 0.100+ writes workbooks with zip 9. zip 2.6.1 is GHSA-m665-v7pm-7grj,
 # GHSA-q7v9-x93c-xqv3, and GHSA-8hxf-qr8p-62x4. 9.0.5 is the newest of those fixes.
 rust_xlsxwriter = "0.102"
