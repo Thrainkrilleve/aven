@@ -1,0 +1,54 @@
+# Stage 3 (Role B): Nova as the GPU inference backend.
+#
+# Drops the four local CPU llama.cpp containers and points every worker's /infer
+# at Nova's host llama-server over Tailscale. The coordinator, workers, control
+# panel and AERIC loop are all unchanged -- only where inference runs moves. The
+# GPU raises tokens_per_second, so the model_rate ceiling climbs and higher
+# targets (0.6+) become reachable by the controller.
+#
+# Set NOVA_LLM_URL to Nova's llama-server base (its Tailscale name/IP + port):
+#   NOVA_LLM_URL=http://nova:8080 docker compose -f docker-compose.nova.yml up -d --build
+#
+# If each "model" (red/green/blue/gold) is a *separate* llama-server on Nova,
+# give each its own URL below instead of the shared default. One shared server
+# serializes the four stages onto one model; that's fine for the control demo.
+name: mesh-sim-nova
+
+x-worker: &worker
+  build: ./worker
+
+services:
+  worker-red:
+    <<: *worker
+    environment: { WORKER_ID: red, LAYERS: "23", N_PREDICT: "8",
+                   LLM_URL: "${NOVA_LLM_URL:-http://nova:8080}" }
+  worker-green:
+    <<: *worker
+    environment: { WORKER_ID: green, LAYERS: "24", N_PREDICT: "8",
+                   LLM_URL: "${NOVA_LLM_URL_GREEN:-${NOVA_LLM_URL:-http://nova:8080}}" }
+  worker-blue:
+    <<: *worker
+    environment: { WORKER_ID: blue, LAYERS: "24", N_PREDICT: "8",
+                   LLM_URL: "${NOVA_LLM_URL_BLUE:-${NOVA_LLM_URL:-http://nova:8080}}" }
+  worker-gold:
+    <<: *worker
+    environment: { WORKER_ID: gold, LAYERS: "23", N_PREDICT: "8",
+                   LLM_URL: "${NOVA_LLM_URL_GOLD:-${NOVA_LLM_URL:-http://nova:8080}}" }
+
+  coordinator:
+    build: ./coordinator
+    environment:
+      ROUTE: "http://worker-red:8000,http://worker-green:8000,http://worker-blue:8000,http://worker-gold:8000"
+      USER_KEY: dev-user-key
+      PLANNED_TPS: "4.9"
+      POLL_EVERY: "1.0"
+    ports: ["8080:8080"]
+    depends_on: [worker-red, worker-green, worker-blue, worker-gold]
+
+# Notes:
+#  - Docker Desktop reaches a Tailscale host on the *Windows* host by its MagicDNS
+#    name or 100.x IP; if containers can't resolve "nova", use the 100.x address.
+#  - The worker already switches /infer to a real llama.cpp completion when LLM_URL
+#    is set (same image as the CPU stack), so no worker change is needed.
+#  - Keep POLL_EVERY low (1s) now that inference is fast, so the control loop and
+#    the dashboard see fresh rates.

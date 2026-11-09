@@ -58,3 +58,17 @@ evaluations/possible/_nowcast_*.aven
 
 # Local report/export artifacts from the IDE (HTML/PDF/CSV test output)
 app/aven-orchestrator/reports-test/
+
+# Nova Discord webhook (secret, never commit)
+nova_webhook.txt
+**/nova_webhook.txt
+
+# iSharded mesh-sim / aeric runtime artifacts (regenerated; don't commit)
+aeric/*_ledger.jsonl
+aeric/mesh_pace_sealed.aer
+aeric/daemon.out
+aeric/peer.err
+evaluations/possible/isharded/mesh-sim/*.err
+evaluations/possible/isharded/mesh-sim/measured.aven
+evaluations/possible/isharded/mesh-sim/live_measured.aven
+evaluations/possible/isharded/mesh-sim/watch.aven

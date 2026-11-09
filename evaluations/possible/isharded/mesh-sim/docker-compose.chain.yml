@@ -1,0 +1,48 @@
+# Stage 3 (chain across hosts): the token flows stage -> stage -> machine -> machine.
+#
+# Windows side (this file): coordinator + stage 1 (red) + stage 2 (green), chained.
+# Nova side (run on Nova, see NOVA.md "Split-host chain"): stage 3 (blue) + stage 4
+# (gold). green forwards to blue over the tailnet -- that hop is the real
+# machine-to-machine activation transfer; the per-stage hop chart shows it as the
+# one big bar while the co-located hops stay sub-ms.
+#
+#   token: coordinator(Win) -> red(Win) -> green(Win) --tailnet--> blue(Nova) -> gold(Nova)
+#                                                       ^ the machine crossing
+#
+# Start the Nova stages first, then:
+#   NOVA_IP=100.85.239.122 NOVA_LLM_URL=http://100.85.239.122:8781 \
+#     docker compose -f docker-compose.chain.yml up -d --build
+name: mesh-sim-chain
+
+x-worker: &worker
+  build: ./worker
+
+services:
+  worker-red:
+    <<: *worker
+    environment:
+      WORKER_ID: red
+      LAYERS: "23"
+      N_PREDICT: "8"
+      LLM_URL: "${NOVA_LLM_URL:-http://100.85.239.122:8781}"
+      NEXT_URL: "http://worker-green:8000"            # local Docker hop (sub-ms)
+  worker-green:
+    <<: *worker
+    environment:
+      WORKER_ID: green
+      LAYERS: "24"
+      N_PREDICT: "8"
+      LLM_URL: "${NOVA_LLM_URL:-http://100.85.239.122:8781}"
+      NEXT_URL: "http://${NOVA_IP:-100.85.239.122}:9303"   # --> blue on Nova (tailnet crossing)
+    depends_on: [worker-red]
+
+  coordinator:
+    build: ./coordinator
+    environment:
+      CHAIN: "1"                                       # kick stage 1; chain propagates
+      ROUTE: "http://worker-red:8000,http://worker-green:8000,http://${NOVA_IP:-100.85.239.122}:9303,http://${NOVA_IP:-100.85.239.122}:9304"
+      USER_KEY: dev-user-key
+      PLANNED_TPS: "4.9"
+      POLL_EVERY: "2.0"
+    ports: ["8080:8080"]
+    depends_on: [worker-red, worker-green]
